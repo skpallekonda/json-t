@@ -139,50 +139,6 @@ The result is a data format that is:
 
 ---
 
-## Example
-
-### Schema + Data (JSON-T)
-
-```js
-{
-  schemas: {
-    Customer: {
-      int: id,
-      str: name (minlen=2),
-      <Address>: address?,
-      uuid: ref
-    },
-    Address: {
-      str: line1,
-      str: state,
-      zip: zipCode
-    }
-  },
-  data-schema: "Customer",
-  data: [
-    {1, "Sasi", {"123 Marine Dr", "CA", 62003}, 550e8400e29b41d4a716446655440000},
-    {2, "Kumar", null, 550e8400e29b41d4a716446655440111}
-  ]
-}
-```
-
-### Equivalent JSON (conceptual)
-
-```json
-{
-  "id": 1,
-  "name": "Sasi",
-  "address": {
-    "line1": "123 Marine Dr",
-    "state": "CA",
-    "zipCode": "62003"
-  },
-  "ref": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
----
-
 ## When to Use JSON-T
 
 JSON-T is a good fit for:
