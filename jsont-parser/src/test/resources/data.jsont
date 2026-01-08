@@ -1,0 +1,21 @@
+{
+    data-schema: User,
+    data: [
+        {
+            1,
+            "alice_dev",
+            "alice@example.com",
+            [{ "This-is|an'invalid'string", "Tech City", 94000 }],
+            [ "developer", "admin" ],
+            ADMIN
+        },
+        {
+            2,
+            "bob_guest",
+            null,
+            [{ "456 Market St", "Old Town", 10101 },{ "123 Silicon Way", "Tech City", 94000 }],
+            [ "guest" ],
+            EDITOR
+        }
+    ]
+}

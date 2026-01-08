@@ -20,79 +20,13 @@ JSON-T addresses these problems directly.
 
 ## Design Inspiration
 
-JSON-T came from trying to combine the **best properties of existing data formats** while avoiding their biggest limitations.
+JSON-T combines the best properties of existing data formats while avoiding their limitations:
 
-### 1. CSV — Positional & Compact
-
-CSV is extremely compact because:
-
-* Field names are not repeated
-* Data is positional
-* Encoding is simple and fast
-
-However, CSV lacks:
-
-* Nested structures
-* Strong typing
-* Validation
-* Schema evolution
-
-JSON-T borrows CSV’s **positional encoding efficiency**, but extends it with structure and validation.
-
----
-
-### 2. Protocol Buffers — Strict Types
-
-Protocol Buffers provide:
-
-* Strong, explicit data types
-* Deterministic serialization
-* Reliable producer–consumer contracts
-
-But they require:
-
-* Code generation
-* Binary tooling
-* Language-specific bindings
-* Opaque payloads
-
-JSON-T adopts **strict typing and validation**, without requiring binary formats or code generation.
-
----
-
-### 3. Avro — Schema-First Design
-
-Avro popularized:
-
-* Schema-first data exchange
-* Clear producer/consumer contracts
-* Efficient large-scale data transport
-
-However:
-
-* Schemas are often external
-* Payloads are not human-friendly
-* Tooling is heavy for small teams
-
-JSON-T keeps the **schema-first model**, but embeds schema and data together in a **single, readable document**.
-
----
-
-### 4. JSON — Human Readability
-
-JSON is:
-
-* Simple
-* Human-readable
-* Ubiquitous
-
-But at scale:
-
-* Field names dominate payload size
-* Validation is external and inconsistent
-* Schema drift is hard to detect
-
-JSON-T preserves **JSON-like readability**, while eliminating its structural inefficiencies.
+- **JSON**: Retains support for nested structures, complex objects, and arrays.
+- **CSV**: Adopts positional fields and removes repeating identifiers to significantly reduce payload size.
+- **Protocol Buffers**: Utilizes multiple scalar types (boolean, number, string) with strict typing.
+- **Apache Avro**: Supports embedding schemas alongside data for self-describing catalogs.
+- **BSON**: Provides a foundation for rich data types and efficient traversal.
 
 ---
 
@@ -136,6 +70,82 @@ The result is a data format that is:
 
 * **Text-based (not binary)**
   Human-inspectable, diff-friendly, and tooling-friendly.
+
+---
+
+## Quick Example
+
+### Schema Definition
+Define your data structure once.
+```jsont
+{
+    schemas: {
+        User: {
+            int: id,
+            str: username,
+            str: email?,
+            <Address>: address,
+            str[]: tags?
+        },
+        Address: {
+            str: street,
+            str: city,
+            zip: zipCode
+       }
+    }
+}
+```
+
+### Data Payload
+Transmit data as compact tuples.
+```jsont
+{
+	data-schema: User,
+	data: [
+        { 123456, "sasikp0", "test@sasikp.com0", { "34a Perumbakkam0", "Chennai0", "600150"}, ["developer0", "admin0"]},
+        { 123457, "sasikp1", "test@sasikp.com1", { "34a Perumbakkam1", "Chennai1", "600151"}, ["developer1", "admin1"]}
+    ]
+}
+```
+
+---
+
+## Java Integration
+
+JSON-T provides a Java API for parsing and generating data.
+
+### Maven Dependency
+```xml
+<dependency>
+    <groupId>org.jsont</groupId>
+    <artifactId>jsont-core</artifactId>
+    <version>1.0-SNAPSHOT</version>
+</dependency>
+```
+
+### Reading Data
+```java
+JsonTContext ctx = JsonT.builder()
+        .withAdapter(new AddressAdapter())
+        .withAdapter(new UserAdapter())
+        .withErrorCollector(new DefaultErrorCollector())
+        .parseCatalog(Paths.get("schema.jsont"));
+
+CharStream dataStream = CharStreams.fromPath(Paths.get("data.jsont"));
+List<User> userList = ctx.withData(dataStream).as(User.class).list();
+```
+
+### Writing Data
+```java
+JsonTContext ctx = JsonT.builder()
+        .withAdapter(new AddressAdapter())
+        .withAdapter(new UserAdapter())
+        .withErrorCollector(new DefaultErrorCollector())
+        .parseCatalog(Paths.get("schema.jsont"));
+
+List<User> users = getUsers(); // Your data source
+String output = ctx.stringify(users);
+```
 
 ---
 
@@ -203,4 +213,3 @@ Future work:
 
 > JSON is a notation.
 > JSON-T is a data contract with a transport.
-
