@@ -1,0 +1,19 @@
+{
+    data-schema: User,
+    data: [
+        {
+            1,
+            "alice_dev",
+            "alice@example.com",
+            { "123 Silicon Way", "Tech City", 94000 },
+            [ "developer", "admin" ]
+        },
+        {
+            2,
+            "bob_guest",
+            null,
+            { "456 Market St", "Old Town", 10101 },
+            [ "guest" ]
+        }
+    ]
+}

@@ -1,0 +1,95 @@
+delimiters "<", ">"
+
+// Main template to generate the class
+adapter(packageName, imports, modelName, fields, moreFields, subtypes) ::= <<
+package <packageName>;
+
+import org.jsont.adapters.SchemaAdapter;
+import org.jsont.JsonTType;
+import org.jsont.io.JsonTWriter;
+import java.util.List;
+
+<imports:{imp | import <imp>;}; separator="\n">
+
+public class <modelName>SchemaAdapter implements SchemaAdapter\<<modelName>\> {
+
+    @Override
+    public Class\<<modelName>\> logicalType() {
+        return <modelName>.class;
+    }
+
+    @Override
+    public <modelName> createTarget() {
+        return new <modelName>();
+    }
+
+    @Override
+    public String toSchemaDef() {
+        String header = "<modelName> : {\n";
+        String fields = <fields:{f | <fieldDef(f)>}; separator=" + \n">;
+        String tail = "}";
+        StringBuilder sb = new StringBuilder();
+        sb.append(header);
+        <if (moreFields)>sb.append(fields.substring(0,fields.length()-2))<else>sb.append(fields)<endif>
+        sb.append(tail);
+        return sb.toString();
+    }
+
+    @Overrider
+    List\<Class\<?\>\> childrenTypes() {
+        return List.of(new Class\<?\>[]{ <subtypes> });
+    }
+
+    @Override
+    public void writeObject(Object target, JsonTWriter writer) {
+        // Implementation logic if needed
+    }
+
+    @Override
+    public void set(Object target, String fieldName, Object value) {
+        <modelName> instance = (<modelName>) target;
+        switch (fieldName) {
+            <fields:{f | <if(f.setterMethod)><setterCase(f)><endif>}; separator="\n">
+            default:
+                break;
+        }
+    }
+
+    @Override
+    public Object get(Object target, String fieldName) {
+        <modelName> instance = (<modelName>) target;
+        switch (fieldName) {
+            <fields:{f | <if(f.getterMethod)><getterCase(f)><endif>}; separator="\n">
+            default:
+                return null;
+        }
+    }
+}
+>>
+
+// Sub-template for fieldDef case
+fieldDef(field) ::= <<
+        "<if(field.object)>\<<field.elementType>\><else><field.fieldType><endif><if(field.array)>[]<endif>: <field.jsonName><if(field.optional)>?<endif>,\n"
+>>
+
+// Sub-template for generating Setter cases
+setterCase(field) ::= <<
+case "<field.jsonName>":
+    <if(field.isArray)>
+    if (value instanceof java.util.List) {
+        java.util.List\<<field.componentType>\> list = java.util.List.class.cast(value);
+        <field.componentType>[] arr = list.toArray(new <field.componentType>[]{});
+        instance.<field.setterMethod>(arr);
+    }
+    <else>
+    <field.type> <field.jsonName>Value = <field.type>.class.cast(value);
+    instance.<field.setterMethod>( <field.jsonName>Value );
+    <endif>
+    break;
+>>
+
+// Sub-template for generating Getter cases
+getterCase(field) ::= <<
+case "<field.jsonName>":
+    return instance.<field.getterMethod>();
+>>

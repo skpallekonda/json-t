@@ -1,0 +1,21 @@
+{
+    schemas: {
+        User: {
+            int: id,
+            str: username,
+            str: email?,
+            <Address>: address,
+            str[]: tags?
+        },
+        Address: {
+            str: street,
+            str: city,
+            zip: zipCode
+       }
+    },
+    enums: [
+        Role {
+            ADMIN,            EDITOR,            VIEWER
+        }
+    ]
+}
