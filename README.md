@@ -114,25 +114,57 @@ Transmit data as compact tuples.
 
 JSON-T provides a Java API for parsing and generating data.
 
+### Add maven repository
+```xml
+<repositories>
+    <repository>
+        <id>github-datakore</id>
+        <url>https://maven.pkg.github.com/datakore/json-t</url>
+    </repository>
+</repositories>
+```
+
 ### Maven Dependency
 ```xml
 <dependency>
-    <groupId>org.jsont</groupId>
-    <artifactId>jsont-core</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <groupId>io.github.datakore</groupId>
+    <artifactId>json-t</artifactId>
+    <version>0.0.1</version>
 </dependency>
 ```
 
-### Reading Data
+### Reading Data (Async as Stream) - Use this approach as a default mechanism (or) specifically while handling large batches
 ```java
-JsonTContext ctx = JsonT.builder()
-        .withAdapter(new AddressAdapter())
-        .withAdapter(new UserAdapter())
-        .withErrorCollector(new DefaultErrorCollector())
-        .parseCatalog(Paths.get("schema.jsont"));
+	@Test
+    void shouldReadDataAsStream() throws IOException {
+        JsonTContext ctx = JsonT.builder()
+                .withAdapter(new AddressAdapter()).withAdapter(new UserAdapter())
+                .withErrorCollector(new DefaultErrorCollector()).parseCatalog(scPath);
 
-CharStream dataStream = CharStreams.fromPath(Paths.get("data.jsont"));
-List<User> userList = ctx.withData(dataStream).as(User.class).list();
+        CharStream dataStream = CharStreams.fromPath(datPath);
+        AtomicInteger counter = new AtomicInteger();
+        ctx.withData(dataStream).as(User.class).stream().subscribe(user -> {
+            if (counter.getAndIncrement() % 1000 == 0){
+                System.out.printf("Handled %d records so far\n",counter.get());
+            }
+        });
+    }
+```
+
+### Reading Data (Synchronous as List) - Use this approach for smaller payloads
+```java
+	@Test
+    void shouldReadDataAsList() throws IOException {
+        JsonTContext ctx = JsonT.builder()
+                .withAdapter(new AddressAdapter()).withAdapter(new UserAdapter())
+                .withErrorCollector(new DefaultErrorCollector()).parseCatalog(scPath);
+
+        CharStream dataStream = CharStreams.fromPath(datPath);
+        List<User> userList = ctx.withData(dataStream).as(User.class).list();
+
+        assertEquals(total, userList.size());
+        System.out.println(userList);
+    }
 ```
 
 ### Writing Data
@@ -178,34 +210,29 @@ If a document parses successfully, it is structurally valid.
 
 ---
 
-## Tooling
-
-This repository contains:
-
-* A **Langium-based grammar**
-* TypeScript/JavaScript lexer & parser
-* AST generation
-* Semantic validation hooks
-* CLI and programmatic APIs (work in progress)
-
----
-
 ## Status
 
 🚧 **Work in progress**
 
-Current focus:
+🚀 Current Development Status
+- We are currently focused on hardening the core engine and expanding the developer experience:
+- Granular State Management: Implementing an unspecified terminal to distinguish between a field being explicitly set to null versus a value remaining unchanged.
+- Performance Engineering: The Java implementation currently handles 750k records in stream mode with high efficiency. We are currently optimizing the engine to breach the 1 million record threshold without performance degradation.
+- Annotation Processing: Finalizing the Adapter annotation processing templates to allow seamless integration with custom application POJOs and frameworks.
 
-* Grammar stabilization
-* Parser and AST validation
-* Schema and data consistency checks
+🗺️ Future Roadmap
+- The vision for JsonT is to become a cross-language standard for efficient data transformation:
+- Tooling & IDE Support: * Development of a formal TextMate Grammar to provide high-quality syntax highlighting across VS Code, Sublime Text, and GitHub.
+- Validation Layer: Integrated constraint validation during both read and write cycles to ensure data integrity at the edge.
+- Multi-Language Support: First-class implementations for Rust (high-performance systems) and TypeScript (web/node.js) to enable a truly universal data stack.
+- Interoperability: Bidirectional converters for JSON ↔ JSON-T and support for other major data serialization formats like YAML and MessagePack.
 
-Future work:
+🤝 Seeking Contributors & Support
+JsonT is an ambitious project aimed at redefining data density and validation. We are looking for collaborators to help accelerate growth in these specific areas:
 
-* Binary encoding
-* Schema evolution rules
-* Streaming decoder
-* JSON ↔ JSON-T converters
+1. Grammar & Tooling: If you have experience with TextMate grammars or Language Server Protocol (LSP), we need your help building the developer experience for the next generation of data tools.
+2. Language Ports: Expert Rust or TypeScript developers are needed to help port the core grammar logic, ensuring JsonT is available wherever performance matters.
+3. Benchmarking & Optimization: Help us profile the engine as we push toward (and beyond) the 1-million-record streaming milestone in Java
 
 ---
 
