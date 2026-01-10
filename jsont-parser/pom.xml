@@ -49,7 +49,6 @@
                         <configuration>
                             <visitor>true</visitor>
                             <listener>false</listener>
-                            <outputDirectory>src/main/generated</outputDirectory>
                         </configuration>
                     </execution>
                 </executions>

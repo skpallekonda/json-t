@@ -26,8 +26,8 @@ Add the following to your `pom.xml`:
 The typical flow involves parsing a catalog (schema + enums) and then processing data rows against that context.
 
 ```java
-import org.jsont.JsonT;
-import org.jsont.core.JsonTContext;
+import io.github.datakore.jsont.JsonT;
+import core.io.github.datakore.jsont.JsonTContext;
 import org.antlr.v4.runtime.CharStreams;
 import java.nio.file.Path;
 import java.util.List;
@@ -100,8 +100,8 @@ JsonT uses Ahead-of-Time (AOT) source generation for maximum performance. Instea
 The easiest way to generate adapters is to annotate your model classes:
 
 ```java
-import org.jsont.annotations.JsonTSerializable;
-import org.jsont.annotations.JsonTField;
+import annotations.io.github.datakore.jsont.JsonTSerializable;
+import annotations.io.github.datakore.jsont.JsonTField;
 
 @JsonTSerializable(schema = "Customer")
 public class Customer {

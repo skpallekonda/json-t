@@ -4,9 +4,9 @@ delimiters "<", ">"
 adapter(packageName, imports, modelName, fields, moreFields, subtypes) ::= <<
 package <packageName>;
 
-import org.jsont.adapters.SchemaAdapter;
-import org.jsont.JsonTType;
-import org.jsont.io.JsonTWriter;
+import adapters.io.github.datakore.jsont.SchemaAdapter;
+import io.github.datakore.jsont.JsonTType;
+import io.io.github.datakore.jsont.JsonTWriter;
 import java.util.List;
 
 <imports:{imp | import <imp>;}; separator="\n">
