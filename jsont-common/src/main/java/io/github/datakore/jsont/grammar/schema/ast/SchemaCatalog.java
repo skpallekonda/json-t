@@ -65,11 +65,12 @@ public class SchemaCatalog {
     private ValueType handleObjectField(int col, String fieldName, String objectTypeName) {
         ValueType result = null;
         SchemaNode node = schemaNodes.stream().filter(s -> s.getName().equals(objectTypeName)).findFirst().orElse(null);
-        EnumNode enumNode = enumNodes.stream().filter(s -> s.getName().equals(objectTypeName)).findFirst().orElse(null);
+//        EnumNode enumNode = enumNodes.stream().filter(s -> s.getName().equals(objectTypeName)).findFirst().orElse(null);
+        EnumModel enumModel = enumModelMap.get(objectTypeName);
         if (node != null) {
             result = new ObjectType(col, fieldName, resolveSchema(node));
-        } else if (enumNode != null) {
-            result = new EnumType(col, fieldName, resolveEnum(enumNode));
+        } else if (enumModel != null) {
+            result = new EnumType(col, fieldName, enumModel);
         }
         return result;
     }
@@ -128,6 +129,7 @@ public class SchemaCatalog {
                     }
                 }
                 result = new ArrayType(colPosition, fieldName, base);
+                break;
             default:
                 JsonBaseType baseType = JsonBaseType.byIdentifier(fieldType.getTypeName());
                 result = new ScalarType(colPosition, fieldName, baseType, fieldType.getKind());

@@ -26,7 +26,7 @@ public class ArrayType extends BaseType {
 
     @Override
     public String type() {
-        return elementType.type() + "[]";
+        return elementType.type();
     }
 
     public ValueType getElementType() {

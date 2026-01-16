@@ -7,11 +7,15 @@
           User: {
             i32: id,
             str: username(minLength=5,maxLength='10'),
-            str: email?(minLength=8)
+            str: email?(minLength=8),
+            <Role>: role,
+            str[]: tags?,
+            <Address>: address
           },
           Address: {
              str: city,
-             str: zipCode
+             str: zipCode,
+             <Status>: status?
           }
         ],
         enums: [
@@ -28,12 +32,14 @@
         {
             1,
             "alice_dev",
-            "alice@example.com"
+            "alice@example.com",
+            ADMIN, ["t1","t2"],
+            {"Chennai","60015",ACTIVE}
         },
         {
             2,
             "bob_guest",
-            null
+            null,USER,null,{"Delhi","123456",SUSPENDED}
         }
     ]
 }

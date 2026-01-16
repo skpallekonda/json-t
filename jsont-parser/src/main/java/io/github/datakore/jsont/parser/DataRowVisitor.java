@@ -27,13 +27,9 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
     private final DataStream pipeline;
     private final AtomicInteger rowIndex = new AtomicInteger();
     private final NamespaceT givenNamespace;
+    private SchemaModel dataSchema;
     // The Stack handles Recursion and Nesting naturally
     private final Stack<ParsingContext> stack = new Stack<>();
-    private final BooleanEncodeDecoder booleanDecoder = new BooleanEncodeDecoder();
-    private final NumberEncodeDecoder numberDecoder = new NumberEncodeDecoder();
-    private final StringEncodeDecoder stringDecoder = new StringEncodeDecoder();
-    private SchemaModel dataSchema;
-
 
     public DataRowVisitor(ErrorCollector errorCollector, NamespaceT givenNamespace, DataStream stream) {
         super(errorCollector);
@@ -64,6 +60,7 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
         }
         throw new ParseCancellationException("Unbale to resolve dataschema from Catalog supplied, cannot read data recordds");
     }
+
 
     @Override
     public void exitDataSchemaSection(JsonTParser.DataSchemaSectionContext ctx) {
@@ -117,6 +114,7 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
         SchemaModel nestedSchema = resolveSchema(type.type()); // Recursive resolution
         stack.push(new StructContext(this.rowIndex.get(), expected.colPosition(), expected.fieldName(), nestedSchema));
     }
+
 
     @Override
     public void exitObjectValue(JsonTParser.ObjectValueContext ctx) {
@@ -178,24 +176,55 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
     public void enterScalarValue(JsonTParser.ScalarValueContext ctx) {
         ValueType expected = stack.peek().getExpectedType();
 
+        // Allow NULL or UNSPECIFIED for any type (if optional/nullable)
+        if (ctx.NULL() != null || ctx.UNSPECIFIED() != null) {
+            return;
+        }
+
+        if (expected instanceof ArrayType) {
+            ArrayType at = (ArrayType) expected;
+            expected = at.getElementType();
+        }
+
         if (!(expected instanceof ScalarType)) {
             super.addError(Severity.FATAL, "Found scalar value but expected " + expected, stack.peek().getLocation());
         }
+        // We do NOT push a context for Scalar, as it is a leaf value
     }
 
     @Override
     public void exitScalarValue(JsonTParser.ScalarValueContext ctx) {
         ParsingContext parent = stack.peek();
-        ScalarType type = (ScalarType) parent.getExpectedType();
+        ValueType expected = parent.getExpectedType();
+
+        if (expected instanceof ArrayType) {
+            ArrayType at = (ArrayType) expected;
+            expected = at.getElementType();
+        }
+
+        if (ctx.NULL() != null) {
+            parent.addValue(null);
+            return;
+        }
+
+        if (ctx.UNSPECIFIED() != null) {
+            parent.addValue(UNSPECIFIED_TOKEN);
+            return;
+        }
+
+        // Now we can safely cast to ScalarType, as other tokens (STRING, NUMBER, BOOLEAN) imply scalar
+        if (!(expected instanceof ScalarType)) {
+            // This should have been caught in enterScalarValue, but as a safeguard
+            super.addError(Severity.FATAL, "Found scalar value but expected " + expected, parent.getLocation());
+            return;
+        }
+
+        ScalarType type = (ScalarType) expected;
         JsonBaseType jsonBaseType = type.elementType();
 
         try {
             Object value;
-            if (ctx.NULL() != null) {
-                value = null;
-            } else if (ctx.UNSPECIFIED() != null) {
-                value = UNSPECIFIED_TOKEN;
-            } else if (ctx.BOOLEAN() != null) {
+            if (ctx.BOOLEAN() != null) {
                 value = booleanDecoder.decode(jsonBaseType, ctx.BOOLEAN().getText());
             } else if (ctx.NUMBER() != null) {
                 value = numberDecoder.decode(jsonBaseType, ctx.NUMBER().getText());
@@ -208,6 +237,10 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
         }
     }
 
+    private final BooleanEncodeDecoder booleanDecoder = new BooleanEncodeDecoder();
+    private final NumberEncodeDecoder numberDecoder = new NumberEncodeDecoder();
+    private final StringEncodeDecoder stringDecoder = new StringEncodeDecoder();
+
     interface ParsingContext {
         void addValue(Object value);
 
@@ -219,8 +252,8 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
     private final class StructContext implements ParsingContext {
         final SchemaModel schema;
         final Map<String, Object> values = new LinkedHashMap<>();
-        private final ErrorLocation errorLocation;
         int fieldIndex = 0;
+        private final ErrorLocation errorLocation;
 
         StructContext(int row, SchemaModel schema) {
             this.schema = schema;
@@ -254,8 +287,8 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
     private final class ArrayContext implements ParsingContext {
 
-        final List<Object> values = new ArrayList<>();
         private final ValueType componentType;
+        final List<Object> values = new ArrayList<>();
         private final ErrorLocation errorLocation;
 
         ArrayContext(int row, int col, String field, ValueType componentType) {

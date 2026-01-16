@@ -180,7 +180,7 @@ typeRef
     ;
 
 objectTypeStruct
-    : LT objectTypeName LT
+    : LT objectTypeName GT
     ;
 
 objectTypeName

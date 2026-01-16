@@ -76,8 +76,8 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
     @Override
     public void exitCatalog(JsonTParser.CatalogContext ctx) {
         try {
-            if (unresolvedTypes != null && !unresolvedTypes.isEmpty()
-            ) {
+            schemaCatalog.resolve();
+            if (unresolvedTypes != null && !unresolvedTypes.isEmpty()) {
                 boolean result = unresolvedTypes.stream().noneMatch(unresolvedType -> {
                     boolean r1 = schemaCatalog.getSchema(unresolvedType) != null;
                     boolean r2 = schemaCatalog.getEnum(unresolvedType) != null;
@@ -87,7 +87,6 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
                     throw new SchemaException("Unresolved types referenced in schema");
                 }
             }
-            schemaCatalog.resolve();
             namespaceT.addCatalog(schemaCatalog);
         } catch (Exception e) {
             String location = String.format("ExitCatalog of catalog # %d", namespaceT.getCatalogs().size() + 1);
@@ -106,6 +105,11 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
             errorCollector.report(new ValidationError(Severity.FATAL, "Schema Identifier Length Exceeded", new ErrorLocation(location)));
         }
         currentSchema = new SchemaNode(name);
+    }
+
+    @Override
+    public void enterSchemaEntry(JsonTParser.SchemaEntryContext ctx) {
+        super.enterSchemaEntry(ctx);
     }
 
     @Override
@@ -282,6 +286,7 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
             String currentFieldType = StringUtils.removeQuotes(ctx.getText());
             fieldInfo.put("objectType", currentFieldType);
             fieldInfo.put("fieldType", "object");
+            unresolvedTypes.add(currentFieldType);
         }
     }
 
