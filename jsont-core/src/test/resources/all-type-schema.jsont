@@ -1,0 +1,55 @@
+{
+  namespace: {
+    baseUrl: "https://api.datakore.com/v1",
+    catalogs: [
+      {
+        schemas: [
+          AllTypeHolder: {
+            <StringEntry>: t_str,
+            <NumberEntry>: t_nbr,
+            <DateEntry>: t_date,
+            <ArrayEntry>: t_array
+          },
+          StringEntry: {
+            str: t_min(minLength=5),
+            str: t_max(maxLength=15),
+            str: t_man(required=true),
+            str: t_zip(regex="^\\d{5}$")
+          },
+          ArrayEntry: {
+            str[]: t_allNull(allowNulls=true),
+            str[]: t_noNull(allowNulls=false),
+            i16[]: t_minItems(minItems=2),
+            str[]: t_maxItems(maxItems=1),
+            str[]: t_maxNulls(maxNullItems=2)
+          },
+          NumberEntry: {
+            i16: t_i16(minValue=-10),
+            i32: t_i32(maxValue=100),
+            i64: t_i64(minValue=-9999,maxValue=-99),
+            u16: t_u16(maxValue=5),
+            u32: t_u32(minValue=25),
+            u64: t_u64,
+            d32: t_d32(minValue=-1,maxValue=1,maxPrecision=5),
+            d64: t_d64(maxPrecision=3),
+            d128:t_d128(maxPrecision=6)
+          },
+          DateEntry: {
+            date: t_date,
+            time: t_time,
+            dtm: t_dtm,
+            ts: t_ts,
+            tsz: t_tsz,
+            inst: t_tsz,
+            insz: t_insz,
+            yr: t_yr,
+            mon: t_mon,
+            day: t_day,
+            ym: t_ym,
+            md: t_md
+          }
+        ]
+      }
+    ]
+  }
+}
