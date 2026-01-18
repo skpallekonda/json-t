@@ -1,11 +1,16 @@
 package io.github.datakore.jsont.grammar.schema.coded;
 
 import io.github.datakore.jsont.exception.DataException;
+import io.github.datakore.jsont.grammar.schema.ast.FieldModel;
 import io.github.datakore.jsont.grammar.schema.ast.JsonBaseType;
+import io.github.datakore.jsont.grammar.schema.constraints.number.MaxPrecisionConstraint;
+import io.github.datakore.jsont.grammar.types.ScalarType;
 import io.github.datakore.jsont.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.math.RoundingMode;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class NumberEncodeDecoder implements EncodeDecoder {
 
@@ -69,27 +74,36 @@ public class NumberEncodeDecoder implements EncodeDecoder {
     }
 
     @Override
-    public String encode(JsonBaseType jsonBaseType, Object object) {
+    public String encode(FieldModel fieldModel, Object object) {
         if (object == null) {
             return "null";
         }
+        JsonBaseType jsonBaseType = ((ScalarType) fieldModel.getFieldType()).elementType();
         if (object instanceof Number) {
-            return toTightString(object);
+            return toTightString(fieldModel, object);
         } else if (object instanceof String) {
-            return (String) object;
+            return StringUtils.wrapInQuotes((String) object);
         }
         String message = String.format("Invalid type %s, to encode < %s >", jsonBaseType.identifier(), object);
         throw new DataException(message);
     }
 
-    String toTightString(Object obj) {
+    String toTightString(FieldModel fieldModel, Object obj) {
         if (obj == null) {
             return null;
+        }
+        final AtomicInteger precision = new AtomicInteger(4); // Default precision is 4
+        if (fieldModel.getConstraints() != null) {
+            fieldModel.getConstraints().stream().forEach(c -> {
+                if (c instanceof MaxPrecisionConstraint) {
+                    precision.set(((MaxPrecisionConstraint) c).getMaxPrecision());
+                }
+            });
         }
 
         // 1. Handle BigDecimal directly
         if (obj instanceof BigDecimal) {
-            return ((BigDecimal) obj).stripTrailingZeros().toPlainString();
+            return ((BigDecimal) obj).setScale(precision.get(), RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
         }
 
         // 2. Handle Floating Point types (Double, Float)
@@ -101,7 +115,7 @@ public class NumberEncodeDecoder implements EncodeDecoder {
                 return obj.toString();
             }
 
-            return BigDecimal.valueOf(val).stripTrailingZeros().toPlainString();
+            return BigDecimal.valueOf(val).setScale(precision.get(), RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
         }
 
         if (obj instanceof BigInteger) {

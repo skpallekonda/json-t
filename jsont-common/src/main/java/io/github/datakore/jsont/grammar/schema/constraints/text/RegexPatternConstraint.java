@@ -1,44 +1,31 @@
 package io.github.datakore.jsont.grammar.schema.constraints.text;
 
-import io.github.datakore.jsont.errors.ErrorLocation;
-import io.github.datakore.jsont.errors.ValidationError;
-import io.github.datakore.jsont.grammar.data.ScalarNode;
-import io.github.datakore.jsont.grammar.data.ValueNode;
 import io.github.datakore.jsont.grammar.schema.constraints.BaseConstraint;
 
+import java.util.regex.Pattern;
+
 public class RegexPatternConstraint extends BaseConstraint {
-    private final String pattern;
+    private final String patternString;
+    private final Pattern pattern;
+
 
     public RegexPatternConstraint(ConstraitType type, String pattern) {
         super(type);
-        this.pattern = pattern;
+        this.patternString = pattern;
+        this.pattern = Pattern.compile(pattern);
     }
 
     @Override
-    public boolean checkConstraint(ValueNode node) {
-        if (node instanceof ScalarNode) {
-            ScalarNode scalarNode = (ScalarNode) node;
-            return scalarNode.raw().matches(pattern);
+    protected String checkConstraintScalar(Object value) {
+        if (value instanceof String && !pattern.matcher((String) value).matches()) {
+            return String.format("Field value does not match pattern %s", patternString);
+        } else {
+            return null;
         }
-        return true; // For other types, ignore as true
     }
 
     @Override
-    public ValidationError makeError(int rowIndex, String fieldName, ValueNode node) {
-        if (node instanceof ScalarNode) {
-            ScalarNode scalarNode = (ScalarNode) node;
-            return new ValidationError(
-                    ErrorLocation.withRow("Row ", rowIndex),
-                    fieldName,
-                    "Field value does not match the pattern",
-                    pattern,
-                    scalarNode.raw());
-        }
-        return null;
-    }
-
-    @Override
-    protected Object constraintValue() {
-        return this.pattern;
+    public Object constraintValue() {
+        return this.patternString;
     }
 }

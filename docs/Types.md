@@ -1,7 +1,7 @@
 JsonT handles type(s) of data as per the below levels
 
 - **Lexer level** → only raw tokens (NUMBER, STRING, BOOLEAN, NULL, UNSPECIFIED).
-- **Parser level** → interprets those tokens into structured base types (int, date, bin, etc.).
+- **Parser level** → interprets those tokens into structured base types (i32, date, bin, etc.).
 - **Semantic level** → adds real‑world meaning (uuid, zip, mail, geo, etc.) by constraining base types.
 
 ---
@@ -37,17 +37,17 @@ JsonT handles type(s) of data as per the below levels
 | decimal128        | `d128`     | NUMBER                      | arbitrary precision                                    | high precision          |
 | date              | `date`     | NUMBER                      | `YYYYMMDD`                                             | calendar date           |
 | time              | `time`     | NUMBER                      | `HHmmss`                                               | clock time              |
-| datetime          | `dtim`     | NUMBER                      | `YYYYMMDDHHmmss`                                       | combined date+time      |
-| timestamp (epoch) | `ts64`     | NUMBER                      | epoch seconds/millis                                   | numeric timestamp       |
+| datetime          | `dtm`      | NUMBER                      | `YYYYMMDDHHmmss`                                       | combined date+time      |
+| timestamp (epoch) | `ts`       | NUMBER                      | epoch seconds/millis                                   | numeric timestamp       |
 | timestamp (TZ)    | `tsz`      | STRING                      | `YYYY-MM-DDTHH:mm:ssZ`                                 | UTC timestamp           |
 | moment            | `inst`     | STRING                      | `YYYY-MM-DDTHH:mm:ss`                                  | local instant           |
-| moment (TZ)       | `inz`      | STRING                      | `YYYY-MM-DDTHH:mm:ss±HH:mm`                            | instant with offset     |
+| moment (TZ)       | `insz`     | STRING                      | `YYYY-MM-DDTHH:mm:ss±HH:mm`                            | instant with offset     |
 | Year              | `yr`       | STRING                      | `YYYY`                                                 | year only               |
 | Month             | `mon`      | STRING                      | `MM`                                                   | month only              |
 | Day               | `day`      | STRING                      | `DD`                                                   | day only                |
 | YearMonth         | `ym`       | STRING                      | `YYYY-MM`                                              | year + month            |
 | MonthDay          | `md`       | STRING                      | `MM-DD`                                                | month + day             |
-| binary/base64     | `bin`      | STRING                      | hex/base64                                             | raw binary              |
+| binary/base64     | `b64`      | STRING                      | hex/base64                                             | raw binary              |
 | binary/base64     | `hex`      | STRING                      | hex/base64                                             | raw binary              |
 | objectId (BSON)   | `oid`      | STRING                      | 24 hex chars                                           | BSON object identifier  |
 | duration          | `dur`      | STRING                      | ISO 8601 duration                                      | e.g. `P3Y6M4DT12H30M5S` |

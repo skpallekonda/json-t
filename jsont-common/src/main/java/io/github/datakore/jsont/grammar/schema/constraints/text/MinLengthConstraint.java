@@ -19,30 +19,17 @@ public class MinLengthConstraint extends BaseConstraint {
     }
 
     @Override
-    public boolean checkConstraint(ValueNode node) {
-        if (node instanceof ScalarNode) {
-            ScalarNode scalarNode = (ScalarNode) node;
-            return scalarNode.raw().length() >= minLength;
-        }
-        return true;
-    }
-
-    @Override
-    public ValidationError makeError(int rowIndex, String fieldName, ValueNode node) {
-        if (node instanceof ScalarNode) {
-            ScalarNode scalarNode = (ScalarNode) node;
-            return new ValidationError(
-                    ErrorLocation.withRow("Row ", rowIndex),
-                    fieldName,
-                    "Field value length is less than minimum length",
-                    String.valueOf(minLength),
-                    String.valueOf(scalarNode.raw().length()));
+    protected String checkConstraintScalar(Object value) {
+        if (value instanceof String) {
+            if (value.toString().length() < minLength) {
+                return String.format("Field value length is lesser than maximum length %d", minLength);
+            }
         }
         return null;
     }
 
     @Override
-    protected Object constraintValue() {
+    public Object constraintValue() {
         return this.minLength;
     }
 }

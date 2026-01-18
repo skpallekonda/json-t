@@ -299,7 +299,7 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
 
     protected void addError(Severity severity, String s, ErrorLocation location) {
         this.errorCollector.report(new ValidationError(severity, s, location));
-        if (Severity.FATAL.equals(severity)) {
+        if (severity.isFatal()) {
             throw new ParseCancellationException("Fatal error occured at " + location + ", with message: " + s + ".");
         }
     }

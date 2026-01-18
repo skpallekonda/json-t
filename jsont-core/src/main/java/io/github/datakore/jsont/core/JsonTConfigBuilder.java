@@ -12,6 +12,7 @@ import org.antlr.v4.runtime.CharStreams;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 public class JsonTConfigBuilder {
     private NamespaceT namespaceT;
@@ -50,5 +51,10 @@ public class JsonTConfigBuilder {
 
     public JsonTConfig build() {
         return new JsonTConfig(namespaceT, errorCollector, adapterRegistry, bufferSize, errorFile);
+    }
+
+    public JsonTConfigBuilder withAdapters(SchemaAdapter<?>[] adapters) {
+        Arrays.asList(adapters).forEach(adapter -> adapterRegistry.register(adapter));
+        return this;
     }
 }

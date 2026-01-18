@@ -14,9 +14,9 @@ Add the following to your `pom.xml`:
 
 ```xml
 <dependency>
-  <groupId>org.jsont</groupId>
-  <artifactId>jsont-core</artifactId>
-  <version>1.0-SNAPSHOT</version>
+  <groupId>io.github.datakore</groupId>
+  <artifactId>json-t</artifactId>
+  <version>0.0.1</version>
 </dependency>
 ```
 
@@ -28,18 +28,21 @@ The typical flow involves parsing a catalog (schema + enums) and then processing
 
 ```java
 import io.github.datakore.jsont.JsonT;
-import core.io.github.datakore.jsont.JsonTContext;
+import io.github.datakore.jsont.core.JsonTConfig;
 import org.antlr.v4.runtime.CharStreams;
 import java.nio.file.Path;
 import java.util.List;
 
-// 1. Parse the catalog (schemas and enums)
-JsonTContext ctx = JsonT.parseCatalog(Path.of("schema.jsont"));
+// 1. Configure JsonT with schema
+JsonTConfig config = JsonT.configureBuilder()
+        .source(Path.of("schema.jsont"))
+        .build();
 
 // 2. Process data rows using a CharStream
-List<Customer> customers = ctx.withData(CharStreams.fromPath(Path.of("data.jsont")))
-                               .as(Customer.class)
-                               .list();
+List<Customer> customers = config.source(CharStreams.fromPath(Path.of("data.jsont")))
+                               .convert(Customer.class, 1)
+                               .collectList()
+                               .block();
 ```
 
 ---
@@ -50,7 +53,7 @@ List<Customer> customers = ctx.withData(CharStreams.fromPath(Path.of("data.jsont
 {
   schemas: {
     Customer: {
-      int: id,
+      i32: id,
       str: name,
       CustomerStatus: status,
       <Address>: address?,
@@ -82,12 +85,12 @@ JsonT supports reactive processing via Project Reactor. This is recommended for 
 ```java
 import reactor.core.publisher.Flux;
 
-ctx.withData(CharStreams.fromPath(Path.of("large-data.jsont")))
-   .as(Customer.class)
-   .stream()
-   .subscribe(customer -> {
+config.source(CharStreams.fromPath(Path.of("large-data.jsont")))
+   .convert(Customer.class, 4) // 4 parallel threads
+   .doOnNext(customer -> {
        System.out.println("Processing: " + customer.getName());
-   });
+   })
+   .blockLast();
 ```
 
 ---
@@ -102,8 +105,8 @@ generates efficient adapters for your POJOs.
 The easiest way to generate adapters is to annotate your model classes:
 
 ```java
-import annotations.io.github.datakore.jsont.JsonTSerializable;
-import annotations.io.github.datakore.jsont.JsonTField;
+import io.github.datakore.jsont.JsonTSerializable;
+import io.github.datakore.jsont.JsonTField;
 
 @JsonTSerializable(schema = "Customer")
 public class Customer {
@@ -135,9 +138,10 @@ annotation processor) identifies classes with `@JsonTSerializable` and uses `Ada
 You can also register manual adapters if you need custom logic for specific types:
 
 ```java
-JsonTContext ctx = JsonT.builder()
+JsonTConfig config = JsonT.configureBuilder()
                         .withAdapter(new MyCustomAdapter())
-                        .parseCatalog(Path.of("schema.jsont"));
+                        .source(Path.of("schema.jsont"))
+                        .build();
 ```
 
 ---

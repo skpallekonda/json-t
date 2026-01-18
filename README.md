@@ -86,7 +86,7 @@ Define your data structure once.
 {
     schemas: {
         User: {
-            int: id,
+            i32: id,
             str: username,
             str: email?,
             <Address>: address,
@@ -145,33 +145,47 @@ JSON-T provides a Java API for parsing and generating data.
 ### Reading Data (Async as Stream) - Use this approach as a default mechanism (or) specifically while handling large batches
 
 ```java
-	@Test
+    @Test
     void shouldReadDataAsStream() throws IOException {
-        JsonTContext ctx = JsonT.builder()
-                .withAdapter(new AddressAdapter()).withAdapter(new UserAdapter())
-                .withErrorCollector(new DefaultErrorCollector()).parseCatalog(scPath);
+        JsonTConfig config = JsonT.configureBuilder()
+                .withAdapters(new AddressAdapter()).withAdapters(new UserAdapter())
+                .withErrorCollector(new DefaultErrorCollector())
+                .source(scPath) // Schema Path
+                .build();
 
         CharStream dataStream = CharStreams.fromPath(datPath);
         AtomicInteger counter = new AtomicInteger();
-        ctx.withData(dataStream).as(User.class).stream().subscribe(user -> {
-            if (counter.getAndIncrement() % 1000 == 0){
-                System.out.printf("Handled %d records so far\n",counter.get());
-            }
-        });
+        
+        // Use JsonTExecution for streaming
+        config.source(dataStream)
+              .convert(User.class, 4) // 4 parallel threads
+              .doOnNext(user -> {
+                  if (counter.getAndIncrement() % 1000 == 0){
+                      System.out.printf("Handled %d records so far\n", counter.get());
+                  }
+              })
+              .blockLast();
     }
 ```
 
 ### Reading Data (Synchronous as List) - Use this approach for smaller payloads
 
 ```java
-	@Test
+    @Test
     void shouldReadDataAsList() throws IOException {
-        JsonTContext ctx = JsonT.builder()
-                .withAdapter(new AddressAdapter()).withAdapter(new UserAdapter())
-                .withErrorCollector(new DefaultErrorCollector()).parseCatalog(scPath);
+        JsonTConfig config = JsonT.configureBuilder()
+                .withAdapters(new AddressAdapter()).withAdapters(new UserAdapter())
+                .withErrorCollector(new DefaultErrorCollector())
+                .source(scPath)
+                .build();
 
         CharStream dataStream = CharStreams.fromPath(datPath);
-        List<User> userList = ctx.withData(dataStream).as(User.class).list();
+        
+        // Collect stream into a list
+        List<User> userList = config.source(dataStream)
+                                    .convert(User.class, 1)
+                                    .collectList()
+                                    .block();
 
         assertEquals(total, userList.size());
         System.out.println(userList);
@@ -181,14 +195,19 @@ JSON-T provides a Java API for parsing and generating data.
 ### Writing Data
 
 ```java
-JsonTContext ctx = JsonT.builder()
-        .withAdapter(new AddressAdapter())
-        .withAdapter(new UserAdapter())
+JsonTConfig config = JsonT.configureBuilder()
+        .withAdapters(new AddressAdapter())
+        .withAdapters(new UserAdapter())
         .withErrorCollector(new DefaultErrorCollector())
-        .parseCatalog(Paths.get("schema.jsont"));
+        .source(Paths.get("schema.jsont"))
+        .build();
 
 List<User> users = getUsers(); // Your data source
-String output = ctx.stringify(users);
+
+// Write to a file or stream
+try (Writer writer = new BufferedWriter(new FileWriter("output.jsont"))) {
+    config.stringify(users, StringifyMode.DATA_ONLY, writer);
+}
 ```
 
 ---

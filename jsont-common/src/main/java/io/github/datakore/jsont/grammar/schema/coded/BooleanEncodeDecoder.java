@@ -1,7 +1,9 @@
 package io.github.datakore.jsont.grammar.schema.coded;
 
 import io.github.datakore.jsont.exception.DataException;
+import io.github.datakore.jsont.grammar.schema.ast.FieldModel;
 import io.github.datakore.jsont.grammar.schema.ast.JsonBaseType;
+import io.github.datakore.jsont.grammar.types.ScalarType;
 import io.github.datakore.jsont.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -27,10 +29,11 @@ public class BooleanEncodeDecoder implements EncodeDecoder {
     }
 
     @Override
-    public String encode(JsonBaseType jsonBaseType, Object object) {
+    public String encode(FieldModel fieldModel, Object object) {
         if (object == null) {
             return "nil";
         }
+        JsonBaseType jsonBaseType = ((ScalarType) fieldModel.getFieldType()).elementType();
         if (object instanceof Boolean) {
             return ((Boolean) object).toString();
         } else if (object instanceof String) {

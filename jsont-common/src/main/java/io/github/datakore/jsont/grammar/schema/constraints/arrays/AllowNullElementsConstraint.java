@@ -1,11 +1,9 @@
 package io.github.datakore.jsont.grammar.schema.constraints.arrays;
 
-import io.github.datakore.jsont.errors.ErrorLocation;
-import io.github.datakore.jsont.errors.ValidationError;
-import io.github.datakore.jsont.grammar.data.ArrayNode;
-import io.github.datakore.jsont.grammar.data.NullNode;
-import io.github.datakore.jsont.grammar.data.ValueNode;
 import io.github.datakore.jsont.grammar.schema.constraints.BaseConstraint;
+
+import java.util.List;
+import java.util.Objects;
 
 public class AllowNullElementsConstraint extends BaseConstraint {
     private final boolean allowNullElements;
@@ -16,36 +14,15 @@ public class AllowNullElementsConstraint extends BaseConstraint {
     }
 
     @Override
-    public boolean checkConstraint(ValueNode node) {
-        if (node instanceof ArrayNode) {
-            ArrayNode arrayNode = (ArrayNode) node;
-            if (!allowNullElements) {
-                return arrayNode.elements().stream()
-                        .filter(valueNode -> valueNode instanceof NullNode).count() == 0;
-            }
-            return true;
-        }
-        return true; // For other types, ignore as true
-    }
-
-    @Override
-    public ValidationError makeError(int rowIndex, String fieldName, ValueNode node) {
-        if (node instanceof ArrayNode) {
-            ArrayNode arrayNode = (ArrayNode) node;
-            return new ValidationError(
-                    ErrorLocation.withRow("Row ", rowIndex),
-                    fieldName,
-                    "Field array contains null elements",
-                    String.valueOf(allowNullElements),
-                    String.valueOf(
-                            arrayNode.elements().stream().filter(valueNode -> valueNode instanceof NullNode)
-                                    .count()));
+    protected String checkConstraintList(List<Object> value) {
+        if (!allowNullElements && value != null && value.stream().anyMatch(Objects::isNull)) {
+            return String.format("Field requires no null elements");
         }
         return null;
     }
 
     @Override
-    protected Object constraintValue() {
+    public Object constraintValue() {
         return this.allowNullElements;
     }
 }

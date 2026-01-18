@@ -7,6 +7,8 @@ public class User implements JsonTType {
     private String userName;
     private String email;
     private String role;
+    private Address address;
+    private String[] tags;
 
     public User(int id, String userName, String role, Address address) {
         this.id = id;
@@ -15,18 +17,15 @@ public class User implements JsonTType {
         this.address = address;
     }
 
+    public User() {
+    }
+
     public String getRole() {
         return role;
     }
 
     public void setRole(String role) {
         this.role = role;
-    }
-
-    private Address address;
-    private String[] tags;
-
-    public User() {
     }
 
     public int getId() {

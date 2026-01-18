@@ -1,7 +1,9 @@
 package io.github.datakore.jsont.grammar.schema.coded;
 
 import io.github.datakore.jsont.exception.DataException;
+import io.github.datakore.jsont.grammar.schema.ast.FieldModel;
 import io.github.datakore.jsont.grammar.schema.ast.JsonBaseType;
+import io.github.datakore.jsont.grammar.types.ScalarType;
 import io.github.datakore.jsont.util.StringUtils;
 
 import java.util.Base64;
@@ -47,10 +49,11 @@ public class BinaryEncodeDecoder implements EncodeDecoder {
     }
 
     @Override
-    public String encode(JsonBaseType jsonBaseType, Object object) {
+    public String encode(FieldModel fieldModel, Object object) {
         if (object == null) {
             return "null";
         }
+        JsonBaseType jsonBaseType = ((ScalarType) fieldModel.getFieldType()).elementType();
         if (JsonBaseType.K_BIN.equals(jsonBaseType)) {
             return Base64.getEncoder().encodeToString((byte[]) object);
         } else if (JsonBaseType.K_HEX.equals(jsonBaseType)) {

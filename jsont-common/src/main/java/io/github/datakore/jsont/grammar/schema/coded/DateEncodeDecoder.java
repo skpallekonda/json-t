@@ -1,7 +1,9 @@
 package io.github.datakore.jsont.grammar.schema.coded;
 
 import io.github.datakore.jsont.exception.DataException;
+import io.github.datakore.jsont.grammar.schema.ast.FieldModel;
 import io.github.datakore.jsont.grammar.schema.ast.JsonBaseType;
+import io.github.datakore.jsont.grammar.types.ScalarType;
 import io.github.datakore.jsont.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -20,8 +22,8 @@ public class DateEncodeDecoder implements EncodeDecoder {
     final DateTimeFormatter yyyyMMddHHmmss = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     final DateTimeFormatter HHmmss = DateTimeFormatter.ofPattern("HHmmss");
     final DateTimeFormatter yyyyMMddTHHmmss = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
-    final DateTimeFormatter yyyyMMddTHHmmssZ = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'"); //YYYY-MM-DDTHH:mm:ssZ
-    final DateTimeFormatter yyyyMMddTHHmmssPlusHHmm = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss±HH:mm"); //YYYY-MM-DDTHH:mm:ss±HH:mm
+    final DateTimeFormatter yyyyMMddTHHmmssZ = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssX"); //YYYY-MM-DDTHH:mm:ssX
+    final DateTimeFormatter yyyyMMddTHHmmssPlusHHmm = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX"); //YYYY-MM-DDTHH:mm:ssXXX
     final DateTimeFormatter yyyy = DateTimeFormatter.ofPattern("yyyy"); //YYYY
     final DateTimeFormatter monthFormatter = new DateTimeFormatterBuilder()
             .parseCaseInsensitive()         // Allows "jan", "Jan", "JAN"
@@ -48,6 +50,11 @@ public class DateEncodeDecoder implements EncodeDecoder {
             .appendOptional(DateTimeFormatter.ofPattern("dd/MMM"))
             .appendOptional(DateTimeFormatter.ofPattern("ddMM"))
             .toFormatter(Locale.ENGLISH);
+
+    // Encoders (Single Format)
+    final DateTimeFormatter monthEncoder = DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH);
+    final DateTimeFormatter yearMonthEncoder = DateTimeFormatter.ofPattern("yyyy-MM", Locale.ENGLISH);
+    final DateTimeFormatter monthDayEncoder = DateTimeFormatter.ofPattern("MM-dd", Locale.ENGLISH);
 
 
     @Override
@@ -92,29 +99,12 @@ public class DateEncodeDecoder implements EncodeDecoder {
     }
 
     @Override
-    public String encode(JsonBaseType jsonBaseType, Object obj) {
+    public String encode(FieldModel fieldModel, Object obj) {
         if (obj == null) {
             return "null";
         }
-        TemporalAccessor temporal;
-
-        // 1. Normalize everything to a Modern Java Time object using instanceof
-        if (obj instanceof TemporalAccessor) {
-            // Handles LocalDate, LocalDateTime, ZonedDateTime, etc.
-            temporal = (TemporalAccessor) obj;
-        } else if (obj instanceof java.sql.Timestamp) {
-            // Legacy SQL Timestamp -> LocalDateTime
-            temporal = ((java.sql.Timestamp) obj).toLocalDateTime();
-        } else if (obj instanceof Date) {
-            // Legacy java.util.Date / java.sql.Date -> ZonedDateTime (System Default)
-            temporal = ((Date) obj).toInstant().atZone(ZoneId.systemDefault());
-        } else if (obj instanceof Calendar) {
-            // Legacy Calendar -> ZonedDateTime (Uses Calendar's specific TimeZone)
-            Calendar cal = (Calendar) obj;
-            temporal = cal.toInstant().atZone(cal.getTimeZone().toZoneId());
-        } else {
-            throw new IllegalArgumentException("Unsupported type: " + obj.getClass());
-        }
+        TemporalAccessor temporal = getTemporalAccessor(obj);
+        JsonBaseType jsonBaseType = ((ScalarType) fieldModel.getFieldType()).elementType();
         switch (jsonBaseType.name()) {
             case "K_DATE":
                 return yyyyMMdd.format(temporal);
@@ -126,28 +116,51 @@ public class DateEncodeDecoder implements EncodeDecoder {
                 return String.valueOf(getEpochMillis(temporal));
             case "K_INST":
                 try {
-                    return yyyyMMddTHHmmss.format(temporal);
+                    return surroundByQuote(yyyyMMddTHHmmss.format(temporal));
                 } catch (Exception e) {
-                    return String.valueOf(getEpochMillis(temporal));
+                    return surroundByQuote(String.valueOf(getEpochMillis(temporal)));
                 }
             case "K_TSZ":
-                return yyyyMMddTHHmmssZ.format(temporal);
+                return surroundByQuote(yyyyMMddTHHmmssZ.format(temporal));
             case "K_INSTZ":
-                return yyyyMMddTHHmmssPlusHHmm.format(temporal);
+                return surroundByQuote(yyyyMMddTHHmmssPlusHHmm.format(temporal));
             case "K_YEAR":
-                return yyyy.format(temporal);
+                return surroundByQuote(yyyy.format(temporal));
             case "K_MON":
-                return monthFormatter.format(temporal);
+                return surroundByQuote(monthEncoder.format(temporal));
             case "K_DAY":
-                return DateTimeFormatter.ofPattern("dd").format(temporal);
+                return surroundByQuote(DayOfWeek.from(temporal).toString());
             case "K_YEARMON":
-                return yearMonth.format(temporal);
+                return surroundByQuote(yearMonthEncoder.format(temporal));
             case "K_MNDAY":
-                return monthDay.format(temporal);
+                return surroundByQuote(monthDayEncoder.format(temporal));
             default:
                 String message = String.format("Invalid type %s, to encode < %s >", jsonBaseType.identifier(), obj);
                 throw new DataException(message);
         }
+    }
+
+    private static TemporalAccessor getTemporalAccessor(Object obj) {
+        TemporalAccessor temporal;
+
+        // 1. Normalize everything to a Modern Java Time object using instanceof
+        if (obj instanceof TemporalAccessor) {
+            // Handles LocalDate, LocalDateTime, ZonedDateTime, etc.
+            temporal = (TemporalAccessor) obj;
+        } else if (obj instanceof Timestamp) {
+            // Legacy SQL Timestamp -> LocalDateTime
+            temporal = ((Timestamp) obj).toLocalDateTime();
+        } else if (obj instanceof Date) {
+            // Legacy java.util.Date / java.sql.Date -> ZonedDateTime (System Default)
+            temporal = ((Date) obj).toInstant().atZone(ZoneId.systemDefault());
+        } else if (obj instanceof Calendar) {
+            // Legacy Calendar -> ZonedDateTime (Uses Calendar's specific TimeZone)
+            Calendar cal = (Calendar) obj;
+            temporal = cal.toInstant().atZone(cal.getTimeZone().toZoneId());
+        } else {
+            throw new IllegalArgumentException("Unsupported type: " + obj.getClass());
+        }
+        return temporal;
     }
 
     long getEpochMillis(TemporalAccessor temporal) {
@@ -185,5 +198,9 @@ public class DateEncodeDecoder implements EncodeDecoder {
         }
 
         throw new IllegalArgumentException("Cannot extract Epoch Millis from: " + temporal);
+    }
+
+    private String surroundByQuote(String value) {
+        return "\"" + value + "\"";
     }
 }

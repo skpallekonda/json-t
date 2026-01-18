@@ -5,11 +5,14 @@ import io.github.datakore.jsont.adapters.SchemaAdapter;
 import io.github.datakore.jsont.exception.SchemaException;
 import io.github.datakore.jsont.grammar.schema.ast.*;
 import io.github.datakore.jsont.grammar.schema.coded.*;
+import io.github.datakore.jsont.grammar.schema.constraints.FieldConstraint;
 import io.github.datakore.jsont.grammar.types.*;
+import io.github.datakore.jsont.util.CollectionUtils;
 import io.github.datakore.jsont.util.Constants;
+import io.github.datakore.jsont.util.StringUtils;
 
-import java.net.MalformedURLException;
-import java.net.URL;
+import java.io.IOException;
+import java.io.Writer;
 import java.util.*;
 
 public class JsonTStringify {
@@ -26,21 +29,11 @@ public class JsonTStringify {
         this.registry = registry;
     }
 
-    public <T> String stringifySchema(Class<T> type) {
-        SchemaModel schema = namespace.findSchema(type.getSimpleName());
-        if (schema == null) {
-            return "";
-        }
-        URL baseUrl = null;
-        try {
-            baseUrl = new URL("https://datakore.github.io");
-        } catch (MalformedURLException e) {
-            //
-        }
-        NamespaceT ns = new NamespaceT(baseUrl);
-        SchemaCatalog newCatalog = findRelevantCatalog(type.getSimpleName());
+    void writeSchema(String schema, Writer writer) throws IOException {
+        NamespaceT ns = new NamespaceT(this.namespace.getBaseUrl());
+        SchemaCatalog newCatalog = findRelevantCatalog(schema);
         ns.addCatalog(newCatalog);
-        return ns.toString();
+        writer.write(ns.toString());
     }
 
     private SchemaCatalog findRelevantCatalog(String schemaName) {
@@ -84,90 +77,104 @@ public class JsonTStringify {
         return Collections.emptyList();
     }
 
-    public <T> String stringifyData(List<T> listObject, StringifyMode mode) {
-        if (listObject == null || listObject.isEmpty()) {
-            return "";
-        }
-        String schemaName = listObject.get(0).getClass().getSimpleName();
-        SchemaModel schema = namespace.findSchema(schemaName);
-        if (schema == null) {
-            throw new SchemaException("Data schema not found, please supply a valid catalog/schema");
-        }
-        StringBuilder sb = new StringBuilder();
-        if (mode == StringifyMode.SCHEMA_AND_DATA) {
-            sb.append(stringifySchema(listObject.get(0).getClass()));
-        }
-        sb.append(emitDataSection(listObject, schemaName));
-        return sb.toString();
-    }
-
-    private <T> String emitDataSection(List<T> listObject, String schemaName) {
-        String sb = "{" +
-                "data-schema:" + schemaName +
-                ",data: " +
-                emitListData(listObject) +
-                "}";
-        return sb;
-    }
-
-    private <T> String emitListData(List<T> listObject) {
-        if (listObject == null || listObject.isEmpty()) {
-            return "[]";
-        } else {
-            StringBuilder sb = new StringBuilder();
-            sb.append("[");
-            int size = listObject.size();
-            StringBuilder sb1 = new StringBuilder();
-            for (int i = 0; i < size; i++) {
-                if (sb1.length() > 0) {
-                    sb1.append(",");
-                }
-                T object = listObject.get(i);
-                sb1.append(emitObjectData(object));
-            }
-            sb.append(sb1);
-            sb.append("]");
-            return sb.toString();
-        }
-    }
-
-    private <T> String emitObjectData(T object) {
+    <T> void stringify(T object, Writer writer) throws IOException {
         if (object == null) {
-            return "{}";
+            return;
         }
         String schemaName = object.getClass().getSimpleName();
         SchemaModel schema = namespace.findSchema(schemaName);
         if (schema == null) {
-            return object.toString();
+            throw new SchemaException("Data schema not found for type " + schemaName + ", please supply a valid catalog/schema");
         }
+        emitObjectData(object, writer, null);
+    }
+
+
+    private <T> void emitListData(List<T> listObject, Writer writer, FieldModel fieldModel) throws IOException {
+        if (listObject == null || listObject.isEmpty()) {
+            if (fieldModel != null) writer.write("[]");
+        } else {
+            writer.write("[");
+            int size = listObject.size();
+            for (int i = 0; i < size; i++) {
+                if (i > 0) {
+                    writer.write(",");
+                }
+                T object = listObject.get(i);
+                emitObjectData(object, writer, fieldModel);
+            }
+            writer.write("]");
+        }
+    }
+
+    private <T> void emitObjectData(T object, Writer writer, FieldModel fieldModel) throws IOException {
+        if (object == null) {
+            writer.write("{}");
+            return;
+        }
+
+        // If fieldModel is provided, we might be in a nested context (Array of Scalars or Objects)
+        // If it's a scalar array, we should just write the value.
+        if (fieldModel != null && fieldModel.getFieldType() instanceof ScalarType) {
+            writer.write(handleScalarType(object, fieldModel));
+            return;
+        }
+
+        String schemaName = object.getClass().getSimpleName();
+        SchemaModel schema = namespace.findSchema(schemaName);
+
+        // Fallback for unknown types or scalars in mixed contexts (though JsonT is strict)
+        if (schema == null && fieldModel != null) {
+            writer.write(StringUtils.wrapInQuotes(object.toString()));
+            return;
+        }
+
         SchemaAdapter<?> adapter = registry.resolve(schemaName);
-        StringBuilder result = new StringBuilder();
-        result.append("{");
-        StringBuilder values = new StringBuilder();
+        writer.write("{");
         for (int i = 0; i < schema.fieldCount(); i++) {
             if (i > 0) {
-                values.append(",");
+                writer.write(",");
             }
             FieldModel fm = schema.fields().get(i);
             Object fieldValue = adapter.get(object, fm.getFieldName());
+
+            // Constraint Checking
+            validateConstraints(fm, fieldValue);
+
             if (fieldValue == null || fm.getFieldType() instanceof NullType) {
-                values.append("null");
+                writer.write("null");
             } else if (fm.getFieldType() instanceof UnspecifiedType) {
-                values.append(Constants.UNSPECIFIED_TYPE);
+                writer.write(Constants.UNSPECIFIED_TYPE);
             } else if (fm.getFieldType() instanceof ObjectType) {
-                values.append(emitObjectData(fieldValue));
+                emitObjectData(fieldValue, writer, fm);
             } else if (fm.getFieldType() instanceof ArrayType) {
-                values.append(emitListData((List<?>) fieldValue));
+                // For arrays, we need to pass the field model to handle scalar arrays correctly
+                emitListData(CollectionUtils.toObjectList(fieldValue), writer, fm);
             } else if (fm.getFieldType() instanceof ScalarType) {
-                values.append(handleScalarType(fieldValue, fm));
+                writer.write(handleScalarType(fieldValue, fm));
             } else if (fm.getFieldType() instanceof EnumType) {
-                values.append(fieldValue.toString());
+                writer.write(fieldValue.toString());
             }
         }
-        result.append(values);
-        result.append("}");
-        return result.toString();
+        writer.write("}");
     }
+
+    private void validateConstraints(FieldModel fm, Object fieldValue) {
+        if (fm.getConstraints() != null && !fm.getConstraints().isEmpty() && fieldValue != null) {
+            List<String> errors = new ArrayList<>();
+            for (FieldConstraint constraint : fm.getConstraints()) {
+                String error = constraint.checkConstraint(fieldValue);
+                if (!StringUtils.isBlank(error)) {
+                    errors.add(error);
+                }
+            }
+            if (!errors.isEmpty()) {
+                // TODO throw new DataValidationException(fm, fieldValue, errors);
+//                System.err.println(errors);
+            }
+        }
+    }
+
 
     private String handleScalarType(Object fieldValue, FieldModel fm) {
         ScalarType scalarType = (ScalarType) fm.getFieldType();
@@ -175,18 +182,28 @@ public class JsonTStringify {
         String lexerType = jsonBaseType.lexerValueType();
         switch (lexerType) {
             case "Boolean":
-                return booleanEncoder.encode(jsonBaseType, fieldValue);
+                return booleanEncoder.encode(fm, fieldValue);
             case "String":
-                return stringEncoder.encode(jsonBaseType, fieldValue);
+                return stringEncoder.encode(fm, fieldValue);
             case "Number":
-                return numberEncoder.encode(jsonBaseType, fieldValue);
+                return numberEncoder.encode(fm, fieldValue);
             case "Date":
-                return dateEncoder.encode(jsonBaseType, fieldValue);
+                return dateEncoder.encode(fm, fieldValue);
             case "Binary":
-                return binEncoder.encode(jsonBaseType, fieldValue);
+                return binEncoder.encode(fm, fieldValue);
             default:
                 return fieldValue.toString();
         }
     }
 
+    void writeDataBlockPrefix(String dataSchema, Writer writer) throws IOException {
+        writer.write("\n{");
+        writer.write("data-schema:");
+        writer.write(dataSchema);
+        writer.write(",data: [");
+    }
+
+    void writeDataBlockSuffix(Writer writer) throws IOException {
+        writer.write("\n]\n}");
+    }
 }

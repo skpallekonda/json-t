@@ -3,7 +3,7 @@ package io.github.datakore.jsont.grammar.schema.constraints;
 
 import io.github.datakore.jsont.errors.ValidationError;
 import io.github.datakore.jsont.exception.SchemaException;
-import io.github.datakore.jsont.grammar.data.ValueNode;
+import io.github.datakore.jsont.grammar.schema.ast.FieldModel;
 import io.github.datakore.jsont.grammar.schema.constraints.arrays.AllowNullElementsConstraint;
 import io.github.datakore.jsont.grammar.schema.constraints.arrays.MaxItemsConstraint;
 import io.github.datakore.jsont.grammar.schema.constraints.arrays.MaxNullElementsConstraint;
@@ -32,9 +32,9 @@ public interface FieldConstraint {
         throw new SchemaException("Invalid constraint type: " + identifier);
     }
 
-    boolean checkConstraint(ValueNode node);
+    String checkConstraint(Object value);
 
-    ValidationError makeError(int rowIndex, String fieldName, ValueNode node);
+    ValidationError makeError(int rowIndex, FieldModel field, String errorMessage);
 
     enum ConstraitType {
         AllowNullElements("allowNulls", AllowNullElementsConstraint.class),

@@ -1,10 +1,8 @@
 package io.github.datakore.jsont.grammar.schema.constraints.arrays;
 
-import io.github.datakore.jsont.errors.ErrorLocation;
-import io.github.datakore.jsont.errors.ValidationError;
-import io.github.datakore.jsont.grammar.data.ArrayNode;
-import io.github.datakore.jsont.grammar.data.ValueNode;
 import io.github.datakore.jsont.grammar.schema.constraints.BaseConstraint;
+
+import java.util.List;
 
 public class MinItemsConstraint extends BaseConstraint {
     private final int minItems;
@@ -15,30 +13,15 @@ public class MinItemsConstraint extends BaseConstraint {
     }
 
     @Override
-    public boolean checkConstraint(ValueNode node) {
-        if (node instanceof ArrayNode) {
-            ArrayNode arrayNode = (ArrayNode) node;
-            return arrayNode.elements().size() >= minItems;
-        }
-        return true; // For other types, ignore as true
-    }
-
-    @Override
-    public ValidationError makeError(int rowIndex, String fieldName, ValueNode node) {
-        if (node instanceof ArrayNode) {
-            ArrayNode arrayNode = (ArrayNode) node;
-            return new ValidationError(
-                    ErrorLocation.withRow("Row ", rowIndex),
-                    fieldName,
-                    "Field array size is less than minimum value",
-                    String.valueOf(minItems),
-                    String.valueOf(arrayNode.elements().size()));
+    protected String checkConstraintList(List<Object> value) {
+        if (value == null || value.size() < minItems) {
+            return String.format("Field requires at least %d items", minItems);
         }
         return null;
     }
 
     @Override
-    protected Object constraintValue() {
+    public Object constraintValue() {
         return this.minItems;
     }
 }

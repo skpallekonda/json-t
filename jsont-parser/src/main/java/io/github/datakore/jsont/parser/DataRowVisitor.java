@@ -7,6 +7,7 @@ import io.github.datakore.jsont.errors.collector.ErrorCollector;
 import io.github.datakore.jsont.exception.SchemaException;
 import io.github.datakore.jsont.execution.DataStream;
 import io.github.datakore.jsont.grammar.JsonTParser;
+import io.github.datakore.jsont.grammar.data.RowNode;
 import io.github.datakore.jsont.grammar.schema.ast.JsonBaseType;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
 import io.github.datakore.jsont.grammar.schema.ast.SchemaCatalog;
@@ -15,6 +16,7 @@ import io.github.datakore.jsont.grammar.schema.coded.BooleanEncodeDecoder;
 import io.github.datakore.jsont.grammar.schema.coded.NumberEncodeDecoder;
 import io.github.datakore.jsont.grammar.schema.coded.StringEncodeDecoder;
 import io.github.datakore.jsont.grammar.types.*;
+import io.github.datakore.jsont.util.StringUtils;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 
 import java.util.*;
@@ -27,9 +29,13 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
     private final DataStream pipeline;
     private final AtomicInteger rowIndex = new AtomicInteger();
     private final NamespaceT givenNamespace;
-    private SchemaModel dataSchema;
     // The Stack handles Recursion and Nesting naturally
     private final Stack<ParsingContext> stack = new Stack<>();
+    private final BooleanEncodeDecoder booleanDecoder = new BooleanEncodeDecoder();
+    private final NumberEncodeDecoder numberDecoder = new NumberEncodeDecoder();
+    private final StringEncodeDecoder stringDecoder = new StringEncodeDecoder();
+    private SchemaModel dataSchema;
+
 
     public DataRowVisitor(ErrorCollector errorCollector, NamespaceT givenNamespace, DataStream stream) {
         super(errorCollector);
@@ -61,7 +67,6 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
         throw new ParseCancellationException("Unbale to resolve dataschema from Catalog supplied, cannot read data recordds");
     }
 
-
     @Override
     public void exitDataSchemaSection(JsonTParser.DataSchemaSectionContext ctx) {
         super.exitDataSchemaSection(ctx);
@@ -70,36 +75,27 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
     }
 
     @Override
+    public void exitDataSection(JsonTParser.DataSectionContext ctx) {
+        pipeline.onEOF();
+    }
+
+    @Override
     public void enterDataRow(JsonTParser.DataRowContext ctx) {
         super.clearErrors();
         rowIndex.getAndIncrement();
-        stack.push(new StructContext(rowIndex.get(), dataSchema));
+        // We do NOT push context here anymore. We let enterObjectValue handle it.
     }
 
     @Override
     public void exitDataRow(JsonTParser.DataRowContext ctx) {
-        StructContext root = (StructContext) stack.pop();
-
-        // Optional: Validate if all required fields were filled
-        if (root.fieldIndex < root.schema.fields().size()) {
-            super.addError(Severity.FATAL, "Not all fields have been shared", root.getLocation());
-        }
-
-        List<ValidationError> errors = super.getRowErrors();
-
-        if (!errors.isEmpty()) {
-            pipeline.onRowError(this.rowIndex.get(), errors);
-        } else {
-            pipeline.onRowParsed(root.values);
-        }
+        // Nothing to do here, as the row is emitted in exitObjectValue when stack becomes empty
     }
 
     @Override
     public void enterObjectValue(JsonTParser.ObjectValueContext ctx) {
-        // Check if this is the top-level object (child of dataRow)
-        if (ctx.getParent() instanceof JsonTParser.DataRowContext) {
-            // We are entering the root object. The context is already on the stack from enterDataRow.
-            // We don't need to do anything here.
+        // If stack is empty, this is the root object of the row
+        if (stack.isEmpty()) {
+            stack.push(new StructContext(rowIndex.get(), dataSchema));
             return;
         }
 
@@ -115,25 +111,35 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
         stack.push(new StructContext(this.rowIndex.get(), expected.colPosition(), expected.fieldName(), nestedSchema));
     }
 
-
     @Override
     public void exitObjectValue(JsonTParser.ObjectValueContext ctx) {
-        // Check if this is the top-level object (child of dataRow)
-        if (ctx.getParent() instanceof JsonTParser.DataRowContext) {
-            // We are exiting the root object. The context should remain on the stack until exitDataRow pops it.
-            // We don't need to do anything here.
+        // Defensive check: If stack is empty or top is not StructContext, we shouldn't pop.
+        // This can happen if enterObjectValue failed to push (e.g. error) but exit was called.
+        if (stack.isEmpty() || !(stack.peek() instanceof StructContext)) {
             return;
         }
 
-        // Finished parsing nested object
+        // Finished parsing object
         StructContext completed = (StructContext) stack.pop();
+
         // Optional: Validate if all required fields were filled
         if (completed.fieldIndex < completed.schema.fields().size()) {
             super.addError(Severity.FATAL, "Not all fields have been sent", completed.getLocation());
         }
 
-        // Add the completed List to the Parent (which is now top of stack)
-        stack.peek().addValue(completed.values);
+        if (stack.isEmpty()) {
+            // This was the root object, emit the row
+            List<ValidationError> errors = super.getRowErrors();
+            if (errors.stream().anyMatch(err -> err.severity().isFatal())) {
+                pipeline.onRowError(this.rowIndex.get(), errors);
+            } else {
+                RowNode row = new RowNode(this.rowIndex.get(), completed.values);
+                pipeline.onRowParsed(row);
+            }
+        } else {
+            // This was a nested object, add to parent
+            stack.peek().addValue(completed.values);
+        }
     }
 
     @Override
@@ -152,6 +158,11 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
     @Override
     public void exitArrayValue(JsonTParser.ArrayValueContext ctx) {
+        // Defensive check
+        if (stack.isEmpty() || !(stack.peek() instanceof ArrayContext)) {
+            return;
+        }
+
         ArrayContext completed = (ArrayContext) stack.pop();
         stack.peek().addValue(completed.values);
     }
@@ -168,8 +179,13 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
     @Override
     public void exitEnumValue(JsonTParser.EnumValueContext ctx) {
-        // Add value directly to parent
-        stack.peek().addValue(ctx.CONSTID().getText());
+        try {
+            // Add value directly to parent
+            stack.peek().addValue(ctx.CONSTID().getText());
+        } catch (Exception e) {
+            super.addError(Severity.WARNING, "Error parsing enum value", stack.peek().getLocation());
+            stack.peek().addValue(null);
+        }
     }
 
     @Override
@@ -181,11 +197,6 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
             return;
         }
 
-        if (expected instanceof ArrayType) {
-            ArrayType at = (ArrayType) expected;
-            expected = at.getElementType();
-        }
-
         if (!(expected instanceof ScalarType)) {
             super.addError(Severity.FATAL, "Found scalar value but expected " + expected, stack.peek().getLocation());
         }
@@ -194,52 +205,48 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
     @Override
     public void exitScalarValue(JsonTParser.ScalarValueContext ctx) {
-        ParsingContext parent = stack.peek();
-        ValueType expected = parent.getExpectedType();
-
-        if (expected instanceof ArrayType) {
-            ArrayType at = (ArrayType) expected;
-            expected = at.getElementType();
-        }
-
-        if (ctx.NULL() != null) {
-            parent.addValue(null);
-            return;
-        }
-
-        if (ctx.UNSPECIFIED() != null) {
-            parent.addValue(UNSPECIFIED_TOKEN);
-            return;
-        }
-
-        // Now we can safely cast to ScalarType, as other tokens (STRING, NUMBER, BOOLEAN) imply scalar
-        if (!(expected instanceof ScalarType)) {
-            // This should have been caught in enterScalarValue, but as a safeguard
-            super.addError(Severity.FATAL, "Found scalar value but expected " + expected, parent.getLocation());
-            return;
-        }
-
-        ScalarType type = (ScalarType) expected;
-        JsonBaseType jsonBaseType = type.elementType();
-
+        String raw = null;
         try {
+            ParsingContext parent = stack.peek();
+            ValueType expected = parent.getExpectedType();
+
+            if (ctx.NULL() != null) {
+                parent.addValue(null);
+                return;
+            }
+
+            if (ctx.UNSPECIFIED() != null) {
+                parent.addValue(UNSPECIFIED_TOKEN);
+                return;
+            }
+
+            // Now we can safely cast to ScalarType, as other tokens (STRING, NUMBER, BOOLEAN) imply scalar
+            if (!(expected instanceof ScalarType)) {
+                // This should have been caught in enterScalarValue, but as a safeguard
+                super.addError(Severity.FATAL, "Found scalar value but expected " + expected, parent.getLocation());
+                return;
+            }
+
+            ScalarType type = (ScalarType) expected;
+            JsonBaseType jsonBaseType = type.elementType();
+
             Object value;
             if (ctx.BOOLEAN() != null) {
-                value = booleanDecoder.decode(jsonBaseType, ctx.BOOLEAN().getText());
+                raw = StringUtils.removeQuotes(ctx.BOOLEAN().getText());
+                value = booleanDecoder.decode(jsonBaseType, raw);
             } else if (ctx.NUMBER() != null) {
-                value = numberDecoder.decode(jsonBaseType, ctx.NUMBER().getText());
+                raw = StringUtils.removeQuotes(ctx.NUMBER().getText());
+                value = numberDecoder.decode(jsonBaseType, raw);
             } else {
-                value = stringDecoder.decode(jsonBaseType, ctx.STRING().getText());
+                raw = StringUtils.removeQuotes(ctx.STRING().getText());
+                value = stringDecoder.decode(jsonBaseType, raw);
             }
             parent.addValue(value);
         } catch (Exception e) {
-            super.addError(Severity.ROW_FATAL, "Error parsing scalar value", parent.getLocation());
+            super.addError(Severity.WARNING, "Error parsing scalar value", stack.peek().getLocation());
+            stack.peek().addValue(raw);
         }
     }
-
-    private final BooleanEncodeDecoder booleanDecoder = new BooleanEncodeDecoder();
-    private final NumberEncodeDecoder numberDecoder = new NumberEncodeDecoder();
-    private final StringEncodeDecoder stringDecoder = new StringEncodeDecoder();
 
     interface ParsingContext {
         void addValue(Object value);
@@ -252,8 +259,8 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
     private final class StructContext implements ParsingContext {
         final SchemaModel schema;
         final Map<String, Object> values = new LinkedHashMap<>();
-        int fieldIndex = 0;
         private final ErrorLocation errorLocation;
+        int fieldIndex = 0;
 
         StructContext(int row, SchemaModel schema) {
             this.schema = schema;
@@ -287,8 +294,8 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
     private final class ArrayContext implements ParsingContext {
 
-        private final ValueType componentType;
         final List<Object> values = new ArrayList<>();
+        private final ValueType componentType;
         private final ErrorLocation errorLocation;
 
         ArrayContext(int row, int col, String field, ValueType componentType) {

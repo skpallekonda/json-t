@@ -44,7 +44,7 @@ fieldDecl : typeRef ':' identifier optionalMark? '(' constraintsSection? ')' ;
 **Components:**
 
 - **Type Reference (`typeRef`)**: Specifies the data type.
-    - Scalar: `int`, `str`, `bool`, etc.
+    - Scalar: `i32`, `str`, `bool`, etc.
     - Object Reference: `<Address>`
     - Arrays: `str[]`, `<Item>[]`
 - **Identifier**: The name of the field.
@@ -57,7 +57,7 @@ fieldDecl : typeRef ':' identifier optionalMark? '(' constraintsSection? ')' ;
 ```jsont
 schemas: {
   User: {
-    int: id (),
+    i32: id (),
     str: email? (regex("^.+@.+\..+$")),
     str[]: roles ()
   }
@@ -122,10 +122,15 @@ JsonT supports a rich set of built-in scalar types, identified by specific keywo
 
 | Key    | Type    | Description                     |
 |:-------|:--------|:--------------------------------|
-| `int`  | Integer | 32-bit signed integer           |
-| `long` | Long    | 64-bit signed integer           |
-| `flt`  | Float   | Single-precision floating point |
-| `dbl`  | Decimal | Double-precision floating point |
+| `i16`  | Short   | 16-bit signed integer           |
+| `i32`  | Integer | 32-bit signed integer           |
+| `i64`  | Long    | 64-bit signed integer           |
+| `u16`  | UShort  | 16-bit unsigned integer         |
+| `u32`  | UInt    | 32-bit unsigned integer         |
+| `u64`  | ULong   | 64-bit unsigned integer         |
+| `d32`  | Float   | Single-precision floating point |
+| `d64`  | Double  | Double-precision floating point |
+| `d128` | Decimal | 128-bit decimal floating point  |
 | `bool` | Boolean | `true` or `false`               |
 | `str`  | String  | UTF-8 character sequence        |
 | `uuid` | UUID    | Universally Unique Identifier   |

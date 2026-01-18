@@ -8,6 +8,7 @@ import io.github.datakore.jsont.exception.SchemaException;
 import io.github.datakore.jsont.execution.CSVErrorLogger;
 import io.github.datakore.jsont.execution.DataPipeline;
 import io.github.datakore.jsont.execution.ParserExecutor;
+import io.github.datakore.jsont.grammar.data.RowNode;
 import io.github.datakore.jsont.grammar.schema.ast.FieldModel;
 import io.github.datakore.jsont.grammar.schema.ast.SchemaModel;
 import io.github.datakore.jsont.grammar.types.ObjectType;
@@ -55,17 +56,21 @@ public class JsonTExecution {
         }
     }
 
-    public Flux<Map<String, Object>> parse(int parallelism) {
+    public Flux<RowNode> parse(int parallelism) {
         return createBaseStream(parallelism);
     }
 
-    public Flux<Map<String, Object>> validate(Class<?> targetType, int parallelism) {
+    public Flux<RowNode> validate(Class<?> targetType, int parallelism) {
         SchemaModel schema = config.namespaceT.findSchema(targetType.getSimpleName());
         SchemaValidator validator = new SchemaValidator(config.namespaceT, config.errorCollector);
         return parse(parallelism)
-                .map(map -> {
-                    validator.validate(schema, map);
-                    return map;
+                .mapNotNull(map -> {
+                    try {
+                        validator.validate(schema, map.getRowIndex(), map.values());
+                        return map;
+                    } catch (Exception e) {
+                        return null;
+                    }
                 });
     }
 
@@ -75,14 +80,16 @@ public class JsonTExecution {
                 .map(map -> {
                     SchemaModel schema = config.namespaceT.findSchema(targetType.getSimpleName());
                     SchemaAdapter<?> adapter = config.adapterRegistry.resolve(schema.name());
-                    return (T) convertToType(map, schema, adapter);
+                    return (T) convertToType(map.values(), schema, adapter);
                 });
     }
 
-    private Flux<Map<String, Object>> createBaseStream(int parallelism) {
-        final DataPipeline pipeline = new DataPipeline(config.bufferSize, java.time.Duration.ofSeconds(1), new CSVErrorLogger(config.errorFile));
+    private Flux<RowNode> createBaseStream(int parallelism) {
+        CSVErrorLogger errorLogger = new CSVErrorLogger(config.errorFile);
+        final DataPipeline pipeline = new DataPipeline(config.bufferSize, java.time.Duration.ofSeconds(1), errorLogger);
         DataRowVisitor rowListener = new DataRowVisitor(config.errorCollector, config.namespaceT, pipeline);
 
+        // Start parsing in a separate thread
         Mono.fromRunnable(() -> {
                     try {
                         ParserExecutor.executeDataParse(stream, config.errorCollector, rowListener);
@@ -94,10 +101,18 @@ public class JsonTExecution {
                     }
                 }).subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
-        return pipeline.rows()
-                .parallel(parallelism)           // Split into N groups
-                .runOn(Schedulers.parallel())    // Run on Parallel Scheduler
-                .sequential();
+
+        // Return the Flux from the pipeline
+        Flux<RowNode> flux = pipeline.rows();
+
+        // Only apply parallelism if requested
+        if (parallelism > 1) {
+            return flux.parallel(parallelism)
+                    .runOn(Schedulers.parallel())
+                    .sequential();
+        } else {
+            return flux;
+        }
     }
 
 

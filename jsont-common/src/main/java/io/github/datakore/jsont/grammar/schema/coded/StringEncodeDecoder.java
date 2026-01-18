@@ -1,6 +1,7 @@
 package io.github.datakore.jsont.grammar.schema.coded;
 
 import io.github.datakore.jsont.exception.DataException;
+import io.github.datakore.jsont.grammar.schema.ast.FieldModel;
 import io.github.datakore.jsont.grammar.schema.ast.JsonBaseType;
 import io.github.datakore.jsont.util.StringUtils;
 
@@ -53,11 +54,11 @@ public class StringEncodeDecoder implements EncodeDecoder {
     }
 
     @Override
-    public String encode(JsonBaseType jsonBaseType, Object object) {
+    public String encode(FieldModel fieldModel, Object object) {
         if (object == null) {
             return "null";
         } else {
-            return "\"" + object + "\"";
+            return StringUtils.wrapInQuotes(object.toString());
         }
     }
 }

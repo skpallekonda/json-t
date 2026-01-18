@@ -19,4 +19,12 @@ public class StringUtils {
             return str;
         }
     }
+
+    public static String wrapInQuotes(String str) {
+        if (isBlank(str)) {
+            return "null";
+        }
+        str = removeQuotes(str);
+        return "\"" + str + "\"";
+    }
 }

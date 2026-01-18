@@ -273,6 +273,28 @@ public class SchemaCatalog {
          */
         StringBuilder sb = new StringBuilder();
         sb.append("{");
+        printSchemas(sb);
+        printEnums(sb);
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private void printEnums(StringBuilder sb) {
+        if (enumModelMap.size() > 0) {
+            sb.append(",enums: [");
+            StringBuilder enums = new StringBuilder();
+            for (Map.Entry<String, EnumModel> entry : enumModelMap.entrySet()) {
+                if (enums.length() > 0) {
+                    enums.append(",");
+                }
+                enums.append(entry.getValue());
+            }
+            sb.append(enums);
+            sb.append("]");
+        }
+    }
+
+    private void printSchemas(StringBuilder sb) {
         sb.append("schemas: [");
         StringBuilder schemas = new StringBuilder();
         for (Map.Entry<String, SchemaModel> entry : schemaModelMap.entrySet()) {
@@ -283,18 +305,6 @@ public class SchemaCatalog {
         }
         sb.append(schemas);
         sb.append("]");
-        sb.append(",enums: [");
-        StringBuilder enums = new StringBuilder();
-        for (Map.Entry<String, EnumModel> entry : enumModelMap.entrySet()) {
-            if (enums.length() > 0) {
-                enums.append(",");
-            }
-            enums.append(entry.getValue());
-        }
-        sb.append(enums);
-        sb.append("]");
-        sb.append("}");
-        return sb.toString();
     }
 
     public void addSchema(SchemaModel schema) {

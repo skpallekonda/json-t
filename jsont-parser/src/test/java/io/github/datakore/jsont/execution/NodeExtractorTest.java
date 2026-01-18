@@ -3,6 +3,7 @@ package io.github.datakore.jsont.execution;
 import io.github.datakore.jsont.errors.ValidationError;
 import io.github.datakore.jsont.errors.collector.DefaultErrorCollector;
 import io.github.datakore.jsont.errors.collector.ErrorCollector;
+import io.github.datakore.jsont.grammar.data.RowNode;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
 import io.github.datakore.jsont.parser.DataRowVisitor;
 import io.github.datakore.jsont.parser.SchemaCatalogVisitor;
@@ -14,7 +15,6 @@ import reactor.core.publisher.Flux;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -44,7 +44,7 @@ public class NodeExtractorTest {
         final AtomicInteger errorsReceived = new AtomicInteger();
         DataStream dataStream = new DataStream() {
             @Override
-            public void onRowParsed(Map<String, Object> row) {
+            public void onRowParsed(RowNode row) {
                 rowsReceived.incrementAndGet();
             }
 
@@ -54,7 +54,7 @@ public class NodeExtractorTest {
             }
 
             @Override
-            public Flux<Map<String, Object>> rows() {
+            public Flux<RowNode> rows() {
                 return null;
             }
 

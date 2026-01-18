@@ -15,13 +15,6 @@ public class RowNode implements ValueNode {
         return index;
     }
 
-    public Map<String, Object> getNodeMap() {
-        return nodeMap;
-    }
-
-    public int index() {
-        return index;
-    }
 
     public Map<String, Object> values() {
         return nodeMap;

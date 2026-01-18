@@ -2,35 +2,33 @@ package io.github.datakore.jsont.execution;
 
 import io.github.datakore.jsont.errors.Severity;
 import io.github.datakore.jsont.errors.ValidationError;
+import io.github.datakore.jsont.grammar.data.RowNode;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.util.concurrent.Queues;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.locks.LockSupport;
 
 public class DataPipeline implements DataStream {
-    private final Sinks.Many<Map<String, Object>> sink;
-    private final int backPressureSize;
+    private final Sinks.Many<RowNode> sink;
     private final Duration waitingTimeWhenQueueIsFull;
     private final CSVErrorLogger errorLogger;
 
     public DataPipeline(int backPressureSize, Duration waitingTimeWhenQueueIsFull, CSVErrorLogger errorLogger) {
-        this.backPressureSize = backPressureSize;
         this.waitingTimeWhenQueueIsFull = waitingTimeWhenQueueIsFull;
         this.errorLogger = errorLogger;
 
         this.sink = Sinks.many()
                 .unicast()
                 .onBackpressureBuffer(
-                        Queues.<Map<String, Object>>get(this.backPressureSize).get()
+                        Queues.<RowNode>get(backPressureSize).get()
                 );
     }
 
     @Override
-    public void onRowParsed(Map<String, Object> row) {
+    public void onRowParsed(RowNode row) {
         long start = System.nanoTime();
         long timeoutNanos = waitingTimeWhenQueueIsFull.toNanos();
 
@@ -66,7 +64,7 @@ public class DataPipeline implements DataStream {
     }
 
     @Override
-    public Flux<Map<String, Object>> rows() {
+    public Flux<RowNode> rows() {
         return sink.asFlux();
     }
 

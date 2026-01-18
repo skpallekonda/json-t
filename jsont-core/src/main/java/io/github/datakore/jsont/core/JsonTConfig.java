@@ -3,15 +3,14 @@ package io.github.datakore.jsont.core;
 import io.github.datakore.jsont.adapters.AdapterRegistry;
 import io.github.datakore.jsont.errors.collector.ErrorCollector;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
-import io.github.datakore.jsont.stringify.JsonTStringify;
-import io.github.datakore.jsont.stringify.StringifyMode;
+import io.github.datakore.jsont.stringify.StreamingJsonTWriter;
+import io.github.datakore.jsont.stringify.StreamingJsonTWriterBuilder;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
 
 import java.io.IOException;
+import java.io.StringWriter;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 
 public final class JsonTConfig {
@@ -44,29 +43,21 @@ public final class JsonTConfig {
         return new JsonTExecution(this, stream);
     }
 
-    public String stringify(Class<?> clazz) {
-        JsonTStringify stringify = new JsonTStringify(adapterRegistry, namespaceT);
-        return stringify.stringifySchema(clazz);
+    public <T> String stringify(Class<T> clazz) {
+        StreamingJsonTWriter<T> writer = new StreamingJsonTWriterBuilder<T>()
+                .registry(this.adapterRegistry)
+                .namespace(this.namespaceT)
+                .build(clazz.getSimpleName());
+        StringWriter sw = new StringWriter();
+        writer.stringify(sw, clazz);
+        return sw.toString();
     }
 
-    public String stringify(Object object) {
-        return stringify(object, StringifyMode.DATA_ONLY);
+    public AdapterRegistry getAdapters() {
+        return this.adapterRegistry;
     }
 
-    public String stringify(Object object, StringifyMode mode) {
-        List<Object> list = new ArrayList<>(1);
-        list.add(object);
-        return stringify(list, mode);
+    public NamespaceT getNamespace() {
+        return this.namespaceT;
     }
-
-    public String stringify(List<Object> list) {
-        return stringify(list, StringifyMode.DATA_ONLY);
-    }
-
-    public String stringify(List<Object> list, StringifyMode mode) {
-        JsonTStringify stringify = new JsonTStringify(adapterRegistry, namespaceT);
-        return stringify.stringifyData(list, mode);
-    }
-
-
 }
