@@ -313,19 +313,21 @@ If a document parses successfully, it is structurally valid.
 ---
 ## Updates for v0.0.2
 
-1. Earlier, I was able to parse a simple 700k record file. Beyond that, I was getting out of memory error.  <br />
-Main reason is, I was loading the complete data file in memory, and then traversing it.  <br />
-Fixed this issue by using streaming listener for parsing, and kept fixed backpressure, and wait for subscriber to process the items <br />
-This approach enabled to parse more than 1.5m records of close to 1.5kb per record
-2. Then, for stringification also, loading all objects and writing them was not the right approach, so made the changes to provide multiple options for the clients to use
-3. Using this, when I generated a 10m records, I could finish the task without any errors.  There's further scope to improve performance
-4. For reading / parse, I tried with 1m record file, the library that I use to parse, has limitation on file size, so I couldn't read the file. Explorting alternate options
+1. **Streaming Parser Implementation**: Replaced in-memory parsing with a streaming listener approach to eliminate out-of-memory errors when processing files beyond 700k records. By implementing fixed backpressure and asynchronous subscriber processing, the parser now handles 1.5M+ records (~1.5KB each) efficiently.
 
-5. Refactored the code to make it readable and using right approach
-6. Introduced UNSPECIFIED status in the grammar, which is different from NULL and a value.  This can be used for CDC usecases
+2. **Streaming Serialization**: Introduced multiple stringification strategies to avoid loading entire object graphs into memory, providing clients with flexible approaches based on their use case.
 
-7. Validation while parsing and serializing / stringification is working
-8. Introduced several types, read [Types](./docs/Types.md)
+3. **Scalability Validation**: Successfully tested generation of 10M records without errors. Performance optimization remains an ongoing focus.
+
+4. **Parser Library Evaluation**: Identified file size limitations in the current parsing library when processing 1M+ record files. Exploring alternative parsing solutions.
+
+5. **Code Refactoring**: Improved code readability and architectural patterns across core modules.
+
+6. **UNSPECIFIED Token**: Added UNSPECIFIED status to the grammar as a distinct state (separate from NULL or explicit values), enabling efficient Change Data Capture (CDC) use cases where unchanged fields can be omitted.
+
+7. **Bidirectional Validation**: Implemented validation for both parsing and serialization paths.
+
+8. **Type System Expansion**: Introduced additional data types. See [Types documentation](/datakore/json-t/blob/main/docs/Types.md) for details.
 ---
 
 ## Status
