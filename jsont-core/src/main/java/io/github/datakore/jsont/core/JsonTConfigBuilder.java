@@ -7,10 +7,8 @@ import io.github.datakore.jsont.errors.collector.ErrorCollector;
 import io.github.datakore.jsont.execution.ParserExecutor;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
 import io.github.datakore.jsont.parser.SchemaCatalogVisitor;
-import org.antlr.v4.runtime.CharStream;
-import org.antlr.v4.runtime.CharStreams;
 
-import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.Arrays;
 
@@ -32,11 +30,7 @@ public class JsonTConfigBuilder {
         return this;
     }
 
-    public JsonTConfigBuilder source(Path path) throws IOException {
-        return source(CharStreams.fromPath(path));
-    }
-
-    public JsonTConfigBuilder source(CharStream schemaSource) {
+    public JsonTConfigBuilder source(InputStream schemaSource) {
         // Run a "Schema-Only" parse immediately
         SchemaCatalogVisitor listener = new SchemaCatalogVisitor(errorCollector);
         ParserExecutor.executeSchema(schemaSource, errorCollector, listener);

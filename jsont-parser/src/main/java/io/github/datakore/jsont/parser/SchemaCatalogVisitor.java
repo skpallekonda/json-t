@@ -63,7 +63,7 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
 
     @Override
     public void exitNameSpace(JsonTParser.NameSpaceContext ctx) {
-        addError(Severity.WARNING, "Exiting namespace without any errors", new ErrorLocation("Exit Namespace"));
+        // addError(Severity.WARNING, "Exiting namespace without any errors", new ErrorLocation("Exit Namespace"));
     }
 
     @Override

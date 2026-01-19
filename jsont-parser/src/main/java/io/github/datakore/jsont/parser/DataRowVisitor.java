@@ -101,6 +101,11 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
         ValueType expected = stack.peek().getExpectedType();
 
+        // Handle null/unspecified for ObjectType
+        // Note: This logic is tricky because enterObjectValue is called for '{', but null is a scalar token.
+        // However, if the parser grammar allows 'null' where an object is expected, it might come in as a scalar value context, not object value context.
+        // But if we are here, we saw '{'.
+
         if (!(expected instanceof ObjectType)) {
             super.addError(Severity.FATAL, "Found Object '{...}' but expected " + expected, stack.peek().getLocation());
         }
@@ -189,15 +194,24 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
     }
 
     @Override
+    public void exitNullValue(JsonTParser.NullValueContext ctx) {
+        ValueType expected = stack.peek().getExpectedType();
+        if (ctx.NULL() != null) {
+            stack.peek().addValue(null);
+        } else if (ctx.UNSPECIFIED() != null) {
+            stack.peek().addValue(UNSPECIFIED_TOKEN);
+        } else if (StringUtils.isBlank(ctx.getText())) {
+            stack.peek().addValue(null);
+        }
+    }
+
+    @Override
     public void enterScalarValue(JsonTParser.ScalarValueContext ctx) {
         ValueType expected = stack.peek().getExpectedType();
 
-        // Allow NULL or UNSPECIFIED for any type (if optional/nullable)
-        if (ctx.NULL() != null || ctx.UNSPECIFIED() != null) {
-            return;
-        }
-
         if (!(expected instanceof ScalarType)) {
+            // Special handling: If we expected an ArrayType or ObjectType but got a scalar (that isn't null/unspecified), that's an error.
+            // BUT, if we got here, it means the parser saw a scalar token (STRING, NUMBER, BOOLEAN).
             super.addError(Severity.FATAL, "Found scalar value but expected " + expected, stack.peek().getLocation());
         }
         // We do NOT push a context for Scalar, as it is a leaf value
@@ -210,19 +224,8 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
             ParsingContext parent = stack.peek();
             ValueType expected = parent.getExpectedType();
 
-            if (ctx.NULL() != null) {
-                parent.addValue(null);
-                return;
-            }
-
-            if (ctx.UNSPECIFIED() != null) {
-                parent.addValue(UNSPECIFIED_TOKEN);
-                return;
-            }
-
-            // Now we can safely cast to ScalarType, as other tokens (STRING, NUMBER, BOOLEAN) imply scalar
+            // If expected is NOT a ScalarType, we have a mismatch.
             if (!(expected instanceof ScalarType)) {
-                // This should have been caught in enterScalarValue, but as a safeguard
                 super.addError(Severity.FATAL, "Found scalar value but expected " + expected, parent.getLocation());
                 return;
             }
@@ -244,7 +247,6 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
             parent.addValue(value);
         } catch (Exception e) {
             super.addError(Severity.WARNING, "Error parsing scalar value", stack.peek().getLocation());
-            stack.peek().addValue(raw);
         }
     }
 
@@ -274,6 +276,12 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
         @Override
         public void addValue(Object value) {
+            if (fieldIndex >= schema.fields().size()) {
+                // This can happen if we receive more values than fields defined in schema
+                // We should probably log a warning or error, but for now let's just ignore or throw
+                // Throwing helps catch schema mismatches early
+                throw new SchemaException("Too many fields for schema " + schema.name() + ". Expected " + schema.fields().size());
+            }
             values.put(schema.fields().get(fieldIndex).getFieldName(), value);
             fieldIndex++; // Move to next field
         }

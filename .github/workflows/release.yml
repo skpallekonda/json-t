@@ -6,6 +6,7 @@ on:
       - main
     paths-ignore:
       - '**.md' # Ignores README changes to prevent unnecessary builds
+      - '.github/workflows/release.yml'
 
 jobs:
   publish:
@@ -18,7 +19,7 @@ jobs:
       # 1. Checkout Code
       - uses: actions/checkout@v4
 
-      # 2. Setup Java 11 & Maven Settings
+      # 2. Setup Java 21 & Maven Settings
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -50,7 +51,7 @@ jobs:
         run: mvn clean verify -DskipTests
 
       # 5. Commit Version Bump & Push Tag
-      - name: Commit and Push
+      - name: Commit and Push Release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -71,3 +72,21 @@ jobs:
         run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml -DskipTests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 7. Prepare Next Snapshot
+      - name: Prepare Next Snapshot
+        run: |
+          # Calculate next snapshot version
+          IFS='.' read -r -a PARTS <<< "${{ env.MVN_VERSION }}"
+          NEXT_PATCH=$((PARTS[2] + 1))
+          NEXT_SNAPSHOT="${PARTS[0]}.${PARTS[1]}.$NEXT_PATCH-SNAPSHOT"
+          
+          echo "Setting next snapshot version: $NEXT_SNAPSHOT"
+          
+          # Update pom.xml
+          mvn versions:set -DnewVersion=$NEXT_SNAPSHOT -DgenerateBackupPoms=false -DprocessAllModules=true
+          
+          # Commit and Push
+          git add -u
+          git commit -m "Prepare for next development iteration $NEXT_SNAPSHOT [skip ci]"
+          git push origin main

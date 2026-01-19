@@ -14,11 +14,11 @@ import io.github.datakore.jsont.grammar.schema.ast.SchemaModel;
 import io.github.datakore.jsont.grammar.types.ObjectType;
 import io.github.datakore.jsont.parser.DataRowVisitor;
 import io.github.datakore.jsont.validator.SchemaValidator;
-import org.antlr.v4.runtime.CharStream;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,9 +26,9 @@ import java.util.Map;
 public class JsonTExecution {
 
     private final JsonTConfig config;
-    private final CharStream stream;
+    private final InputStream stream;
 
-    public JsonTExecution(JsonTConfig config, CharStream stream) {
+    public JsonTExecution(JsonTConfig config, InputStream stream) {
         this.config = config;
         this.stream = stream;
     }

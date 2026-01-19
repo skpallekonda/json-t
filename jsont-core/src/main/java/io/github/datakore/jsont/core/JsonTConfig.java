@@ -5,10 +5,8 @@ import io.github.datakore.jsont.errors.collector.ErrorCollector;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriter;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriterBuilder;
-import org.antlr.v4.runtime.CharStream;
-import org.antlr.v4.runtime.CharStreams;
 
-import java.io.IOException;
+import java.io.InputStream;
 import java.io.StringWriter;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -29,16 +27,7 @@ public final class JsonTConfig {
         this.errorFile = errorFile;
     }
 
-    public JsonTExecution source(Path path) {
-        Objects.requireNonNull(path, "Source cannot be null");
-        try {
-            return new JsonTExecution(this, CharStreams.fromPath(path));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public JsonTExecution source(CharStream stream) {
+    public JsonTExecution source(InputStream stream) {
         Objects.requireNonNull(stream, "Source cannot be null");
         return new JsonTExecution(this, stream);
     }
