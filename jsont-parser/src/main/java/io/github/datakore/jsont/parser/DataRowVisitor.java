@@ -235,13 +235,17 @@ public final class DataRowVisitor extends SchemaCatalogVisitor {
 
             Object value;
             if (ctx.BOOLEAN() != null) {
-                raw = StringUtils.removeQuotes(ctx.BOOLEAN().getText());
+                raw = ctx.BOOLEAN().getText();
                 value = booleanDecoder.decode(jsonBaseType, raw);
             } else if (ctx.NUMBER() != null) {
-                raw = StringUtils.removeQuotes(ctx.NUMBER().getText());
+                raw = ctx.NUMBER().getText();
                 value = numberDecoder.decode(jsonBaseType, raw);
             } else {
-                raw = StringUtils.removeQuotes(ctx.STRING().getText());
+                raw = ctx.STRING().getText();
+                // Fast path for removeQuotes
+                if (raw.length() >= 2 && (raw.charAt(0) == '"' || raw.charAt(0) == '\'')) {
+                    raw = raw.substring(1, raw.length() - 1);
+                }
                 value = stringDecoder.decode(jsonBaseType, raw);
             }
             parent.addValue(value);

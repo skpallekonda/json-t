@@ -213,7 +213,7 @@ public class JsonTTest {
                 InputStream dataStream = new FileInputStream(dataPath.toFile())) {
             JsonTConfig config = getJsonTConfig(is, errorPath);
             JsonTExecution execution = config.source(dataStream);
-            execution.parse(4) // Use 4 parallel threads
+            execution.parse() // Use 4 parallel threads
                     .doOnNext(row -> {
                         long count = rowsProcessed.incrementAndGet();
                         if (count % 10 == 0) {

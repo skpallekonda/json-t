@@ -37,5 +37,11 @@
             <version>1.4</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.instancio</groupId>
+            <artifactId>instancio-core</artifactId>
+            <version>3.7.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

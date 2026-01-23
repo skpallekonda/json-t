@@ -5,11 +5,13 @@ import io.github.datakore.jsont.errors.collector.ErrorCollector;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriter;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriterBuilder;
+import io.github.datakore.jsont.util.StepCounter;
 
 import java.io.InputStream;
 import java.io.StringWriter;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 public final class JsonTConfig {
     final NamespaceT namespaceT;
@@ -17,6 +19,7 @@ public final class JsonTConfig {
     final AdapterRegistry adapterRegistry;
     final int bufferSize;
     final Path errorFile;
+    private Consumer<StepCounter> monitor;
 
 
     public JsonTConfig(NamespaceT namespaceT, ErrorCollector errorCollector, AdapterRegistry adapterRegistry, int bufferSize, Path errorFile) {
@@ -27,9 +30,14 @@ public final class JsonTConfig {
         this.errorFile = errorFile;
     }
 
+    public JsonTConfig withMonitor(Consumer<StepCounter> monitor) {
+        this.monitor = monitor;
+        return this;
+    }
+
     public JsonTExecution source(InputStream stream) {
         Objects.requireNonNull(stream, "Source cannot be null");
-        return new JsonTExecution(this, stream);
+        return new JsonTExecution(this, stream, this.monitor);
     }
 
     public <T> String stringify(Class<T> clazz) {
