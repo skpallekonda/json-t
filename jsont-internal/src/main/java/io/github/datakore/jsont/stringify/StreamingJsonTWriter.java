@@ -5,14 +5,15 @@ import io.github.datakore.jsont.datagen.DataGenerator;
 import io.github.datakore.jsont.exception.DataException;
 import io.github.datakore.jsont.exception.SchemaException;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
-import reactor.core.publisher.Flux;
+import io.github.datakore.jsont.util.StepCounter;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.Writer;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 public class StreamingJsonTWriter<T> {
@@ -34,153 +35,164 @@ public class StreamingJsonTWriter<T> {
         }
     }
 
-    public Mono<Void> stringify(T data, Writer writer, boolean includeSchema) {
-        return Mono.fromRunnable(() -> {
-            try {
-                // emit schema
-                if (includeSchema) {
-                    stringify.writeSchema(this.dataSchema, writer);
-                }
-                // write data block prefix
-                stringify.writeDataBlockPrefix(this.dataSchema, writer);
-                stringify.stringify(data, writer);
-                // write data block suffix
-                stringify.writeDataBlockSuffix(writer);
-            } catch (Exception e) {
-                throw new DataException(e);
-            }
+    public void stringify(T data, Writer writer, boolean includeSchema) {
+        stringifyTemplate(writer, includeSchema, w -> stringify.stringify(data, w));
+    }
+
+    public void stringify(List<T> data, Writer writer, boolean includeSchema) {
+        stringifyTemplate(writer, includeSchema, w -> writeRecordList(w, data, false));
+    }
+
+    public Mono<Void> stringifyAsync(T data, Writer writer, boolean includeSchema) {
+        return Mono.fromCallable(() -> {
+            stringify(data, writer, includeSchema);
+            return null;
+        }).subscribeOn(Schedulers.boundedElastic()).then();
+    }
+
+    public Mono<Void> stringifyAsync(List<T> data, Writer writer, boolean includeSchema) {
+        return Mono.fromCallable(() -> {
+            stringify(data, writer, includeSchema);
+            return null;
+        }).subscribeOn(Schedulers.boundedElastic()).then();
+    }
+
+    public void stringify(Writer writer,
+                          long totalRecords,
+                          int batchSize,
+                          int flushEveryNBatches,
+                          boolean includeSchema,
+                          Consumer<StepCounter> onBatchComplete) throws IOException {
+        stringifyTemplate(writer, includeSchema, w -> {
+            writeBatchedRecords(w, totalRecords, batchSize,
+                    flushEveryNBatches, onBatchComplete);
         });
     }
 
-    public Mono<Void> stringify(List<T> data, Writer writer, boolean includeSchema) {
-        return Mono.fromRunnable(() -> {
-            try {
-                // emit schema
-                if (includeSchema) {
-                    stringify.writeSchema(this.dataSchema, writer);
-                }
-                // write data block prefix
-                stringify.writeDataBlockPrefix(this.dataSchema, writer);
-                commonListDataWrite(writer, data, false);
-                // write data block suffix
-                stringify.writeDataBlockSuffix(writer);
-            } catch (Exception e) {
-                throw new DataException(e);
+    private void writeBatchedRecords(Writer writer,
+                                     long totalRecords,
+                                     int batchSize,
+                                     int flushEveryNBatches,
+                                     Consumer<StepCounter> onBatchComplete) throws IOException {
+        long batchCount = 0;
+        boolean isFirstBatch = true;
+
+        for (long recordIndex = 0; recordIndex < totalRecords; recordIndex += batchSize) {
+            // Calculate actual batch size (last batch might be smaller)
+            int currentBatchSize = (int) Math.min(batchSize, totalRecords - recordIndex);
+
+            // Generate batch
+            List<T> batch = generateBatch(currentBatchSize);
+            // Progress callback
+            if (onBatchComplete != null) {
+                onBatchComplete.accept(new StepCounter("generation", batchCount + 1));
             }
-        });
-    }
 
-    private Flux<List<T>> createBatchedDataStream(long totalRecords, int batchSize) {
-        return Flux.generate(
-                () -> 0L,
-                (state, sink) -> {
-                    if (state >= totalRecords) {
-                        sink.complete();
-                        return state;
-                    }
-                    int count = (int) Math.min(batchSize, totalRecords - state);
-                    List<T> batch = new java.util.ArrayList<>(count);
-                    try {
-                        for (int i = 0; i < count; i++) {
-                            batch.add(generator.generate(this.dataSchema));
-                        }
-                        sink.next(batch);
-                    } catch (Exception e) {
-                        sink.error(e);
-                    }
-                    return state + count;
-                }
-        );
-    }
+            // Write batch
+            writeRecordList(writer, batch, !isFirstBatch);
+            isFirstBatch = false;
+            batchCount++;
 
-    public Mono<Void> stringify(Writer writer,
-                                long totalRecords,
-                                int batchSize,
-                                int flushEveryNBatches,
-                                boolean includeSchema) {
-        return stringify(writer, totalRecords, batchSize, flushEveryNBatches, includeSchema, null);
-    }
-
-    public Mono<Void> stringify(Writer writer,
-                                long totalRecords,
-                                int batchSize,
-                                int flushEveryNBatches,
-                                boolean includeSchema,
-                                Consumer<Long> onBatchComplete) {
-        AtomicBoolean isFirstBatch = new AtomicBoolean(true);
-        return Mono.fromRunnable(() -> {
-                    try {
-                        if (includeSchema) {
-                            stringify.writeSchema(this.dataSchema, writer);
-                        }
-                        stringify.writeDataBlockPrefix(this.dataSchema, writer);
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to write JSON start", e);
-                    }
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .thenMany(
-                        createBatchedDataStream(totalRecords, batchSize)
-                                .subscribeOn(Schedulers.parallel()) // Generate data on CPU-bound thread
-                                .publishOn(Schedulers.boundedElastic(), 16) // Switch to IO-bound thread for writing, buffer up to 16 batches
-                                .index()
-                                .concatMap(tuple -> {
-                                    long batchIndex = tuple.getT1();
-                                    List<T> batch = tuple.getT2();
-
-                                    return writeBatchReactive(writer, batch, isFirstBatch)
-                                            .then(flushIfNeeded(writer, batchIndex, flushEveryNBatches))
-                                            .doOnSuccess(v -> {
-                                                if (onBatchComplete != null) {
-                                                    onBatchComplete.accept(batchIndex + 1);
-                                                }
-                                            });
-                                })
-                ).then(writeJsonEndAndFlush(writer));
-    }
-
-    private Mono<Void> flushIfNeeded(Writer writer, long batchIndex, int flushEveryNBatches) {
-        if ((batchIndex + 1) % flushEveryNBatches == 0) {
-            return Mono.fromRunnable(() -> {
-                try {
-                    writer.flush();
-                } catch (IOException e) {
-                    throw new DataException("Failed to flush writer", e);
-                }
-            }).then();
-        }
-        return Mono.empty();
-    }
-
-    // Helper method for final flush
-    private Mono<Void> writeJsonEndAndFlush(Writer writer) {
-        return Mono.fromRunnable(() -> {
-            try {
-                stringify.writeDataBlockSuffix(writer);
+            // Periodic flush to disk
+            if (batchCount % flushEveryNBatches == 0) {
                 writer.flush();
-            } catch (IOException e) {
-                throw new DataException("Failed to write JSON end", e);
             }
-        }).then();
+
+            // Progress callback
+            if (onBatchComplete != null) {
+                onBatchComplete.accept(new StepCounter("stringify", batchCount));
+            }
+        }
     }
 
-    private Mono<Void> writeBatchReactive(Writer writer, List<T> batch, AtomicBoolean isFirstBatch) {
-        return Mono.fromRunnable(() -> {
-            try {
-                boolean needsComma = !isFirstBatch.getAndSet(false);
-                commonListDataWrite(writer, batch, needsComma);
-            } catch (IOException e) {
-                throw new DataException("Failed to write batch", e);
-            }
-        });
-    }
-
-    private void commonListDataWrite(Writer writer, List<T> batch, boolean needsComma) throws IOException {
-        for (int i = 0; i < batch.size(); i++) {
-            if (needsComma || i > 0) {
+    /**
+     * Write a list of records with proper comma separation.
+     *
+     * @param writer            Buffered writer
+     * @param records           List of records to write
+     * @param needsLeadingComma Whether to prefix with comma (not first batch)
+     */
+    private void writeRecordList(Writer writer, List<T> records, boolean needsLeadingComma)
+            throws IOException {
+        for (int i = 0; i < records.size(); i++) {
+            if (needsLeadingComma || i > 0) {
                 writer.write(",\n");
             }
-            stringify.stringify(batch.get(i), writer);
+            stringify.stringify(records.get(i), writer);
+        }
+    }
+
+    /**
+     * Generate a batch of records using the DataGenerator.
+     */
+    private List<T> generateBatch(int batchSize) {
+        List<T> batch = new ArrayList<>(batchSize);
+        try {
+            for (int i = 0; i < batchSize; i++) {
+                batch.add(generator.generate(this.dataSchema));
+            }
+        } catch (Exception e) {
+            throw new DataException("Failed to generate batch", e);
+        }
+        return batch;
+    }
+
+    public Mono<Void> stringifyAsync(Writer writer,
+                                     long totalRecords,
+                                     int batchSize,
+                                     int flushEveryNBatches,
+                                     boolean includeSchema,
+                                     Consumer<StepCounter> onBatchComplete) {
+        return Mono.fromCallable(() -> {
+            stringify(writer, totalRecords, batchSize, flushEveryNBatches,
+                    includeSchema, onBatchComplete);
+            return null;
+        }).subscribeOn(Schedulers.boundedElastic()).then();
+    }
+
+    public Mono<Void> stringifyAsync(Writer writer,
+                                     long totalRecords,
+                                     int batchSize,
+                                     int flushEveryNBatches,
+                                     boolean includeSchema) {
+        return stringifyAsync(writer, totalRecords, batchSize,
+                flushEveryNBatches, includeSchema, null);
+    }
+
+    private Writer ensureBuffered(Writer writer) {
+        if (writer instanceof BufferedWriter) {
+            return writer;
+        }
+        return new BufferedWriter(writer);
+    }
+
+    @FunctionalInterface
+    private interface DataWriter {
+        void writeData(Writer writer) throws IOException;
+    }
+
+    private void stringifyTemplate(Writer writer, boolean includeSchema, DataWriter dataWriter) {
+        Writer bufferedWriter = ensureBuffered(writer);
+
+        try {
+            // Step 1: Write schema (optional)
+            if (includeSchema) {
+                stringify.writeSchema(this.dataSchema, bufferedWriter);
+            }
+
+            // Step 2: Write data block prefix
+            stringify.writeDataBlockPrefix(this.dataSchema, bufferedWriter);
+
+            // Step 3: Write actual data (delegated to caller)
+            dataWriter.writeData(bufferedWriter);
+
+            // Step 4: Write data block suffix
+            stringify.writeDataBlockSuffix(bufferedWriter);
+
+            // Step 5: Final flush
+            bufferedWriter.flush();
+        } catch (Exception e) {
+            throw new DataException("Failed to stringify data", e);
         }
     }
 }

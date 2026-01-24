@@ -1,0 +1,6 @@
+title: JsonT
+description: A high-performance, schema-driven JSON-T parser and generator for Java.
+theme: jekyll-theme-cayman
+show_downloads: false
+plugins:
+  - jekyll-seo-tag

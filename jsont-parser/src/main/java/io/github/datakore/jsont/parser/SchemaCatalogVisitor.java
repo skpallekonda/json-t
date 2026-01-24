@@ -63,7 +63,7 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
 
     @Override
     public void exitNameSpace(JsonTParser.NameSpaceContext ctx) {
-        addError(Severity.WARNING, "Exiting namespace without any errors", new ErrorLocation("Exit Namespace"));
+        // addError(Severity.WARNING, "Exiting namespace without any errors", new ErrorLocation("Exit Namespace"));
     }
 
     @Override
@@ -155,9 +155,10 @@ public class SchemaCatalogVisitor extends JsonTBaseListener {
             String location = String.format("Enum name %s", name);
             errorCollector.report(new ValidationError(Severity.FATAL, "Enum values must be unique", new ErrorLocation(location)));
         }
-        list.clear();
         EnumModel model = new EnumModel(name, set);
         schemaCatalog.addEnum(name, model);
+        enumList.add(new EnumNode(name, list));
+        list.clear();
     }
 
     @Override

@@ -4,13 +4,16 @@ import com.github.curiousoddman.rgxgen.RgxGen;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.*;
+import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class RandomDataGenerator {
 
-    private final SecureRandom random = new SecureRandom();
+    // Use ThreadLocalRandom for better performance in multithreaded environments
+    // SecureRandom is synchronized and slow for high-throughput data generation
+    private final Random random = ThreadLocalRandom.current();
 
     private double minDefault(String typeName) {
         switch (typeName) {
@@ -50,36 +53,40 @@ public class RandomDataGenerator {
             precision = 4;
         }
 
-        // Generate a random double within the range [min, max)
-        double randomValue = random.nextDouble();
+        // Use ThreadLocalRandom directly
+        double randomValue = ThreadLocalRandom.current().nextDouble();
         randomValue = min + (max - min) * randomValue;
-        BigDecimal bigDecimal = new BigDecimal(String.valueOf(randomValue));
-        if (negated) {
-            bigDecimal = bigDecimal.negate();
-        }
-
+        
+        // Avoid BigDecimal for simple types if possible, but keeping logic for now.
+        // Optimization: Only use BigDecimal when necessary (d32, d64, d128) or for final conversion
+        
         switch (typeName) {
             case "t_i16":
-                return bigDecimal.shortValue();
+                return (short) (negated ? -randomValue : randomValue);
             case "t_i32":
-                return bigDecimal.intValue();
+                return (int) (negated ? -randomValue : randomValue);
             case "t_i64":
-                return bigDecimal.longValue();
+                return (long) (negated ? -randomValue : randomValue);
             case "t_u16":
-                return bigDecimal.abs().shortValue();
+                return (short) Math.abs(randomValue);
             case "t_u32":
-                return bigDecimal.abs().intValue();
+                return (int) Math.abs(randomValue);
             case "t_u64":
-                return bigDecimal.abs().longValue();
+                return (long) Math.abs(randomValue);
             case "t_d32":
-                bigDecimal = bigDecimal.setScale(precision, RoundingMode.HALF_UP);
-                return bigDecimal.floatValue();
+                // Float
+                return BigDecimal.valueOf(negated ? -randomValue : randomValue)
+                        .setScale(precision, RoundingMode.HALF_UP)
+                        .floatValue();
             case "t_d64":
-                bigDecimal = bigDecimal.setScale(precision, RoundingMode.HALF_UP);
-                return bigDecimal.doubleValue();
+                // Double
+                return BigDecimal.valueOf(negated ? -randomValue : randomValue)
+                        .setScale(precision, RoundingMode.HALF_UP)
+                        .doubleValue();
             case "t_d128":
-                bigDecimal = bigDecimal.setScale(precision, RoundingMode.HALF_UP);
-                return bigDecimal;
+                // BigDecimal
+                return BigDecimal.valueOf(negated ? -randomValue : randomValue)
+                        .setScale(precision, RoundingMode.HALF_UP);
             default:
                 throw new IllegalArgumentException("Unknown number type: " + typeName);
         }
@@ -88,55 +95,53 @@ public class RandomDataGenerator {
     public Object generateDate(String fieldName) {
         long minDay = LocalDate.of(2000, 1, 1).toEpochDay();
         long maxDay = LocalDate.of(2030, 12, 31).toEpochDay();
-        long randomDay = minDay + random.nextInt(1, (int) (maxDay - minDay));
+        // ThreadLocalRandom for range
+        long randomDay = ThreadLocalRandom.current().nextLong(minDay, maxDay);
 
         switch (fieldName) {
             case "t_date":
                 return LocalDate.ofEpochDay(randomDay);
             case "t_time":
-                return LocalTime.of(random.nextInt(1, 24), random.nextInt(1, 60), random.nextInt(1, 60));
+                return LocalTime.of(ThreadLocalRandom.current().nextInt(0, 24), ThreadLocalRandom.current().nextInt(0, 60), ThreadLocalRandom.current().nextInt(0, 60));
             case "t_dtm":
-                return LocalDateTime.of(LocalDate.ofEpochDay(randomDay), LocalTime.of(random.nextInt(1, 24), random.nextInt(1, 60), random.nextInt(1, 60)));
+                return LocalDateTime.of(LocalDate.ofEpochDay(randomDay), LocalTime.of(ThreadLocalRandom.current().nextInt(0, 24), ThreadLocalRandom.current().nextInt(0, 60), ThreadLocalRandom.current().nextInt(0, 60)));
             case "t_ts":
-                Instant instant = Instant.now().minusSeconds(random.nextInt(1000000));
+                Instant instant = Instant.now().minusSeconds(ThreadLocalRandom.current().nextInt(1000000));
                 return new Timestamp(instant.toEpochMilli());
             case "t_tsz":
-                return ZonedDateTime.now(ZoneId.of("UTC")).minusSeconds(random.nextInt(1000000));
+                return ZonedDateTime.now(ZoneId.of("UTC")).minusSeconds(ThreadLocalRandom.current().nextInt(1000000));
             case "t_inst":
-                return Instant.now().minusSeconds(random.nextInt(1000000));
+                return Instant.now().minusSeconds(ThreadLocalRandom.current().nextInt(1000000));
             case "t_insz":
                 // insz in DateEntry is ZonedDateTime
-                return ZonedDateTime.now().minusSeconds(random.nextInt(1000000));
+                return ZonedDateTime.now().minusSeconds(ThreadLocalRandom.current().nextInt(1000000));
             case "t_yr":
-                return Year.of(1900 + random.nextInt(200));
+                return Year.of(1900 + ThreadLocalRandom.current().nextInt(200));
             case "t_mon":
-                return Month.of(1 + random.nextInt(12));
+                return Month.of(1 + ThreadLocalRandom.current().nextInt(12));
             case "t_day":
-                return DayOfWeek.of(1 + random.nextInt(7));
+                return DayOfWeek.of(1 + ThreadLocalRandom.current().nextInt(7));
             case "t_ym":
-                return YearMonth.of(1900 + random.nextInt(200), 1 + random.nextInt(12));
+                return YearMonth.of(1900 + ThreadLocalRandom.current().nextInt(200), 1 + ThreadLocalRandom.current().nextInt(12));
             case "t_md":
-                return MonthDay.of(1 + random.nextInt(12), 1 + random.nextInt(28));
+                return MonthDay.of(1 + ThreadLocalRandom.current().nextInt(12), 1 + ThreadLocalRandom.current().nextInt(28));
             default:
                 return null;
         }
     }
 
     public String generateString(int minLength, int maxLength) {
-        int length = minLength + random.nextInt(maxLength - minLength + 1);
+        int length = ThreadLocalRandom.current().nextInt(minLength, maxLength + 1);
         StringBuilder sb = new StringBuilder(length);
-        int wordLength = Math.min(4, random.nextInt(10));
+        int wordLength = Math.min(4, ThreadLocalRandom.current().nextInt(10));
         int wordIndex = 0;
         for (int i = 0; i < length; i++, wordIndex++) {
             if (wordIndex == wordLength) {
                 sb.append(' ');
-                wordLength = Math.min(4, random.nextInt(10));
-                if (wordLength > 4) {
-//                    System.out.println("FLASH FLASH FLASH");
-                }
+                wordLength = Math.min(4, ThreadLocalRandom.current().nextInt(10));
                 wordIndex = 0;
             }
-            sb.append((char) ('a' + random.nextInt(26)));
+            sb.append((char) ('a' + ThreadLocalRandom.current().nextInt(26)));
         }
         return sb.toString();
     }
@@ -148,8 +153,7 @@ public class RandomDataGenerator {
 
     public int generateInt(int minLength, int maxLength) {
         // Generate a random double within the range [min, max)
-        double randomValue = minLength + (maxLength - minLength) * random.nextDouble();
-        BigDecimal bigDecimal = new BigDecimal(randomValue);
-        return bigDecimal.abs().shortValue();
+        double randomValue = ThreadLocalRandom.current().nextDouble(minLength, maxLength);
+        return (int) Math.abs(randomValue);
     }
 }

@@ -5,13 +5,13 @@ import io.github.datakore.jsont.errors.collector.ErrorCollector;
 import io.github.datakore.jsont.grammar.schema.ast.NamespaceT;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriter;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriterBuilder;
-import org.antlr.v4.runtime.CharStream;
-import org.antlr.v4.runtime.CharStreams;
+import io.github.datakore.jsont.util.StepCounter;
 
-import java.io.IOException;
+import java.io.InputStream;
 import java.io.StringWriter;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 public final class JsonTConfig {
     final NamespaceT namespaceT;
@@ -19,6 +19,7 @@ public final class JsonTConfig {
     final AdapterRegistry adapterRegistry;
     final int bufferSize;
     final Path errorFile;
+    private Consumer<StepCounter> monitor;
 
 
     public JsonTConfig(NamespaceT namespaceT, ErrorCollector errorCollector, AdapterRegistry adapterRegistry, int bufferSize, Path errorFile) {
@@ -29,18 +30,14 @@ public final class JsonTConfig {
         this.errorFile = errorFile;
     }
 
-    public JsonTExecution source(Path path) {
-        Objects.requireNonNull(path, "Source cannot be null");
-        try {
-            return new JsonTExecution(this, CharStreams.fromPath(path));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    public JsonTConfig withMonitor(Consumer<StepCounter> monitor) {
+        this.monitor = monitor;
+        return this;
     }
 
-    public JsonTExecution source(CharStream stream) {
+    public JsonTExecution source(InputStream stream) {
         Objects.requireNonNull(stream, "Source cannot be null");
-        return new JsonTExecution(this, stream);
+        return new JsonTExecution(this, stream, this.monitor);
     }
 
     public <T> String stringify(Class<T> clazz) {

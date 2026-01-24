@@ -38,6 +38,15 @@ public class ArrayType extends BaseType {
         return ValueNodeKind.ARRAY;
     }
 
+    @Override
+    public boolean isObject() {
+        return this.elementType.isObject();
+    }
+
+    @Override
+    public boolean isEnum() {
+        return this.elementType.isEnum();
+    }
 
     @Override
     public boolean isArray() {

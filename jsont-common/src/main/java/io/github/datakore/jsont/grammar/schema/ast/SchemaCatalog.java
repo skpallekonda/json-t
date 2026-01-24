@@ -285,7 +285,7 @@ public class SchemaCatalog {
             StringBuilder enums = new StringBuilder();
             for (Map.Entry<String, EnumModel> entry : enumModelMap.entrySet()) {
                 if (enums.length() > 0) {
-                    enums.append(",");
+                    enums.append(", ");
                 }
                 enums.append(entry.getValue());
             }
@@ -299,7 +299,7 @@ public class SchemaCatalog {
         StringBuilder schemas = new StringBuilder();
         for (Map.Entry<String, SchemaModel> entry : schemaModelMap.entrySet()) {
             if (schemas.length() > 0) {
-                schemas.append(",");
+                schemas.append(", ");
             }
             schemas.append(entry.getValue());
         }

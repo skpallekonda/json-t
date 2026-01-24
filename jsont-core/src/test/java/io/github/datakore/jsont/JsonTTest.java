@@ -17,14 +17,12 @@ import io.github.datakore.jsont.grammar.data.RowNode;
 import io.github.datakore.jsont.parser.DataRowVisitor;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriter;
 import io.github.datakore.jsont.stringify.StreamingJsonTWriterBuilder;
-import org.antlr.v4.runtime.CharStream;
-import org.antlr.v4.runtime.CharStreams;
+import io.github.datakore.jsont.util.ProgressMonitor;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.StringWriter;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -33,7 +31,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -57,13 +54,15 @@ public class JsonTTest {
 
     @Test
     void shouldProduceSchemaStringify() throws IOException {
-        StreamingJsonTWriter<AllTypeHolder> writer = getTypedStreamWriter("src/test/resources/all-type-schema.jsont", AllTypeHolder.class, null, adapter1, adapter2);
-        StringWriter sw = new StringWriter();
-        writer.stringify(sw, AllTypeHolder.class);
-        System.out.println(sw);
+        try (InputStream is = new FileInputStream("src/test/resources/all-type-schema.jsont")) {
+            StreamingJsonTWriter<AllTypeHolder> writer = getTypedStreamWriter(is, AllTypeHolder.class, null, adapter1, adapter2);
+            StringWriter sw = new StringWriter();
+            writer.stringify(sw, AllTypeHolder.class);
+            System.out.println(sw);
+        }
     }
 
-    private <T> StreamingJsonTWriter<T> getTypedStreamWriter(String path, Class<T> clazz, DataGenerator<T> gen, SchemaAdapter<?>... adapters) throws IOException {
+    private <T> StreamingJsonTWriter<T> getTypedStreamWriter(InputStream path, Class<T> clazz, DataGenerator<T> gen, SchemaAdapter<?>... adapters) throws IOException {
         JsonTConfig config = getJsonTConfig(path, adapters);
         StreamingJsonTWriterBuilder<T> builder = new StreamingJsonTWriterBuilder<T>()
                 .registry(config.getAdapters())
@@ -75,9 +74,7 @@ public class JsonTTest {
                 .build(clazz.getSimpleName());
     }
 
-    private JsonTConfig getJsonTConfig(String schemaPath, SchemaAdapter<?>... adapters) throws IOException {
-        Path scPath = Paths.get(schemaPath);
-        assert scPath.toFile().exists();
+    private JsonTConfig getJsonTConfig(InputStream scPath, SchemaAdapter<?>... adapters) throws IOException {
         return JsonT.configureBuilder()
                 .withAdapters(adapters)
                 .withErrorCollector(errorCollector).source(scPath).build();
@@ -89,10 +86,12 @@ public class JsonTTest {
         User u1 = new User(123, "sasikp", "ADMIN", add);
         u1.setEmail("sasikp@abcdef.com");
         u1.setTags(new String[]{"programmer"});
-        StreamingJsonTWriter<User> writer = getTypedStreamWriter("src/test/resources/ns-schema.jsont", User.class, null, adapter1, adapter2);
-        StringWriter sw = new StringWriter();
-        writer.stringify(u1, sw, true).block();
-        System.out.println(sw);
+        try (InputStream is = new FileInputStream("src/test/resources/ns-schema.jsont")) {
+            StreamingJsonTWriter<User> writer = getTypedStreamWriter(is, User.class, null, adapter1, adapter2);
+            StringWriter sw = new StringWriter();
+            writer.stringify(u1, sw, true);
+            System.out.println(sw);
+        }
     }
 
     @Test
@@ -103,22 +102,24 @@ public class JsonTTest {
         StringEntryAdapter a4 = new StringEntryAdapter();
         ArrayEntryAdapter a5 = new ArrayEntryAdapter();
         DataGenerator<AllTypeHolder> gen = new AllTypeHolderDataGen();
-        StreamingJsonTWriter<AllTypeHolder> stringifier = getTypedStreamWriter(
-                "src/test/resources/all-type-schema.jsont", AllTypeHolder.class, gen, a1, a2, a3, a4, a5);
         String outFile = String.format("10_000_000-%d.jsont", System.currentTimeMillis());
         Path path = Paths.get(outFile);
-        path = Files.createFile(path);
-        try (FileWriter writer = new FileWriter(path.toFile())) {
-            Consumer<Long> progressMonitor = batchCount -> System.out.println("Completed batch " + batchCount);
-            stringifier.stringify(writer, 1_000_000, 25000, 25, false,progressMonitor)
-                    .block();
+        Files.createFile(path);
+        long totalRecords = 100_000;
+        long batchSize = 5_000;
+        long progressMonitoringWindow = 10;
+        ProgressMonitor progressMonitor = new ProgressMonitor(totalRecords, batchSize, progressMonitoringWindow);
+        progressMonitor.startProgress();
+        try (InputStream is = new FileInputStream("src/test/resources/all-type-schema.jsont")) {
+            StreamingJsonTWriter<AllTypeHolder> stringifier = getTypedStreamWriter(is, AllTypeHolder.class, gen, a1, a2, a3, a4, a5);
+            try (FileWriter writer = new FileWriter(path.toFile())) {
+                stringifier.stringify(writer, totalRecords, (int) batchSize, 25, false, progressMonitor);
+            }
         }
-        System.out.println(outFile);
+        progressMonitor.endProgress();
     }
 
-    private JsonTConfig getJsonTConfig(Path errorPath) throws IOException {
-        Path schemaPath = Paths.get("src/test/resources/all-type-schema.jsont");
-        assert schemaPath.toFile().exists();
+    private JsonTConfig getJsonTConfig(InputStream schemaPath, Path errorPath) throws IOException {
         AllTypeHolderAdapter a1 = new AllTypeHolderAdapter();
         DateTypeAdapter a2 = new DateTypeAdapter();
         NumberTypeAdapter a3 = new NumberTypeAdapter();
@@ -136,7 +137,6 @@ public class JsonTTest {
     void shouldParseAllTypeData() throws IOException {
         Path schemaPath = Paths.get("10000000-1768667773899.jsont");
         assert schemaPath.toFile().exists();
-        CharStream schemaStream = CharStreams.fromPath(schemaPath);
         AtomicLong rowsProcessed = new AtomicLong();
         Instant strt = Instant.now();
         DataStream dataStream = new DataStream() {
@@ -167,53 +167,61 @@ public class JsonTTest {
             }
         };
         DataRowVisitor listener = new DataRowVisitor(errorCollector, null, dataStream);
-        ParserExecutor.executeDataParse(schemaStream, errorCollector, listener);
-        Instant end = Instant.now();
-        System.out.println("Total number of records read is " + rowsProcessed.get());
-        System.out.printf("Took %s to process %d records", Duration.between(strt, end), rowsProcessed.get());
+        try (InputStream schemaStream = new FileInputStream(schemaPath.toFile())) {
+            ParserExecutor.executeDataParse(schemaStream, errorCollector, listener);
+            Instant end = Instant.now();
+            System.out.println("Total number of records read is " + rowsProcessed.get());
+            System.out.printf("Took %s to process %d records", Duration.between(strt, end), rowsProcessed.get());
+        }
     }
 
     @Test
     void shouldReadDataAsList() throws IOException {
-        JsonTConfig config = JsonT.configureBuilder()
-                .withAdapters(new AddressAdapter()).withAdapters(new UserAdapter())
-                .withErrorCollector(new DefaultErrorCollector())
-                .source(scPath)
-                .build();
+        Path schemaPath = Paths.get("src/test/resources/all-type-schema.jsont");
+        String dataPath = "500000-1767884033236.jsont";
+        try (InputStream is = new FileInputStream(schemaPath.toString())) {
+            JsonTConfig config = JsonT.configureBuilder()
+                    .withAdapters(new AddressAdapter()).withAdapters(new UserAdapter())
+                    .withErrorCollector(new DefaultErrorCollector())
+                    .source(is)
+                    .build();
+            try (FileInputStream fis = new FileInputStream(dataPath)) {
+                // Collect stream into a list
+                List<User> userList = config.source(fis)
+                        .convert(User.class, 2)
+                        .collectList()
+                        .block();
 
-        CharStream dataStream = CharStreams.fromPath(datPath);
-
-        // Collect stream into a list
-        List<User> userList = config.source(dataStream)
-                .convert(User.class, 2)
-                .collectList()
-                .block();
-
-        assertEquals(total, userList.size());
-        System.out.println(userList);
+                Assertions.assertNotNull(userList);
+                assertEquals(total, userList.size());
+                System.out.println(userList);
+            }
+        }
     }
 
     @Test
     void shouldParseUsingJsonTExecution() throws IOException {
         String dataFile = "src/test/resources/all-type-sample.jsont";
+        Path schemaPath = Paths.get("src/test/resources/all-type-schema.jsont");
         Path dataPath = Paths.get(dataFile);
-        assert dataPath.toFile().exists();
         Path errorPath = Paths.get(dataFile.concat(".csv"));
-        JsonTConfig config = getJsonTConfig(errorPath);
-        JsonTExecution execution = config.source(dataPath);
-
+        assert dataPath.toFile().exists();
         AtomicLong rowsProcessed = new AtomicLong();
         Instant start = Instant.now();
-
-        execution.parse(4) // Use 4 parallel threads
-                .doOnNext(row -> {
-                    long count = rowsProcessed.incrementAndGet();
-                    if (count % 10 == 0) {
-                        System.out.printf("Processed %d rows so far - time elapsed %s \n", count, Duration.between(start, Instant.now()));
-                    }
-                })
-                .blockLast(); // Wait for completion
-
+        try (
+                InputStream is = new FileInputStream(schemaPath.toFile());
+                InputStream dataStream = new FileInputStream(dataPath.toFile())) {
+            JsonTConfig config = getJsonTConfig(is, errorPath);
+            JsonTExecution execution = config.source(dataStream);
+            execution.parse() // Use 4 parallel threads
+                    .doOnNext(row -> {
+                        long count = rowsProcessed.incrementAndGet();
+                        if (count % 10 == 0) {
+                            System.out.printf("Processed %d rows so far - time elapsed %s \n", count, Duration.between(start, Instant.now()));
+                        }
+                    })
+                    .blockLast(); // Wait for completion
+        }
         Instant end = Instant.now();
         System.out.println("Total number of records read is " + rowsProcessed.get());
         System.out.printf("Took %s to process %d records", Duration.between(start, end), rowsProcessed.get());

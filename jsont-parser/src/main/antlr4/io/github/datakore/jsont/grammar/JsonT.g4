@@ -147,18 +147,22 @@ dataRow
     ;
 
 value
-    : scalarValue
+    : nullValue
+    | scalarValue
     | enumValue
     | objectValue
     | arrayValue
+    ;
+
+nullValue
+    : NULL
+    | UNSPECIFIED
     ;
 
 scalarValue
     : STRING
     | NUMBER
     | BOOLEAN
-    | UNSPECIFIED
-    | NULL
     ;
 
 enumValue
