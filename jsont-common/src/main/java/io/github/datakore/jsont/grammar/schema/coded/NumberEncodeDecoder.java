@@ -18,33 +18,33 @@ public class NumberEncodeDecoder implements EncodeDecoder {
     private final StringEncodeDecoder stringEncodeDecoder = new StringEncodeDecoder();
 
     private static Object handlePureNumberTypes(JsonBaseType jsonBaseType, String raw, BigDecimal bd) {
-        switch (jsonBaseType.name()) {
-            case "K_I16":
+        switch (jsonBaseType) {
+            case I16:
                 return bd.shortValue();
-            case "K_I32":
+            case I32:
                 return bd.intValue();
-            case "K_I64":
+            case I64:
                 return bd.longValue();
-            case "K_U16":
+            case U16:
                 if (bd.compareTo(BigDecimal.ZERO) < 0) {
                     throw new DataException("Invalid scalar value: " + bd);
                 }
                 return bd.shortValue();
-            case "K_U32":
+            case U32:
                 if (bd.compareTo(BigDecimal.ZERO) < 0) {
                     throw new DataException("Invalid scalar value: " + bd);
                 }
                 return bd.intValue();
-            case "K_U64":
+            case U64:
                 if (bd.compareTo(BigDecimal.ZERO) < 0) {
                     throw new DataException("Invalid scalar value: " + bd);
                 }
                 return bd.longValue();
-            case "K_D32":
+            case D32:
                 return bd.floatValue();
-            case "K_D64":
+            case D64:
                 return bd.doubleValue();
-            case "K_D128":
+            case D128:
                 return bd;
             default:
                 String message = String.format("Invalid type %s, to decode < %s >", jsonBaseType.identifier(), raw);

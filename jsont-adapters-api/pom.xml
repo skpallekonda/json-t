@@ -19,5 +19,33 @@
         </dependency>
     </dependencies>
 
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>io.github.datakore</groupId>
+                <artifactId>jsont-maven-plugin</artifactId>
+                <version>0.0.4-SNAPSHOT</version>
+                <configuration>
+                    <schemaFolder>src/test/resources</schemaFolder>
+                    <packageName>com.example.models</packageName>
+                    <temporalTypeMapping>
+                        <DATE>java.util.Date</DATE>
+                        <TIMESTAMP>java.time.Instant</TIMESTAMP>
+                    </temporalTypeMapping>
+                    <arrayHandler>List</arrayHandler>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>generate-models</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate-models</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
 
 </project>

@@ -14,6 +14,7 @@ import io.github.datakore.marketplace.entity.Order;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -47,12 +48,13 @@ public class StringifyUtil {
     }
 
     public Path setupTestFileFor(long recordCount) throws IOException {
-        int batchSize = (int) Math.max(recordCount/100,1000);
+        int batchSize = (int) Math.max(recordCount / 100, 1000);
         int flushEveryNBatches = 10;
         long progressWindowSize = Math.min(50, recordCount / (batchSize + flushEveryNBatches));
         boolean includeSchema = true;
         String outFileBatch = String.format("%d", recordCount);
-        ProgressMonitor onBatchComplete = new ProgressMonitor(recordCount, batchSize, progressWindowSize);
+        StringWriter stringWriter = new StringWriter();
+        ProgressMonitor onBatchComplete = new ProgressMonitor(recordCount, batchSize, progressWindowSize, stringWriter);
         String outFileName = String.format("jsont-benchmark/target/marketplace_data-%s.jsont", outFileBatch);
         File outFile = new File(outFileName);
         try (FileWriter writer = new FileWriter(outFile)) {
@@ -61,6 +63,7 @@ public class StringifyUtil {
             stringifier.stringify(writer, recordCount, batchSize, flushEveryNBatches, false, onBatchComplete);
             onBatchComplete.endProgress();
         }
+        System.out.printf(stringWriter.toString());
         return Paths.get(outFile.getAbsolutePath());
     }
 

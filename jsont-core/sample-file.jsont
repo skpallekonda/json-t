@@ -1,7 +1,0 @@
-{
-	data-schema: User,
-	data: [
-        { 123456,"sasikp0","test@sasikp.com0", { "34a Perumbakkam0","Chennai0","600150"},["developer0", "admin0"]},
-        { 123457,"sasikp1","test@sasikp.com1", { "34a Perumbakkam1","Chennai1","600151"},["developer1", "admin1"]}
-    ]
-}

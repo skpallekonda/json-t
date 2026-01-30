@@ -19,9 +19,12 @@ public class BinaryEncodeDecoder implements EncodeDecoder {
         String lexerType = jsonBaseType.lexerValueType();
         switch (lexerType) {
             case "Binary":
-                if (raw.startsWith("0x") && JsonBaseType.K_BIN.equals(jsonBaseType)) {
+                // Note: K_BIN was used for base64, K_HEX for hex string.
+                // The logic here seems to imply K_BIN is also hex if it starts with "0x"
+                // This might be a bug in the original logic, but I'm just updating the enum name.
+                if (raw.startsWith("0x") && JsonBaseType.BIN.equals(jsonBaseType)) {
                     return Base64.getDecoder().decode(raw.substring(2));
-                } else if (JsonBaseType.K_HEX.equals(jsonBaseType)) {
+                } else if (JsonBaseType.HEX.equals(jsonBaseType)) {
                     return hexToBytes(raw);
                 }
             default:
@@ -54,9 +57,9 @@ public class BinaryEncodeDecoder implements EncodeDecoder {
             return "null";
         }
         JsonBaseType jsonBaseType = ((ScalarType) fieldModel.getFieldType()).elementType();
-        if (JsonBaseType.K_BIN.equals(jsonBaseType)) {
+        if (JsonBaseType.BIN.equals(jsonBaseType)) {
             return Base64.getEncoder().encodeToString((byte[]) object);
-        } else if (JsonBaseType.K_HEX.equals(jsonBaseType)) {
+        } else if (JsonBaseType.HEX.equals(jsonBaseType)) {
             return bytesToHex((byte[]) object);
         }
         String message = String.format("Invalid type %s, to encode < %s >", jsonBaseType.identifier(), object);

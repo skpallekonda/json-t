@@ -13,8 +13,6 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAccessor;
-import java.util.Calendar;
-import java.util.Date;
 import java.util.Locale;
 
 public class DateEncodeDecoder implements EncodeDecoder {
@@ -63,34 +61,34 @@ public class DateEncodeDecoder implements EncodeDecoder {
             return null;
         final String value = StringUtils.removeQuotes(raw);
         assert value != null;
-        switch (jsonBaseType.name()) {
-            case "K_DATE":
+        switch (jsonBaseType) {
+            case DATE:
                 return yyyyMMdd.parse(value, LocalDate::from);
-            case "K_TIME":
+            case TIME:
                 return HHmmss.parse(value, LocalTime::from);
-            case "K_DATETIME":
+            case DATETIME:
                 return yyyyMMddHHmmss.parse(value, LocalDateTime::from);
-            case "K_TIMESTAMP":
+            case TIMESTAMP:
                 return new Timestamp(new BigDecimal(value).longValue());
-            case "K_INST":
+            case INST:
                 try {
                     return yyyyMMddTHHmmss.parse(value, Instant::from);
                 } catch (Exception e) {
                     return Instant.ofEpochSecond(new BigDecimal(value).longValue());
                 }
-            case "K_TSZ":
+            case TSZ:
                 return yyyyMMddTHHmmssZ.parse(value, ZonedDateTime::from);
-            case "K_INSTZ":
+            case INSTZ:
                 return yyyyMMddTHHmmssPlusHHmm.parse(value, ZonedDateTime::from);
-            case "K_YEAR":
+            case YEAR:
                 return yyyy.parse(value, Year::from);
-            case "K_MON":
+            case MON:
                 return monthFormatter.parse(value, Month::from);
-            case "K_DAY":
+            case DAY:
                 return MonthDay.parse(value);
-            case "K_YEARMON":
+            case YEARMON:
                 return yearMonth.parseBest(value, YearMonth::from);
-            case "K_MNDAY":
+            case MNDAY:
                 return monthDay.parseBest(value, MonthDay::from);
             default:
                 String message = String.format("Invalid type %s, to decode < %s >", jsonBaseType.identifier(), raw);
@@ -105,34 +103,34 @@ public class DateEncodeDecoder implements EncodeDecoder {
         }
         TemporalAccessor temporal = getTemporalAccessor(obj);
         JsonBaseType jsonBaseType = ((ScalarType) fieldModel.getFieldType()).elementType();
-        switch (jsonBaseType.name()) {
-            case "K_DATE":
+        switch (jsonBaseType) {
+            case DATE:
                 return yyyyMMdd.format(temporal);
-            case "K_TIME":
+            case TIME:
                 return HHmmss.format(temporal);
-            case "K_DATETIME":
+            case DATETIME:
                 return yyyyMMddHHmmss.format(temporal);
-            case "K_TIMESTAMP":
+            case TIMESTAMP:
                 return String.valueOf(getEpochMillis(temporal));
-            case "K_INST":
+            case INST:
                 try {
                     return surroundByQuote(yyyyMMddTHHmmss.format(temporal));
                 } catch (Exception e) {
                     return surroundByQuote(String.valueOf(getEpochMillis(temporal)));
                 }
-            case "K_TSZ":
+            case TSZ:
                 return surroundByQuote(yyyyMMddTHHmmssZ.format(temporal));
-            case "K_INSTZ":
+            case INSTZ:
                 return surroundByQuote(yyyyMMddTHHmmssPlusHHmm.format(temporal));
-            case "K_YEAR":
+            case YEAR:
                 return surroundByQuote(yyyy.format(temporal));
-            case "K_MON":
+            case MON:
                 return surroundByQuote(monthEncoder.format(temporal));
-            case "K_DAY":
+            case DAY:
                 return surroundByQuote(DayOfWeek.from(temporal).toString());
-            case "K_YEARMON":
+            case YEARMON:
                 return surroundByQuote(yearMonthEncoder.format(temporal));
-            case "K_MNDAY":
+            case MNDAY:
                 return surroundByQuote(monthDayEncoder.format(temporal));
             default:
                 String message = String.format("Invalid type %s, to encode < %s >", jsonBaseType.identifier(), obj);
@@ -140,27 +138,20 @@ public class DateEncodeDecoder implements EncodeDecoder {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private static TemporalAccessor getTemporalAccessor(Object obj) {
-        TemporalAccessor temporal;
-
-        // 1. Normalize everything to a Modern Java Time object using instanceof
+        // 1. Native Java Time support
         if (obj instanceof TemporalAccessor) {
-            // Handles LocalDate, LocalDateTime, ZonedDateTime, etc.
-            temporal = (TemporalAccessor) obj;
-        } else if (obj instanceof Timestamp) {
-            // Legacy SQL Timestamp -> LocalDateTime
-            temporal = ((Timestamp) obj).toLocalDateTime();
-        } else if (obj instanceof Date) {
-            // Legacy java.util.Date / java.sql.Date -> ZonedDateTime (System Default)
-            temporal = ((Date) obj).toInstant().atZone(ZoneId.systemDefault());
-        } else if (obj instanceof Calendar) {
-            // Legacy Calendar -> ZonedDateTime (Uses Calendar's specific TimeZone)
-            Calendar cal = (Calendar) obj;
-            temporal = cal.toInstant().atZone(cal.getTimeZone().toZoneId());
-        } else {
-            throw new IllegalArgumentException("Unsupported type: " + obj.getClass());
+            return (TemporalAccessor) obj;
         }
-        return temporal;
+
+        // 2. Check Registry for custom adapters (including legacy types like Date, Calendar)
+        TemporalAdapter adapter = TemporalAdapterRegistry.getAdapter(obj.getClass());
+        if (adapter != null) {
+            return adapter.toTemporal(obj);
+        }
+
+        throw new IllegalArgumentException("Unsupported type: " + obj.getClass() + ". Please register a TemporalAdapter.");
     }
 
     long getEpochMillis(TemporalAccessor temporal) {

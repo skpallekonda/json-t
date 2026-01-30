@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicLong;
@@ -43,7 +44,7 @@ public class JsonTStructureAnalyzerTest {
         NamespaceT ns = ParserExecutor.validateSchema(schemaResult, errorCollector);
         ChunkContext chunkContext = ParserExecutor.validateDataSchema(dataResult, ns);
         AtomicLong counter = new AtomicLong();
-        ProgressMonitor monitor = new ProgressMonitor(10000, 2, 10, true);
+        ProgressMonitor monitor = new ProgressMonitor(10000, 2, 10, true,new StringWriter());
         monitor.startProgress();
         try (InputStream inputStream = Files.newInputStream(Paths.get(path))) {
             ScanStage stage = new ScanStage(inputStream, chunkContext, monitor);
@@ -68,7 +69,7 @@ public class JsonTStructureAnalyzerTest {
         ChunkContext chunkContext = ParserExecutor.validateDataSchema(dataResult, ns);
         AtomicLong counter = new AtomicLong();
         int batchSize = 10000;
-        ProgressMonitor monitor = new ProgressMonitor(totalRecords, batchSize, 50, true);
+        ProgressMonitor monitor = new ProgressMonitor(totalRecords, batchSize, 50, true,new StringWriter());
         monitor.startProgress();
         try (InputStream inputStream = Files.newInputStream(Paths.get(String.format(path, totalRecords)))) {
             ScanStage stage = new ScanStage(inputStream, chunkContext, monitor);

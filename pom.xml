@@ -205,6 +205,7 @@
         <module>jsont-internal</module>
         <module>jsont-core</module>
         <module>jsont-benchmark</module>
+        <module>jsont-maven-plugin</module>
     </modules>
 
 </project>

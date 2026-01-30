@@ -1,0 +1,14 @@
+{
+  namespace: {
+    baseUrl: "https://api.datakore.com/v1",
+    catalogs: [
+    {
+      schemas: [
+        Order: {
+          u64: orderId,str: orderNumber,
+          date: orderDate,<OrderStatus>: orderStatus,
+          <Customer>: customer,
+          <OrderLineItem>[]: lineItems,
+          <Payment>: payment,
+          <Shipping>: shipping,
+          d64: subtotal,d64: totalTax,d64: totalDiscount,d64: shippingCost,d64: grandTotal,date: createdAt,date: updatedAt,str: createdBy?,str: lastModifiedBy?}, Payment: {<PaymentMethod>: paymentMethod,str: transactionId,date: paymentDate,d64: amount,str: currency,<CardDetails>: cardDetails?}, Category: {str: categoryId,str: categoryName,str: department}, Address: {str: street,str: city,str: state,str: zipCode,str: country}, Customer: {u64: customerId,str: firstName,str: lastName,str: email,str: phoneNumber,<Address>: billingAddress,<Address>: shippingAddress?}, OrderLineItem: {u64: lineItemId,str: sku,str: productName,u32: quantity,d64: unitPrice,d64: discount?,d64: tax,d64: totalPrice,<Category>: category}, Shipping: {str: carrier,str: trackingNumber,date: estimatedDelivery,date: actualDelivery?,d64: shippingCost,<ShippingMethod>: shippingMethod}, CardDetails: {str: last4Digits,str: cardType,date: expiryDate}],enums: [ShippingMethod: [EXPRESS,OVERNIGHT,STANDARD], OrderStatus: [CANCELLED,DELIVERED,CONFIRMED,PENDING,SHIPPED], PaymentMethod: [CRYPTO,PAYPAL,DEBIT_CARD,CREDIT_CARD]]}]}}
