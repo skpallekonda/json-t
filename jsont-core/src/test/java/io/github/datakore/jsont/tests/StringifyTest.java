@@ -48,7 +48,7 @@ public class StringifyTest extends BaseTests {
         long totalRecords = 100;
         int batchSize = 10;
         int flushSize = 5;
-        ProgressMonitor monitor = new ProgressMonitor(totalRecords, batchSize, flushSize);
+        ProgressMonitor monitor = new ProgressMonitor(totalRecords, batchSize, flushSize,sw);
         monitor.startProgress();
         stringifier.stringify(sw, totalRecords, batchSize, flushSize, false, monitor);
         monitor.endProgress();
@@ -65,7 +65,7 @@ public class StringifyTest extends BaseTests {
         long totalRecords = 2;
         int batchSize = 1;
         int flushSize = 5;
-        ProgressMonitor monitor = new ProgressMonitor(totalRecords, batchSize, flushSize);
+        ProgressMonitor monitor = new ProgressMonitor(totalRecords, batchSize, flushSize,sw);
         monitor.startProgress();
         stringifier.stringify(sw, totalRecords, batchSize, flushSize, false, monitor);
         monitor.endProgress();

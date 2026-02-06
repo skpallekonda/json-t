@@ -9,6 +9,7 @@ import io.github.datakore.jsont.util.StepCounter;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.StringWriter;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,7 +32,8 @@ public class ParseToConvertTests extends BaseTests {
         writer = Files.newBufferedWriter(temp, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         long batchSize = Math.max(recordCount / 100, 10);
         long flushSize = Math.min(5, batchSize / 10);
-        ProgressMonitor monitor = new ProgressMonitor(recordCount, batchSize, flushSize);
+        StringWriter stringWriter = new StringWriter();
+        ProgressMonitor monitor = new ProgressMonitor(recordCount, batchSize, flushSize, stringWriter);
         monitor.startProgress();
         stringifier.stringify(writer, recordCount, (int) batchSize, (int) flushSize, includeSchema, monitor);
         monitor.endProgress();
@@ -73,7 +75,8 @@ public class ParseToConvertTests extends BaseTests {
         try {
             long count = 1_000_000;
             Path path = generateUserData(count, true);
-            ProgressMonitor monitor = new ProgressMonitor(count, 10_000, 50, true);
+            StringWriter stringWriter = new StringWriter();
+            ProgressMonitor monitor = new ProgressMonitor(count, 10_000, 50, true, stringWriter);
             AtomicLong counter = new AtomicLong(0);
             monitor.startProgress();
             jsonTConfig.withMonitor(monitor).source(path).convert(User.class, 4)
@@ -81,6 +84,7 @@ public class ParseToConvertTests extends BaseTests {
                             user -> monitor.accept(new StepCounter("client", counter.incrementAndGet()))
                     ).blockLast();
             monitor.endProgress();
+            System.out.println(stringWriter.toString());
         } catch (Exception e) {
             e.printStackTrace();
         }

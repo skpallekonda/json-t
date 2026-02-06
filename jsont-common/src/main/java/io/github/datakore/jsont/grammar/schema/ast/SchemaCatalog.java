@@ -37,6 +37,33 @@ public class SchemaCatalog {
         this.enumNodes = Collections.emptyList();
     }
 
+    public List<SchemaModel> resolvedSchemaModels() {
+        return this.schemaModelMap.values().stream().filter(this::isValidSchema).collect(Collectors.toList());
+    }
+
+    public List<SchemaModel> unresolvedSchemaModels() {
+        return this.schemaModelMap.values().stream().filter(s -> !isValidSchema(s)).collect(Collectors.toList());
+    }
+
+    public List<EnumModel> resolvedEnumModels() {
+        return new ArrayList<>(this.enumModelMap.values());
+    }
+
+    private boolean isValidSchema(SchemaModel model) {
+        for (FieldModel fm : model.fields()) {
+            if (fm.getFieldType().isEnum()) {
+                if (!this.enumModelMap.containsKey(fm.getFieldType().type())) {
+                    return false;
+                }
+            } else if (fm.getFieldType().isObject()) {
+                if (!this.schemaModelMap.containsKey(fm.getFieldType().type())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private void resolveEnumModels() {
         enumNodes.stream().map(this::resolveEnum).forEach(m -> enumModelMap.putIfAbsent(m.name(), m));
         enumNodes.clear();

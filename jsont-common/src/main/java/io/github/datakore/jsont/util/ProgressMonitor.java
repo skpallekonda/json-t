@@ -1,5 +1,7 @@
 package io.github.datakore.jsont.util;
 
+import java.io.IOException;
+import java.io.Writer;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -13,23 +15,29 @@ public class ProgressMonitor implements Consumer<StepCounter> {
     private final boolean reportingAtRecordLevel;
     private Instant start = Instant.now();
     private long startMemory;
+    private final Writer writer;
 
-    public ProgressMonitor(long totalRecords, long batchSize, long progressWindowSize, boolean reportingAtRecordLevel) {
+    public ProgressMonitor(long totalRecords, long batchSize, long progressWindowSize, boolean reportingAtRecordLevel, Writer writer) {
         this.totalRecords = totalRecords;
         this.batchSize = batchSize;
         this.windowSize = Math.max(5, progressWindowSize);
         this.reportingAtRecordLevel = reportingAtRecordLevel;
         this.startMemory = getUsedMemory();
+        this.writer = writer;
     }
 
-    public ProgressMonitor(long totalRecords, long batchSize, long progressWindowSize) {
-        this(totalRecords, batchSize, progressWindowSize, false);
+    public ProgressMonitor(long totalRecords, long batchSize, long progressWindowSize, Writer writer) {
+        this(totalRecords, batchSize, progressWindowSize, false, writer);
     }
 
     public void startProgress() {
         this.start = Instant.now();
         this.startMemory = getUsedMemory();
-        System.out.printf("%s: Start Memory: %s%n", DateTimeFormatter.ISO_INSTANT.format(this.start), formatMemory(this.startMemory));
+        try {
+            writer.write(String.format("%s: Start Memory: %s%n", DateTimeFormatter.ISO_INSTANT.format(this.start), formatMemory(this.startMemory)));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -67,15 +75,19 @@ public class ProgressMonitor implements Consumer<StepCounter> {
         long memoryDiff = currentMemory - startMemory;
         String sign = memoryDiff >= 0 ? "+" : "";
 
-        System.out.printf("%s: Batch %d: [%s] %d records, %d rec/sec, Mem: %s (%s%s)%n",
-                DateTimeFormatter.ISO_INSTANT.format(now),
-                batchNo,
-                stepName,
-                recordsProcessed,
-                throughput,
-                formatMemory(currentMemory),
-                sign,
-                formatMemory(memoryDiff));
+        try {
+            writer.write(String.format("%s: Batch %d: [%s] %d records, %d rec/sec, Mem: %s (%s%s)%n",
+                    DateTimeFormatter.ISO_INSTANT.format(now),
+                    batchNo,
+                    stepName,
+                    recordsProcessed,
+                    throughput,
+                    formatMemory(currentMemory),
+                    sign,
+                    formatMemory(memoryDiff)));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public Duration endProgress() {
@@ -87,8 +99,12 @@ public class ProgressMonitor implements Consumer<StepCounter> {
         long memoryDiff = endMemory - startMemory;
         String sign = memoryDiff >= 0 ? "+" : "";
 
-        System.out.printf("Total Records: %d, Duration: %s, Throughput: %d rec/sec, Final Mem: %s (%s%s)%n",
-                totalRecords, totalDuration, throughput, formatMemory(endMemory), sign, formatMemory(memoryDiff));
+        try {
+            writer.write(String.format("Total Records: %d, Duration: %s, Throughput: %d rec/sec, Final Mem: %s (%s%s)%n",
+                    totalRecords, totalDuration, throughput, formatMemory(endMemory), sign, formatMemory(memoryDiff)));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         return totalDuration;
     }
 

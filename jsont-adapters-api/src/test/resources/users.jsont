@@ -1,0 +1,45 @@
+{
+  namespace: {
+    baseUrl: "https://api.datakore.com/v1",
+    catalogs: [
+      {
+        schemas: [
+          User: {
+            i32: id,
+            str: username(minLength=5,maxLength='10'),
+            str: email?(minLength=8),
+            <Role>: role,
+            str[]: tags?,
+            <Address1>: address
+          },
+          Address1: {
+             str: city,
+             str: zipCode,
+             <Status>: status?
+          }
+        ],
+        enums: [
+          Status: [ ACTIVE, INACTIVE, SUSPENDED ],
+          Role: [ ADMIN, USER ]
+        ]
+      }
+    ]
+  }
+}
+{
+    data-schema: User,
+    data: [
+        {
+            1,
+            "alice_dev",
+            "alice@example.com",
+            ADMIN, ["t1","t2"],
+            {"Chennai","60015",ACTIVE}
+        },
+        {
+            2,
+            "bob_guest",
+            null,USER,null,{"Delhi","123456",SUSPENDED}
+        }
+    ]
+}

@@ -37,16 +37,16 @@ public class StringEncodeDecoder implements EncodeDecoder {
 
     private Object handlePureStringTypeDecodes(JsonBaseType jsonBaseType, String raw) {
         switch (jsonBaseType.name()) {
-            case "K_STRING":
-            case "K_NSTR":
+            case "STRING":
+            case "NSTR":
                 return raw;
-            case "K_URI":
+            case "URI":
                 try {
                     return new URL(raw);
                 } catch (MalformedURLException e) {
                     return URI.create(raw);
                 }
-            case "K_UUID":
+            case "UUID":
                 return UUID.fromString(raw);
             default:
                 return raw;

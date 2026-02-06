@@ -2,7 +2,11 @@ package io.github.datakore.jsont.chunk;
 
 public class AnalysisResult {
     public enum FileVariant {
-        SCHEMA_ONLY, FULL_DOCUMENT, DATA_BLOCK, FRAGMENT
+        SCHEMA_ONLY, FULL_DOCUMENT, DATA_BLOCK, FRAGMENT;
+
+        public static boolean containsSchema(FileVariant variant) {
+            return variant == SCHEMA_ONLY || variant == FULL_DOCUMENT;
+        }
     }
 
     private final FileVariant variant;

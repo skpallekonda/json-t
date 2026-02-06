@@ -1,8 +1,6 @@
 package io.github.datakore.jsont.entity;
 
-import io.github.datakore.jsont.JsonTType;
-
-public class Address implements JsonTType {
+public class Address {
     private String status;
     private String city;
     private String zipCode;

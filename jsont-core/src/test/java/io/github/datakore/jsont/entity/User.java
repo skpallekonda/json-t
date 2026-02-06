@@ -1,8 +1,6 @@
 package io.github.datakore.jsont.entity;
 
-import io.github.datakore.jsont.JsonTType;
-
-public class User implements JsonTType {
+public class User {
     private int id;
     private String userName;
     private String email;

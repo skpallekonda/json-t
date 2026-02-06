@@ -5,25 +5,25 @@ import java.util.List;
 
 public enum JsonBaseType {
     //Signed Integers
-    K_I16("i16"), K_I32("i32"), K_I64("i64"),
+    I16("i16"), I32("i32"), I64("i64"),
     //Unsigned Integers
-    K_U16("u16"), K_U32("u32"), K_U64("u64"),
+    U16("u16"), U32("u32"), U64("u64"),
     // Signed Decimals
-    K_D32("d32"), K_D64("d64"), K_D128("d128"),
+    D32("d32"), D64("d64"), D128("d128"),
     // Number based date, time, datetime, timestamp
-    K_DATE("date"), K_TIME("time"), K_DATETIME("dtm"), K_TIMESTAMP("ts"),
+    DATE("date"), TIME("time"), DATETIME("dtm"), TIMESTAMP("ts"),
     // String based date, time, datetime, timestamp with zone
-    K_TSZ("tsz"), K_INST("inst"), K_INSTZ("insz"),
+    TSZ("tsz"), INST("inst"), INSTZ("insz"),
     // Integer year, month, day
-    K_YEAR("yr"), K_MON("mon"), K_DAY("day"),
+    YEAR("yr"), MON("mon"), DAY("day"),
     // String based year+mon, month+day
-    K_YEARMON("ym"), K_MNDAY("md"),
+    YEARMON("ym"), MNDAY("md"),
     // Base64, ObjectID, Hex
-    K_BIN("b64"), K_OID("oid"), K_HEX("hex"),
+    BIN("b64"), OID("oid"), HEX("hex"),
     // Raw string, normalized string, URI, UUID
-    K_STRING("str"), K_NSTR("nstr"), K_URI("uri"), K_UUID("uuid"),
+    STRING("str"), NSTR("nstr"), URI("uri"), UUID("uuid"),
     // Boolean
-    K_BOOLEAN("bool");
+    BOOLEAN("bool");
 
     private final String identifier;
     private final List<String> numberTypes;
