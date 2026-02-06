@@ -6,7 +6,7 @@
 
     <groupId>io.github.datakore</groupId>
     <artifactId>jsont-parent</artifactId>
-    <version>0.0.5</version>
+    <version>0.0.6-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <!-- Project Metadata -->

@@ -6,7 +6,7 @@
     <parent>
         <groupId>io.github.datakore</groupId>
         <artifactId>jsont-parent</artifactId>
-        <version>0.0.5</version>
+        <version>0.0.6-SNAPSHOT</version>
     </parent>
 
     <artifactId>jsont-adapters-api</artifactId>
@@ -24,7 +24,7 @@
             <plugin>
                 <groupId>io.github.datakore</groupId>
                 <artifactId>jsont-maven-plugin</artifactId>
-                <version>0.0.5</version>
+                <version>0.0.6-SNAPSHOT</version>
                 <configuration>
                     <schemaFolder>src/test/resources</schemaFolder>
                     <packageName>com.example.models</packageName>
