@@ -69,11 +69,15 @@ public class AdapterEmitter {
                         .endControlFlow();
             } else if (fm.getFieldType() instanceof ArrayType) {
                 // Use CollectionAdapterRegistry
+                // We need to use the raw type for the adapter variable and lookup to avoid generic type mismatch errors
+                // e.g. CollectionAdapter<List> adapter = Registry.getAdapter(List.class);
+                TypeName rawType = getRawType(fieldType);
+                
                 setSwitchBuilder.addStatement("$T adapter = $T.getAdapter($T.class)",
-                        ParameterizedTypeName.get(ClassName.get(CollectionAdapter.class), fieldType),
+                        ParameterizedTypeName.get(ClassName.get(CollectionAdapter.class), rawType),
                         ClassName.get(CollectionAdapterRegistry.class),
-                        fieldType);
-                setSwitchBuilder.addStatement("entity.set$L(adapter.fromList((java.util.List) value))", typeResolver.capitalize(fieldName));
+                        rawType);
+                setSwitchBuilder.addStatement("entity.set$L(($T) adapter.fromList((java.util.List) value))", typeResolver.capitalize(fieldName), fieldType);
             } else if (fm.getFieldType() instanceof ScalarType && typeResolver.isTemporalMapped((ScalarType) fm.getFieldType())) {
                 // Use TemporalAdapterRegistry
                 setSwitchBuilder.addStatement("$T adapter = $T.getAdapter($T.class)",
@@ -123,5 +127,12 @@ public class AdapterEmitter {
         } catch (IOException e) {
             log.error("Failed to write adapter class " + adapterClassName, e);
         }
+    }
+
+    private TypeName getRawType(TypeName typeName) {
+        if (typeName instanceof ParameterizedTypeName) {
+            return ((ParameterizedTypeName) typeName).rawType;
+        }
+        return typeName;
     }
 }
