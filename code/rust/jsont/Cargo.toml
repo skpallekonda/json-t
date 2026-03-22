@@ -1,0 +1,14 @@
+[package]
+name = "jsont"
+version = "0.1.0"
+edition = "2024"
+description = "JsonT schema, data model, builders, parser and stringifier"
+
+[dependencies]
+pest = "2"
+pest_derive = "2"
+rust_decimal = { version = "1", features = ["serde"] }
+thiserror = "1"
+
+[dev-dependencies]
+# nothing yet — integration tests live in tests/
