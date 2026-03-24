@@ -7,9 +7,10 @@
 //   - Error types re-exported from error::*
 // =============================================================================
 
+pub mod builder;
+pub mod diagnostic;
 pub mod error;
 pub mod model;
-pub mod builder;
 
 // parse and stringify are implementation modules, not public API modules —
 // their logic is exposed through the trait impls on the model types.
@@ -17,29 +18,33 @@ pub(crate) mod parse;
 pub(crate) mod stringify;
 
 // Re-export everything a consumer needs at the crate root.
-pub use error::{JsonTError, ParseError, EvalError, TransformError, StringifyError};
-pub use model::namespace::{JsonTNamespace, JsonTCatalog};
-pub use model::schema::{JsonTSchema, SchemaKind, SchemaOperation};
-pub use model::field::{JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
-pub use model::constraint::{
-    JsonTConstraint,
-    ValueConstraintKey, LengthConstraintKey,
-    ArrayConstraintNbr, ArrayConstraintBool,
-};
-pub use model::validation::{
-    JsonTValidationBlock, JsonTRule, JsonTExpression,
-    UnaryOp, BinaryOp,
-};
-pub use model::enumdef::JsonTEnum;
-pub use model::data::{JsonTValue, JsonTNumber, JsonTRow, JsonTArray};
-pub use builder::namespace::JsonTNamespaceBuilder;
 pub use builder::catalog::JsonTCatalogBuilder;
-pub use builder::schema::JsonTSchemaBuilder;
-pub use builder::field::JsonTFieldBuilder;
+pub use builder::data::{JsonTArrayBuilder, JsonTRowBuilder};
 pub use builder::enumdef::JsonTEnumBuilder;
-pub use builder::validation::JsonTValidationBlockBuilder;
-pub use builder::data::{JsonTRowBuilder, JsonTArrayBuilder};
+pub use builder::field::JsonTFieldBuilder;
 pub use builder::infer::SchemaInferrer;
+pub use builder::namespace::JsonTNamespaceBuilder;
+pub use builder::schema::JsonTSchemaBuilder;
+pub use builder::validation::JsonTValidationBlockBuilder;
+
+// Diagnostic
+pub use diagnostic::sink::{ConsoleSink, FileSink, MemorySink};
+pub use diagnostic::{DiagnosticEvent, EventKind, Severity, SinkError};
+
+// Error
+pub use error::{EvalError, JsonTError, ParseError, StringifyError, TransformError};
+
+// Model
+pub use model::constraint::{
+    ArrayConstraintBool, ArrayConstraintNbr, JsonTConstraint, LengthConstraintKey,
+    ValueConstraintKey,
+};
+pub use model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTValue};
+pub use model::enumdef::JsonTEnum;
+pub use model::field::{JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
+pub use model::namespace::{JsonTCatalog, JsonTNamespace};
+pub use model::schema::{JsonTSchema, SchemaKind, SchemaOperation};
+pub use model::validation::{BinaryOp, JsonTExpression, JsonTRule, JsonTValidationBlock, UnaryOp};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Core traits
@@ -64,11 +69,7 @@ pub trait Evaluatable {
 /// Implementations must accept a SchemaRegistry so derived schemas can
 /// resolve their parent chain at transform time.
 pub trait RowTransformer {
-    fn transform(
-        &self,
-        row: JsonTRow,
-        registry: &SchemaRegistry,
-    ) -> Result<JsonTRow, JsonTError>;
+    fn transform(&self, row: JsonTRow, registry: &SchemaRegistry) -> Result<JsonTRow, JsonTError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,21 +87,33 @@ pub struct StringifyOptions {
 
 impl Default for StringifyOptions {
     fn default() -> Self {
-        Self { pretty: false, indent: 2 }
+        Self {
+            pretty: false,
+            indent: 2,
+        }
     }
 }
 
 impl StringifyOptions {
     pub fn compact() -> Self {
-        Self { pretty: false, indent: 2 }
+        Self {
+            pretty: false,
+            indent: 2,
+        }
     }
 
     pub fn pretty() -> Self {
-        Self { pretty: true, indent: 2 }
+        Self {
+            pretty: true,
+            indent: 2,
+        }
     }
 
     pub fn pretty_with_indent(indent: usize) -> Self {
-        Self { pretty: true, indent }
+        Self {
+            pretty: true,
+            indent,
+        }
     }
 }
 
@@ -156,4 +169,18 @@ impl SchemaRegistry {
         }
         registry
     }
+}
+
+/// Receive and handle diagnostic events emitted during pipeline processing.
+///
+/// Implement this trait to route events to any target:
+/// console, file, database, event stream, etc.
+/// The crate ships three built-in impls: ConsoleSink, FileSink, MemorySink.
+pub trait DiagnosticSink {
+    /// Receive one event. Implementations should not panic; errors should be
+    /// swallowed or stored and surfaced via flush().
+    fn emit(&mut self, event: diagnostic::DiagnosticEvent);
+
+    /// Flush any buffered output. Called by the pipeline at the end of processing.
+    fn flush(&mut self) -> Result<(), diagnostic::SinkError>;
 }
