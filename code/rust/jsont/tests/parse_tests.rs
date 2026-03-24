@@ -13,7 +13,7 @@ use jsont::{
     JsonTFieldKind,
     SchemaKind,
     StringifyOptions,
-    Stringifiable,
+    Stringification,
     SchemaRegistry,
     JsonTRowBuilder,
     JsonTValue,

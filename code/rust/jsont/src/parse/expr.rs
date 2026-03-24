@@ -103,23 +103,28 @@ fn build_unary(pair: Pair<Rule>) -> Result<JsonTExpression, JsonTError> {
         .ok_or_else(|| ParseError::Unexpected("empty unary expression".into()))?;
 
     match first.as_rule() {
-        // "!" token
+        // No unary operator — just a primary expression.
         Rule::primary_expression => build_primary(first),
 
-        _ => {
-            // The first token is the operator symbol; second is the operand.
-            let op = match first.as_str() {
-                "!" => UnaryOp::Not,
-                "-" => UnaryOp::Neg,
-                s   => return Err(ParseError::Unexpected(
-                    format!("unknown unary operator: {}", s)
-                ).into()),
-            };
+        // op_not / op_neg are non-silent named rules; they produce a Pair whose
+        // as_str() is "!" or "-".  The operand follows as the next inner Pair.
+        Rule::op_not => {
             let operand_pair = inner.next()
                 .ok_or_else(|| ParseError::Unexpected("missing unary operand".into()))?;
             let operand = build_expr_pair(operand_pair)?;
-            Ok(JsonTExpression::UnaryOp { op, operand: Box::new(operand) })
+            Ok(JsonTExpression::UnaryOp { op: UnaryOp::Not, operand: Box::new(operand) })
         }
+
+        Rule::op_neg => {
+            let operand_pair = inner.next()
+                .ok_or_else(|| ParseError::Unexpected("missing unary operand".into()))?;
+            let operand = build_expr_pair(operand_pair)?;
+            Ok(JsonTExpression::UnaryOp { op: UnaryOp::Neg, operand: Box::new(operand) })
+        }
+
+        other => Err(ParseError::Unexpected(
+            format!("unexpected rule in unary expression: {:?}", other)
+        ).into()),
     }
 }
 

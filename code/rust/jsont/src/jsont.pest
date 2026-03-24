@@ -258,8 +258,8 @@ field_path_list = { field_path ~ ("," ~ field_path)* }
 // =============================================================================
 
 expression             = { logical_or_expression }
-logical_or_expression  = { logical_and_expression ~ ("||" ~ logical_and_expression)* }
-logical_and_expression = { equality_expression    ~ ("&&" ~ equality_expression)* }
+logical_or_expression  = { logical_and_expression ~ (op_or  ~ logical_and_expression)* }
+logical_and_expression = { equality_expression    ~ (op_and ~ equality_expression)* }
 
 equality_expression = {
     relational_expression ~ ((op_eeq | op_neq) ~ relational_expression)*
@@ -280,9 +280,11 @@ multiplicative_expression = {
 
 // [D-2] Unary minus handled here — NOT as part of the number literal.
 // Both "!" (logical not) and "-" (arithmetic negation) are unary prefix ops.
+// Named op rules are used (not inline literals) so the operator Pair appears
+// in the parse tree and build_unary can read it.
 unary_expression = {
-    ("!" ~ unary_expression)
-    | ("-" ~ unary_expression)
+    (op_not ~ unary_expression)
+    | (op_neg ~ unary_expression)
     | primary_expression
 }
 
@@ -298,17 +300,24 @@ primary_expression = {
 function_call = { FIELDID ~ "(" ~ argument_list? ~ ")" }
 argument_list = { expression ~ ("," ~ expression)* }
 
-// Operators as silent rules — captured via their parent rule node
-op_eeq   = _{ "==" }
-op_neq   = _{ "!=" }
-op_le    = _{ "<=" }
-op_ge    = _{ ">=" }
-op_lt    = _{ "<" }
-op_gt    = _{ ">" }
-op_plus  = _{ "+" }
-op_minus = _{ "-" }
-op_star  = _{ "*" }
-op_div   = _{ "/" }
+// Operators as NON-silent rules so they produce Pair nodes in the parse tree.
+// The parser (build_binary_chain / build_unary) reads them via pair.as_str().
+// Silent rules (_{ }) are invisible to Pairs iterators and would make the
+// operator undetectable at parse time.
+op_or    = { "||" }
+op_and   = { "&&" }
+op_eeq   = { "==" }
+op_neq   = { "!=" }
+op_le    = { "<=" }
+op_ge    = { ">=" }
+op_lt    = { "<" }
+op_gt    = { ">" }
+op_plus  = { "+" }
+op_minus = { "-" }
+op_star  = { "*" }
+op_div   = { "/" }
+op_not   = { "!" }
+op_neg   = { "-" }
 
 
 // =============================================================================

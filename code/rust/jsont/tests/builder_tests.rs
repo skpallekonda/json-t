@@ -26,7 +26,7 @@ use jsont::{
     JsonTFieldKind,
     ScalarType,
     // Traits
-    Stringifiable,
+    Stringification,
     StringifyOptions,
 };
 

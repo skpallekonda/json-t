@@ -2,7 +2,7 @@
 // lib.rs — JsonT crate root
 // =============================================================================
 // Public surface:
-//   - Core traits:  Parseable, Stringifiable, Evaluatable, RowTransformer
+//   - Core traits:  Parseable, Stringification, Evaluatable, RowTransformer
 //   - All model types re-exported from model::*
 //   - Error types re-exported from error::*
 // =============================================================================
@@ -56,7 +56,7 @@ pub trait Parseable: Sized {
 }
 
 /// Serialize a JsonT value back to a JsonT source string.
-pub trait Stringifiable {
+pub trait Stringification {
     fn stringify(&self, options: StringifyOptions) -> String;
 }
 
@@ -76,7 +76,7 @@ pub trait RowTransformer {
 // Supporting types used by the traits above
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Options controlling how Stringifiable output is formatted.
+/// Options controlling how Stringification output is formatted.
 #[derive(Debug, Clone)]
 pub struct StringifyOptions {
     /// Emit human-readable indented output when true; compact single-line otherwise.

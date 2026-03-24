@@ -1,11 +1,11 @@
 // =============================================================================
-// stringify/mod.rs — Stringifiable impls for all model types
+// stringify/mod.rs — Stringification impls for all model types
 // =============================================================================
 // Produces valid JsonT source text from the in-memory model.
 // Pretty-printing indents with `options.indent` spaces per level.
 // =============================================================================
 
-use crate::{Stringifiable, StringifyOptions};
+use crate::{Stringification, StringifyOptions};
 use crate::model::namespace::{JsonTNamespace, JsonTCatalog};
 use crate::model::schema::{JsonTSchema, SchemaKind, SchemaOperation, FieldPath};
 use crate::model::field::{JsonTField, JsonTFieldKind, JsonTFieldType};
@@ -43,7 +43,7 @@ impl<'a> Ctx<'a> {
 // JsonTNamespace
 // =============================================================================
 
-impl Stringifiable for JsonTNamespace {
+impl Stringification for JsonTNamespace {
     fn stringify(&self, options: StringifyOptions) -> String {
         let ctx = Ctx::new(&options);
         let c1 = ctx.deeper();
@@ -499,28 +499,28 @@ fn stringify_array(arr: &JsonTArray) -> String {
 }
 
 // =============================================================================
-// Stringifiable trait impls for data types
+// Stringification trait impls for data types
 // =============================================================================
 
-impl Stringifiable for JsonTValue {
+impl Stringification for JsonTValue {
     fn stringify(&self, _options: StringifyOptions) -> String {
         stringify_value(self)
     }
 }
 
-impl Stringifiable for JsonTRow {
+impl Stringification for JsonTRow {
     fn stringify(&self, _options: StringifyOptions) -> String {
         stringify_row(self)
     }
 }
 
-impl Stringifiable for JsonTArray {
+impl Stringification for JsonTArray {
     fn stringify(&self, _options: StringifyOptions) -> String {
         stringify_array(self)
     }
 }
 
-impl Stringifiable for JsonTExpression {
+impl Stringification for JsonTExpression {
     fn stringify(&self, _options: StringifyOptions) -> String {
         stringify_expr(self)
     }

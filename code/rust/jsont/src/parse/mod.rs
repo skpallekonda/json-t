@@ -14,7 +14,7 @@ use pest_derive::Parser;
 use crate::Parseable;
 use crate::error::{JsonTError, ParseError};
 use crate::model::namespace::{JsonTNamespace, JsonTCatalog};
-use crate::model::data::JsonTValue;
+use crate::model::data::{JsonTValue, JsonTRow, JsonTArray};
 use crate::model::validation::JsonTExpression;
 use crate::model::schema::JsonTSchema;
 use crate::model::field::{JsonTField, ScalarType};
@@ -59,7 +59,11 @@ impl Parseable for JsonTNamespace {
                     mb_ns = Some(walk_namespace(pair)?);
                 }
                 Rule::data_rows => {
-                    // TODO: Phase 4
+                    // Data rows are the sibling of the namespace in the top-level
+                    // json_t rule. JsonTNamespace models schema metadata only and
+                    // does not carry row data. Parse data rows separately using
+                    // Vec<JsonTRow>::parse() on the same source, or on a rows-only
+                    // input. No action needed here.
                 }
                 Rule::EOI => break,
                 _ => {}
@@ -88,6 +92,41 @@ impl Parseable for JsonTValue {
             .ok_or_else(|| ParseError::Unexpected("empty value input".into()))?;
 
         walk_value(pair)
+    }
+}
+
+/// Parse a sequence of data rows.
+///
+/// Input is one or more positional-value objects, comma-separated, with an
+/// optional trailing comma:
+/// ```text
+/// { "alice", 30, true },
+/// { "bob",   25, false }
+/// ```
+/// Each `{ v1, v2, ... }` maps to one `JsonTRow`.
+///
+/// Parsing uses the top-level `json_t` rule so that leading/trailing whitespace
+/// is handled by pest's implicit WHITESPACE insertion around `SOI`/`EOI`.
+/// A namespace block is simply ignored if present.
+impl Parseable for Vec<JsonTRow> {
+    fn parse(input: &str) -> Result<Self, JsonTError> {
+        let mut pairs = JsonTParser::parse(Rule::json_t, input)
+            .map_err(|e| ParseError::Pest(e.to_string()))?;
+
+        let json_t = pairs.next()
+            .ok_or_else(|| ParseError::Unexpected("empty input".into()))?;
+
+        let mut rows = Vec::new();
+        for pair in json_t.into_inner() {
+            if pair.as_rule() == Rule::data_rows {
+                rows = walk_data_rows(pair)?;
+            }
+        }
+
+        if rows.is_empty() {
+            return Err(ParseError::Unexpected("no data rows found in input".into()).into());
+        }
+        Ok(rows)
     }
 }
 
@@ -458,23 +497,50 @@ fn walk_enum_def(pair: Pair<Rule>) -> Result<JsonTEnum, JsonTError> {
     builder.build()
 }
 
+fn walk_data_rows(pair: Pair<Rule>) -> Result<Vec<JsonTRow>, JsonTError> {
+    // data_rows = { data_row ~ ("," ~ data_row)* ~ ","? }
+    // data_row  = { object_value }
+    pair.into_inner()
+        .filter(|p| p.as_rule() == Rule::data_row)
+        .map(|data_row_pair| {
+            let obj = data_row_pair.into_inner().next()
+                .ok_or_else(|| ParseError::Unexpected("empty data_row".into()))?;
+            walk_object_value(obj)
+        })
+        .collect()
+}
+
+fn walk_object_value(pair: Pair<Rule>) -> Result<JsonTRow, JsonTError> {
+    // object_value = { "{" ~ value ~ ("," ~ value)* ~ "}" }
+    // Inline punctuation ("{", ",", "}") produces no pairs; only value children appear.
+    let values: Result<Vec<JsonTValue>, JsonTError> = pair.into_inner()
+        .map(walk_value)
+        .collect();
+    Ok(JsonTRow::new(values?))
+}
+
+fn walk_array_value(pair: Pair<Rule>) -> Result<JsonTArray, JsonTError> {
+    // array_value = { "[" ~ value ~ ("," ~ value)* ~ "]" }
+    let items: Result<Vec<JsonTValue>, JsonTError> = pair.into_inner()
+        .map(walk_value)
+        .collect();
+    Ok(JsonTArray::new(items?))
+}
+
 fn walk_value(pair: Pair<Rule>) -> Result<JsonTValue, JsonTError> {
     match pair.as_rule() {
-        Rule::value | Rule::scalar_value => {
+        // Transparent wrapper rules — descend one level.
+        Rule::value | Rule::scalar_value | Rule::literal => {
             walk_value(pair.into_inner().next().unwrap())
         }
-        Rule::string  => Ok(JsonTValue::str(walk_string(pair)?)),
-        Rule::number  => Ok(JsonTValue::d64(walk_number(pair)?)),
-        Rule::boolean => Ok(JsonTValue::bool(walk_boolean(pair)?)),
-        Rule::null_value => Ok(JsonTValue::Null),
+        Rule::string            => Ok(JsonTValue::str(walk_string(pair)?)),
+        Rule::number            => Ok(JsonTValue::d64(walk_number(pair)?)),
+        Rule::boolean           => Ok(JsonTValue::bool(walk_boolean(pair)?)),
+        Rule::null_value        => Ok(JsonTValue::Null),
         Rule::unspecified_value => Ok(JsonTValue::Unspecified),
-        Rule::enum_value => Ok(JsonTValue::Enum(pair.as_str().to_string())),
-        Rule::object_value => {
-            Err(ParseError::Unexpected("Object value parsing not yet implemented".to_string()).into())
-        }
-        Rule::array_value => {
-            Err(ParseError::Unexpected("Array value parsing not yet implemented".to_string()).into())
-        }
+        Rule::enum_value        => Ok(JsonTValue::Enum(pair.as_str().to_string())),
+        Rule::object_value      => Ok(JsonTValue::Object(walk_object_value(pair)?)),
+        Rule::array_value       => Ok(JsonTValue::Array(walk_array_value(pair)?)),
         _ => panic!("walk_value hit unknown rule: {:?}", pair.as_rule()),
     }
 }
