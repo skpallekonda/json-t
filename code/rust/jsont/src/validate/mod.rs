@@ -23,11 +23,24 @@
 //       .with_sink(Box::new(FileSink::new("errors.log").unwrap()))
 //       .build();
 //
-//   // Validate one or more batches
+//   // Streaming — process one row at a time, O(1) memory for per-row rules:
+//   pipeline.validate_each(parsed_rows, |row| {
+//       // called immediately for every row that has no Fatal issues
+//   });
+//
+//   // Convenience — collect all clean rows into a Vec:
 //   let clean_rows = pipeline.validate_rows(parsed_rows);
 //
 //   // Flush and shut down the sink thread
 //   pipeline.finish()?;
+//
+// # Memory model
+//
+//   Per-row constraints and row-level rules are evaluated in O(1) space.
+//   Uniqueness checking accumulates a HashSet of composite string keys —
+//   O(unique-keys), not O(rows).
+//   Dataset-level aggregate rules (validation.dataset) are not yet
+//   implemented and require a separate pass over all rows.
 //
 // # Non-blocking design
 //
@@ -61,13 +74,22 @@ use crate::DiagnosticSink;
 /// Row-validation pipeline bound to one schema.
 ///
 /// Validates [`JsonTRow`] batches against field constraints and schema rules,
-/// returning only the rows that had no Fatal issues.  Diagnostic events are
-/// delivered asynchronously to all registered sinks so I/O latency never
-/// stalls the validation loop.
+/// delivering clean rows (those with no Fatal issues) either through a
+/// streaming callback ([`validate_each`]) or collected into a [`Vec`]
+/// ([`validate_rows`]).
+///
+/// Diagnostic events are delivered asynchronously to all registered sinks
+/// so I/O latency never stalls the validation loop.
+///
+/// # Memory model
+/// - Per-row constraints and rules: O(1) — truly streaming.
+/// - Uniqueness: O(unique-keys) — only composite key strings are accumulated,
+///   not the row data itself.
+/// - [`validate_rows`] adds O(clean-rows) for the output collection.
 ///
 /// # Lifecycle
 /// 1. Build via [`ValidationPipeline::builder`].
-/// 2. Call [`validate_rows`] one or more times.
+/// 2. Call [`validate_each`] or [`validate_rows`] one or more times.
 /// 3. Call [`finish`] to flush all sinks and join the background thread.
 pub struct ValidationPipeline {
     fields:      Vec<JsonTField>,
@@ -87,23 +109,31 @@ impl ValidationPipeline {
         ValidationPipelineBuilder::new(schema)
     }
 
-    /// Validate `rows` against the schema.
+    /// Validate rows one at a time, calling `on_clean` immediately for each
+    /// row that has no Fatal issues.
     ///
-    /// Returns the rows that had no Fatal issues.  Rows with only Warning or
-    /// Info events are included in the output.  All diagnostic events are sent
-    /// to sinks asynchronously.
+    /// This is the core streaming API:
+    /// - Per-row constraints and row-level rules are evaluated in O(1) space.
+    /// - Uniqueness accumulates O(unique-keys) — key strings only, not rows.
+    /// - Clean rows are handed to `on_clean` without buffering.
     ///
-    /// Uniqueness is checked per-batch: each call to `validate_rows` starts
-    /// with fresh uniqueness state.
-    pub fn validate_rows(&self, rows: Vec<JsonTRow>) -> Vec<JsonTRow> {
-        let start            = Instant::now();
-        let total            = rows.len();
-        let mut clean        = Vec::<JsonTRow>::with_capacity(rows.len());
-        let mut valid_count  = 0usize;
-        let mut warn_count   = 0usize;
+    /// All diagnostic events are sent to sinks asynchronously.
+    ///
+    /// Uniqueness state is local to each `validate_each` call; successive
+    /// calls start with fresh uniqueness state.
+    pub fn validate_each<I, F>(&self, rows: I, mut on_clean: F)
+    where
+        I: IntoIterator<Item = JsonTRow>,
+        F: FnMut(JsonTRow),
+    {
+        let start             = Instant::now();
+        let mut total         = 0usize;
+        let mut valid_count   = 0usize;
+        let mut warn_count    = 0usize;
         let mut invalid_count = 0usize;
 
         // One HashSet per uniqueness rule; lives for the duration of this call.
+        // Accumulates composite key strings — not row data.
         let mut unique_sets: Vec<HashSet<Vec<String>>> = self
             .validation
             .as_ref()
@@ -115,6 +145,7 @@ impl ValidationPipeline {
         }));
 
         for (idx, row) in rows.into_iter().enumerate() {
+            total += 1;
             let mut row_events: Vec<DiagnosticEvent> = Vec::new();
 
             // ── Shape check ───────────────────────────────────────────────
@@ -189,7 +220,8 @@ impl ValidationPipeline {
                     .with_source(&self.schema_name),
                 );
             } else {
-                clean.push(row);
+                // Emit the clean row immediately — no buffering.
+                on_clean(row);
                 if warn_n > 0 {
                     warn_count += 1;
                     self.emit(
@@ -217,14 +249,25 @@ impl ValidationPipeline {
             invalid_rows: invalid_count,
             duration_ms,
         }));
+    }
 
+    /// Convenience wrapper: validate rows and collect clean ones into a `Vec`.
+    ///
+    /// Accepts any value that implements `IntoIterator<Item = JsonTRow>`,
+    /// including `Vec<JsonTRow>`, arrays, or custom iterators.
+    ///
+    /// Internally delegates to [`validate_each`]; only the output collection
+    /// allocates beyond O(unique-keys) working memory.
+    pub fn validate_rows(&self, rows: impl IntoIterator<Item = JsonTRow>) -> Vec<JsonTRow> {
+        let mut clean = Vec::new();
+        self.validate_each(rows, |row| clean.push(row));
         clean
     }
 
     /// Flush all sinks and join the background sink thread.
     ///
-    /// **Must be called** after all `validate_rows` invocations to ensure
-    /// every event is delivered and every sink is flushed.
+    /// **Must be called** after all `validate_each`/`validate_rows` invocations
+    /// to ensure every event is delivered and every sink is flushed.
     pub fn finish(mut self) -> Result<(), SinkError> {
         // Dropping the sender closes the channel → sink thread will drain
         // remaining events, flush all sinks, and exit.

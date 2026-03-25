@@ -36,6 +36,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use jsont::{JsonTRow, JsonTRowBuilder, JsonTValue, Parseable, write_row};
+use jsont::{
+    DiagnosticEvent, DiagnosticSink, SinkError,
+    JsonTFieldBuilder, JsonTSchemaBuilder, ScalarType, ValidationPipeline,
+    model::validation::JsonTValidationBlock,
+    model::schema::FieldPath,
+};
 
 // =============================================================================
 // Tracking allocator
@@ -288,4 +294,217 @@ fn bench_10m() {
     println!("\n=== JsonT Benchmark  10M records ===");
     println!("  Schema: Order {{ i64:id, str:product, i32:quantity, d64:price, enum:status }}");
     run_benchmark(10_000_000);
+}
+
+// =============================================================================
+// Validation benchmarks
+// =============================================================================
+//
+// Measures validation pipeline throughput and peak heap across four variants:
+//
+//   (a) Field constraints only, buffered   — validate_rows() → Vec<JsonTRow>
+//   (b) Field constraints only, streaming  — validate_each() with null callback
+//   (c) Field constraints + uniqueness on id, buffered
+//   (d) Field constraints + uniqueness on id, streaming
+//
+// Constraints applied (all benchmark rows satisfy them — no rejections):
+//   product  : minLength = 2
+//   quantity : minValue = 1.0, maxValue = 99.0
+//   price    : minValue = 0.01
+//
+// Uniqueness on id is trivially satisfied because make_row(i) uses i as the id.
+//
+// Run:
+//   cargo test bench_validate_ -- --nocapture
+// =============================================================================
+
+// ── NullSink — discards all events, eliminates sink I/O from timing ──────────
+
+struct NullSink;
+
+impl DiagnosticSink for NullSink {
+    fn emit(&mut self, _: DiagnosticEvent) {}
+    fn flush(&mut self) -> Result<(), SinkError> { Ok(()) }
+}
+
+// ── Validation schemas ────────────────────────────────────────────────────────
+
+/// Same 5-field Order schema with per-row field constraints (80 % case).
+/// No uniqueness or dataset rules — pure O(1) streaming path.
+fn order_schema_constrained() -> jsont::JsonTSchema {
+    JsonTSchemaBuilder::straight("Order")
+        .field(JsonTFieldBuilder::scalar("id",       ScalarType::I64).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("product",  ScalarType::Str).min_length(2).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("quantity", ScalarType::I32).min_value(1.0).max_value(99.0).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("price",    ScalarType::D64).min_value(0.01).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("status",   ScalarType::Str).build().unwrap()).unwrap()
+        .build()
+        .unwrap()
+}
+
+/// Same schema plus a uniqueness constraint on `id`.
+/// The uniqueness HashSet accumulates O(N) key strings — illustrates the
+/// memory cost of dataset-level constraints vs the O(1) streaming case.
+fn order_schema_with_unique() -> jsont::JsonTSchema {
+    let validation = JsonTValidationBlock {
+        rules:   vec![],
+        unique:  vec![vec![FieldPath::single("id")]],
+        dataset: vec![],
+    };
+    JsonTSchemaBuilder::straight("Order")
+        .field(JsonTFieldBuilder::scalar("id",       ScalarType::I64).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("product",  ScalarType::Str).min_length(2).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("quantity", ScalarType::I32).min_value(1.0).max_value(99.0).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("price",    ScalarType::D64).min_value(0.01).build().unwrap()).unwrap()
+        .field(JsonTFieldBuilder::scalar("status",   ScalarType::Str).build().unwrap()).unwrap()
+        .validation(validation)
+        .build()
+        .unwrap()
+}
+
+// ── Result type ───────────────────────────────────────────────────────────────
+
+struct ValidateResult {
+    total:          usize,
+    clean:          usize,
+    validate_time:  Duration,
+    throughput_rms: f64,   // rows per millisecond
+    peak_heap:      usize,
+}
+
+// ── validate_rows — buffered, collects clean rows into Vec ────────────────────
+
+fn do_validate_buffered(rows: Vec<JsonTRow>, schema: jsont::JsonTSchema) -> ValidateResult {
+    let pipeline = ValidationPipeline::builder(schema)
+        .without_console()
+        .with_sink(Box::new(NullSink))
+        .build();
+
+    let total    = rows.len();
+    let baseline = reset_peak();
+
+    let t0    = Instant::now();
+    let clean = pipeline.validate_rows(rows);
+    let elapsed = t0.elapsed();
+
+    pipeline.finish().unwrap();
+
+    let peak = peak_above(baseline);
+    let ms   = (elapsed.as_secs_f64() * 1_000.0).max(0.001);
+    ValidateResult {
+        total,
+        clean:          clean.len(),
+        validate_time:  elapsed,
+        throughput_rms: total as f64 / ms,
+        peak_heap:      peak,
+    }
+}
+
+// ── validate_each — streaming, zero output buffering ─────────────────────────
+
+fn do_validate_streaming(rows: Vec<JsonTRow>, schema: jsont::JsonTSchema) -> ValidateResult {
+    let pipeline = ValidationPipeline::builder(schema)
+        .without_console()
+        .with_sink(Box::new(NullSink))
+        .build();
+
+    let total    = rows.len();
+    let baseline = reset_peak();
+    let mut clean_count = 0usize;
+
+    let t0 = Instant::now();
+    pipeline.validate_each(rows, |_| clean_count += 1);
+    let elapsed = t0.elapsed();
+
+    pipeline.finish().unwrap();
+
+    let peak = peak_above(baseline);
+    let ms   = (elapsed.as_secs_f64() * 1_000.0).max(0.001);
+    ValidateResult {
+        total,
+        clean:          clean_count,
+        validate_time:  elapsed,
+        throughput_rms: total as f64 / ms,
+        peak_heap:      peak,
+    }
+}
+
+// ── Print helper ──────────────────────────────────────────────────────────────
+
+fn print_vr(label: &str, vr: &ValidateResult) {
+    println!(
+        "  validate  {:>5} records  [{:<33}]  time {:>10}  {:>9.1} rec/ms  clean {:>5}  peak {:>10}",
+        fmt_count(vr.total),
+        label,
+        fmt_duration(vr.validate_time),
+        vr.throughput_rms,
+        fmt_count(vr.clean),
+        fmt_bytes(vr.peak_heap),
+    );
+}
+
+// ── Core validation benchmark logic ──────────────────────────────────────────
+
+fn run_validation_benchmark(count: usize) {
+    // (a) Field constraints only — buffered output (validate_rows)
+    //     Peak heap includes the output Vec<JsonTRow> for all clean rows.
+    {
+        let rows: Vec<JsonTRow> = (0..count as u64).map(make_row).collect();
+        let vr = do_validate_buffered(rows, order_schema_constrained());
+        print_vr("constraints, buffered", &vr);
+    }
+
+    // (b) Field constraints only — streaming (validate_each, null callback)
+    //     Output is not buffered; peak heap reflects only per-row working memory.
+    {
+        let rows: Vec<JsonTRow> = (0..count as u64).map(make_row).collect();
+        let vr = do_validate_streaming(rows, order_schema_constrained());
+        print_vr("constraints, streaming", &vr);
+    }
+
+    // (c) Field constraints + uniqueness on id — buffered
+    //     Peak heap = output Vec + uniqueness HashSet (O(N) key strings).
+    {
+        let rows: Vec<JsonTRow> = (0..count as u64).map(make_row).collect();
+        let vr = do_validate_buffered(rows, order_schema_with_unique());
+        print_vr("constraints+unique, buffered", &vr);
+    }
+
+    // (d) Field constraints + uniqueness on id — streaming
+    //     No output Vec; only the uniqueness HashSet grows with N.
+    //     Directly shows the O(unique-keys) cost of uniqueness checking.
+    {
+        let rows: Vec<JsonTRow> = (0..count as u64).map(make_row).collect();
+        let vr = do_validate_streaming(rows, order_schema_with_unique());
+        print_vr("constraints+unique, streaming", &vr);
+    }
+}
+
+// ── Test entry points ─────────────────────────────────────────────────────────
+
+#[test]
+fn bench_validate_1k() {
+    println!("\n=== JsonT Validation Benchmark  1K records ===");
+    println!("  Schema: Order {{ i64:id, str:product, i32:quantity, d64:price, str:status }}");
+    println!("  Constraints: product minLength(2), quantity [1..99], price >= 0.01");
+    println!("  All benchmark rows satisfy all constraints — no rejections.");
+    run_validation_benchmark(1_000);
+}
+
+#[test]
+fn bench_validate_100k() {
+    println!("\n=== JsonT Validation Benchmark  100K records ===");
+    println!("  Schema: Order {{ i64:id, str:product, i32:quantity, d64:price, str:status }}");
+    println!("  Constraints: product minLength(2), quantity [1..99], price >= 0.01");
+    println!("  All benchmark rows satisfy all constraints — no rejections.");
+    run_validation_benchmark(100_000);
+}
+
+#[test]
+fn bench_validate_1m() {
+    println!("\n=== JsonT Validation Benchmark  1M records ===");
+    println!("  Schema: Order {{ i64:id, str:product, i32:quantity, d64:price, str:status }}");
+    println!("  Constraints: product minLength(2), quantity [1..99], price >= 0.01");
+    println!("  All benchmark rows satisfy all constraints — no rejections.");
+    run_validation_benchmark(1_000_000);
 }

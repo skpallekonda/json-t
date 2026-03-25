@@ -503,7 +503,26 @@ fn test_conditional_requirement_excluded() {
     assert!(cond_violations[0].is_fatal());
 }
 
-// ── 12. ProcessCompleted summary event emitted ────────────────────────────
+// ── 12. validate_each — streaming callback, no Vec buffering ──────────────
+
+#[test]
+fn test_validate_each_streaming() {
+    let schema = order_schema();
+    let pipeline = ValidationPipeline::builder(schema)
+        .without_console()
+        .build();
+
+    // Supply rows as a lazy iterator — no Vec allocation for input.
+    let input = (1i64..=3).map(|i| make_order(i, "Item", 1, 1.0));
+
+    let mut received = Vec::new();
+    pipeline.validate_each(input, |row| received.push(row));
+    pipeline.finish().unwrap();
+
+    assert_eq!(received.len(), 3, "all three rows should arrive via callback");
+}
+
+// ── 13. ProcessCompleted summary event emitted ────────────────────────────
 
 #[test]
 fn test_process_completed_event_emitted() {
