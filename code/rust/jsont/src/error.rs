@@ -120,6 +120,13 @@ pub enum TransformError {
     /// The Vec contains the schema names visited before the cycle was detected.
     #[error("cyclic schema derivation: {}", .0.join(" -> "))]
     CyclicDerivation(Vec<String>),
+
+    /// A `filter(...)` predicate evaluated to false — the row is excluded.
+    ///
+    /// This is not a hard error; callers should skip the row and continue
+    /// processing the rest of the stream.
+    #[error("row filtered out by predicate")]
+    Filtered,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

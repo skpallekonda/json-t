@@ -18,6 +18,9 @@ pub mod validate;
 pub(crate) mod parse;
 pub(crate) mod stringify;
 
+// transform: RowTransformer impl for JsonTSchema
+pub(crate) mod transform;
+
 // Streaming row API — bypasses pest and per-row String allocation.
 pub use parse::rows::parse_rows;
 pub use stringify::rows::{write_row, write_rows};
@@ -48,7 +51,7 @@ pub use model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTValue};
 pub use model::enumdef::JsonTEnum;
 pub use model::field::{JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
 pub use model::namespace::{JsonTCatalog, JsonTNamespace};
-pub use model::schema::{JsonTSchema, SchemaKind, SchemaOperation};
+pub use model::schema::{FieldPath, JsonTSchema, RenamePair, SchemaKind, SchemaOperation};
 pub use model::validation::{BinaryOp, JsonTExpression, JsonTRule, JsonTValidationBlock, UnaryOp};
 
 // ─────────────────────────────────────────────────────────────────────────────
