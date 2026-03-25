@@ -5,6 +5,8 @@
 // Pretty-printing indents with `options.indent` spaces per level.
 // =============================================================================
 
+pub(crate) mod rows;
+
 use crate::{Stringification, StringifyOptions};
 use crate::model::namespace::{JsonTNamespace, JsonTCatalog};
 use crate::model::schema::{JsonTSchema, SchemaKind, SchemaOperation, FieldPath};

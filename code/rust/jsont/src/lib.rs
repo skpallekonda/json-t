@@ -17,6 +17,10 @@ pub mod model;
 pub(crate) mod parse;
 pub(crate) mod stringify;
 
+// Streaming row API — bypasses pest and per-row String allocation.
+pub use parse::rows::parse_rows;
+pub use stringify::rows::{write_row, write_rows};
+
 // Re-export everything a consumer needs at the crate root.
 pub use builder::catalog::JsonTCatalogBuilder;
 pub use builder::data::{JsonTArrayBuilder, JsonTRowBuilder};

@@ -7,6 +7,7 @@
 // =============================================================================
 
 pub mod expr;
+pub(crate) mod rows;
 
 use pest::Parser;
 use pest_derive::Parser;
@@ -95,38 +96,22 @@ impl Parseable for JsonTValue {
     }
 }
 
-/// Parse a sequence of data rows.
+/// Parse a sequence of data rows using the hand-written streaming scanner.
 ///
-/// Input is one or more positional-value objects, comma-separated, with an
-/// optional trailing comma:
-/// ```text
-/// { "alice", 30, true },
-/// { "bob",   25, false }
-/// ```
-/// Each `{ v1, v2, ... }` maps to one `JsonTRow`.
+/// Input must contain data rows only — no namespace block.  Each
+/// `{ v1, v2, ... }` maps to one `JsonTRow`.  Rows are separated by commas;
+/// a single trailing comma after the last row is accepted.
 ///
-/// Parsing uses the top-level `json_t` rule so that leading/trailing whitespace
-/// is handled by pest's implicit WHITESPACE insertion around `SOI`/`EOI`.
-/// A namespace block is simply ignored if present.
+/// All numeric literals are emitted as `JsonTValue::d64(f64)` because there
+/// is no schema context available at parse time.
 impl Parseable for Vec<JsonTRow> {
     fn parse(input: &str) -> Result<Self, JsonTError> {
-        let mut pairs = JsonTParser::parse(Rule::json_t, input)
-            .map_err(|e| ParseError::Pest(e.to_string()))?;
-
-        let json_t = pairs.next()
-            .ok_or_else(|| ParseError::Unexpected("empty input".into()))?;
-
-        let mut rows = Vec::new();
-        for pair in json_t.into_inner() {
-            if pair.as_rule() == Rule::data_rows {
-                rows = walk_data_rows(pair)?;
-            }
-        }
-
-        if rows.is_empty() {
+        let mut row_vec = Vec::new();
+        let count = rows::parse_rows(input, |row| row_vec.push(row))?;
+        if count == 0 {
             return Err(ParseError::Unexpected("no data rows found in input".into()).into());
         }
-        Ok(rows)
+        Ok(row_vec)
     }
 }
 
@@ -495,19 +480,6 @@ fn walk_enum_def(pair: Pair<Rule>) -> Result<JsonTEnum, JsonTError> {
     }
     
     builder.build()
-}
-
-fn walk_data_rows(pair: Pair<Rule>) -> Result<Vec<JsonTRow>, JsonTError> {
-    // data_rows = { data_row ~ ("," ~ data_row)* ~ ","? }
-    // data_row  = { object_value }
-    pair.into_inner()
-        .filter(|p| p.as_rule() == Rule::data_row)
-        .map(|data_row_pair| {
-            let obj = data_row_pair.into_inner().next()
-                .ok_or_else(|| ParseError::Unexpected("empty data_row".into()))?;
-            walk_object_value(obj)
-        })
-        .collect()
 }
 
 fn walk_object_value(pair: Pair<Rule>) -> Result<JsonTRow, JsonTError> {
