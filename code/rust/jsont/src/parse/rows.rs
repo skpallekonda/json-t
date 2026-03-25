@@ -27,6 +27,8 @@
 // the previous pest path which used pair.as_str().trim_matches(quote).
 // =============================================================================
 
+use std::io::{self, BufRead};
+
 use crate::error::{JsonTError, ParseError};
 use crate::model::data::{JsonTArray, JsonTRow, JsonTValue};
 
@@ -81,6 +83,202 @@ pub fn parse_rows(
     }
 
     Ok(count)
+}
+
+// =============================================================================
+// Streaming API — BufRead-based, O(1) memory regardless of file size
+// =============================================================================
+
+/// Parse data rows from any [`BufRead`] source, calling `on_row` once per row.
+///
+/// Unlike [`parse_rows`], this never loads the whole input into memory.
+/// The internal read buffer stays at O(BufReader capacity) — typically 8 KB —
+/// and `current_row` holds at most one row at a time (~1 KB for a complex schema).
+///
+/// # Memory profile
+/// - Read buffer:   O(buf_capacity) — usually 8 KB from `BufReader<File>`.
+/// - Row buffer:    O(one row)      — cleared immediately after `on_row` returns.
+/// - Accumulation: none            — rows are never collected into a `Vec`.
+pub fn parse_rows_streaming(
+    reader: impl BufRead,
+    mut on_row: impl FnMut(JsonTRow),
+) -> Result<usize, JsonTError> {
+    let mut ext      = RowBytesExtractor::new(reader);
+    let mut row_buf  = Vec::<u8>::with_capacity(1024);
+    let mut count    = 0usize;
+
+    loop {
+        match ext.next_row_bytes(&mut row_buf) {
+            Ok(true)  => {
+                let row = Scanner::new(&row_buf).parse_row()?;
+                on_row(row);
+                count += 1;
+            }
+            Ok(false) => break,
+            Err(e)    => {
+                return Err(
+                    ParseError::Unexpected(format!("I/O error during streaming parse: {}", e))
+                        .into(),
+                );
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+/// Iterator that lazily yields [`JsonTRow`] values from any [`BufRead`] source.
+///
+/// Useful when you need to pass a streaming row source to any API that accepts
+/// `IntoIterator<Item = JsonTRow>` — for example [`ValidationPipeline::validate_each`].
+///
+/// # Memory profile
+/// O(1): only one row's worth of bytes is live at a time.
+///
+/// # Example
+/// ```no_run
+/// use std::fs::File;
+/// use std::io::BufReader;
+/// use jsont::RowIter;
+///
+/// let f = File::open("data.jsont").unwrap();
+/// for row in RowIter::new(BufReader::new(f)) {
+///     println!("{:?}", row);
+/// }
+/// ```
+pub struct RowIter<R: BufRead> {
+    ext:      RowBytesExtractor<R>,
+    row_buf:  Vec<u8>,
+    done:     bool,
+}
+
+impl<R: BufRead> RowIter<R> {
+    pub fn new(reader: R) -> Self {
+        Self {
+            ext:     RowBytesExtractor::new(reader),
+            row_buf: Vec::with_capacity(1024),
+            done:    false,
+        }
+    }
+}
+
+impl<R: BufRead> Iterator for RowIter<R> {
+    type Item = JsonTRow;
+
+    fn next(&mut self) -> Option<JsonTRow> {
+        if self.done {
+            return None;
+        }
+        match self.ext.next_row_bytes(&mut self.row_buf) {
+            Ok(true)  => Scanner::new(&self.row_buf).parse_row().ok(),
+            _         => { self.done = true; None }
+        }
+    }
+}
+
+// =============================================================================
+// RowBytesExtractor — private chunk-boundary–transparent byte scanner
+// =============================================================================
+//
+// Wraps any BufRead and uses fill_buf() + consume() to walk bytes without ever
+// loading the whole source into memory.  Scanner state (depth, in_string, …)
+// is kept in struct fields so it survives across fill_buf() refills transparently.
+//
+// Only `{` / `}` depth plus string-escape tracking are needed to reliably find
+// where one row ends and the next begins.  `[` / `]` (array brackets) never
+// delimit a top-level row and so need no separate depth counter.
+
+struct RowBytesExtractor<R: BufRead> {
+    reader:     R,
+    depth:      usize,
+    in_string:  bool,
+    quote_char: u8,
+    escaped:    bool,
+}
+
+impl<R: BufRead> RowBytesExtractor<R> {
+    fn new(reader: R) -> Self {
+        Self { reader, depth: 0, in_string: false, quote_char: 0, escaped: false }
+    }
+
+    /// Fill `out` with the raw bytes of the next complete `{…}` row.
+    ///
+    /// Returns `Ok(true)`  — a row was placed in `out`.
+    /// Returns `Ok(false)` — EOF reached with no pending row.
+    ///
+    /// The caller is responsible for clearing `out` before passing it;
+    /// this method calls `out.clear()` at the start of each new row search.
+    fn next_row_bytes(&mut self, out: &mut Vec<u8>) -> Result<bool, io::Error> {
+        out.clear();
+
+        loop {
+            // Borrow the internal buffer without copying it.
+            let buf = self.reader.fill_buf()?;
+            if buf.is_empty() {
+                return Ok(false); // genuine EOF
+            }
+
+            let mut consumed  = 0usize;
+            let mut row_done  = false;
+
+            for i in 0..buf.len() {
+                let b = buf[i];
+                consumed = i + 1; // always advance past this byte
+
+                if self.in_string {
+                    if self.escaped {
+                        self.escaped = false;
+                    } else if b == b'\\' {
+                        self.escaped = true;
+                    } else if b == self.quote_char {
+                        self.in_string = false;
+                    }
+                    if self.depth > 0 {
+                        out.push(b);
+                    }
+                    continue;
+                }
+
+                // Not inside a string.
+                match b {
+                    b'"' | b'\'' => {
+                        self.in_string  = true;
+                        self.quote_char = b;
+                        if self.depth > 0 {
+                            out.push(b);
+                        }
+                    }
+                    b'{' => {
+                        if self.depth == 0 {
+                            out.clear(); // discard any inter-row whitespace/commas
+                        }
+                        self.depth += 1;
+                        out.push(b);
+                    }
+                    b'}' if self.depth > 0 => {
+                        out.push(b);
+                        self.depth -= 1;
+                        if self.depth == 0 {
+                            row_done = true;
+                            break; // stop consuming this buffer here
+                        }
+                    }
+                    _ => {
+                        if self.depth > 0 {
+                            out.push(b);
+                        }
+                        // depth == 0: skip commas / whitespace between rows
+                    }
+                }
+            }
+
+            self.reader.consume(consumed);
+
+            if row_done {
+                return Ok(true);
+            }
+        }
+    }
 }
 
 // =============================================================================

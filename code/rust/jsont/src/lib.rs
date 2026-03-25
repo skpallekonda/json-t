@@ -23,6 +23,8 @@ pub(crate) mod transform;
 
 // Streaming row API — bypasses pest and per-row String allocation.
 pub use parse::rows::parse_rows;
+pub use parse::rows::parse_rows_streaming;
+pub use parse::rows::RowIter;
 pub use stringify::rows::{write_row, write_rows};
 
 // Re-export everything a consumer needs at the crate root.

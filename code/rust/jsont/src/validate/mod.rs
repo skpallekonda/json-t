@@ -264,6 +264,61 @@ impl ValidationPipeline {
         clean
     }
 
+    /// Validate a single row and immediately call `on_clean` if it passes.
+    ///
+    /// Designed for per-row streaming pipelines where the caller already drives
+    /// the row source (e.g. a `RowIter` inside a channel worker).  Unlike
+    /// [`validate_each`], this method emits no `ProcessStarted` / `ProcessCompleted`
+    /// lifecycle events and maintains no uniqueness state — call it in a tight loop
+    /// without the per-batch overhead.
+    ///
+    /// Field constraints and row-level rules are applied exactly as in
+    /// [`validate_each`].  Any diagnostic events produced are forwarded to the
+    /// registered sinks asynchronously.
+    pub fn validate_one(&self, row: JsonTRow, on_clean: impl FnOnce(JsonTRow)) {
+        let idx = 0usize; // no meaningful batch index in single-shot mode
+        let mut events: Vec<DiagnosticEvent> = Vec::new();
+
+        if row.fields.len() != self.fields.len() {
+            self.emit(
+                DiagnosticEvent::fatal(EventKind::ShapeMismatch {
+                    field:    "(row)".into(),
+                    expected: format!("{} field(s)", self.fields.len()),
+                    actual:   format!("{} field(s)", row.fields.len()),
+                })
+                .at_row(idx)
+                .with_source(&self.schema_name),
+            );
+            return;
+        }
+
+        // Field constraints
+        for (field, value) in self.fields.iter().zip(row.fields.iter()) {
+            events.extend(constraint::check_field(field, value, idx));
+        }
+
+        // Row-level rules (skipped when any field check was fatal)
+        if !has_fatal(&events) {
+            if let Some(validation) = &self.validation {
+                events.extend(rule::check_rules(
+                    &self.fields,
+                    validation,
+                    &row.fields,
+                    idx,
+                ));
+            }
+        }
+
+        let is_clean = !has_fatal(&events);
+        for event in events {
+            self.emit(event);
+        }
+
+        if is_clean {
+            on_clean(row);
+        }
+    }
+
     /// Flush all sinks and join the background sink thread.
     ///
     /// **Must be called** after all `validate_each`/`validate_rows` invocations

@@ -70,7 +70,54 @@ The initial Rust implementation used the pest PEG parser for data rows — the s
 
 The pest parser materialises every token for every row into a `Pair<Rule>` tree with `Rc` overhead before walking a single node. A 42 MB file produced a 3.8 GB tree — 90× amplification. The streaming scanner processes bytes left-to-right and emits one `JsonTRow` to a callback as each row completes, keeping memory proportional to the parsed rows themselves rather than the raw text.
 
-### Comparison with Java (Round 1)
+---
+
+## Rust Marketplace Order Benchmarks (complex nested schema)
+
+> **Schema:** `Order` — 17 fields including nested objects: `<Customer>` (with `<Address>`), `<OrderLineItem>[]` (with `<Category>`), `<Payment>` (with `<CardDetails>?`), `<Shipping>`<br />
+> **Schema file:** `code/rust/jsont/tests/orders-schema.jsont`<br />
+> **Typical record size:** ~532–541 bytes/row (compact JsonT on disk)<br />
+> **Validation rules:** 5 field constraints (`orderNumber` minLength, 4× `d64` min_value) + 4 row-level expression rules (`grandTotal > 0`, `subtotal >= 0`, `totalTax >= 0`, `shippingCost >= 0`)<br />
+> **Platform:** Windows 11, x86-64, `cargo test --release`
+
+### Step 1 — Streaming Build + Stringify (O(1) memory)
+
+Each row is constructed, written to a `BufWriter`, and immediately dropped.
+At any instant only **one** `JsonTRow` is live — peak heap stays constant regardless of N.
+
+| Record Count | Build + Stringify (ms) | Throughput     | File size    | Bytes / row | Peak heap (build loop) |
+|:-------------|:----------------------:|:--------------:|:------------:|:-----------:|:----------------------:|
+|       1,000  |                 12.89  |    83.3 rec/ms |   519.32 KB  |      532 B  |               **3.93 KB** |
+|     100,000  |                664.92  |   150.6 rec/ms |    51.30 MB  |      538 B  |               **3.93 KB** |
+|   1,000,000  |             35,880.00  |    27.9 rec/ms |   515.88 MB  |      541 B  |               **3.93 KB** |
+
+> Peak heap of **3.93 KB** across all sizes proves O(1) memory for the streaming build+stringify loop — no accumulation, no batch.
+
+### Step 2 — Parse file into memory
+
+| Record Count | File size  | Parse (ms)  | Throughput     | Byte throughput | Peak heap (load + parse) |
+|:-------------|:----------:|:-----------:|:--------------:|:---------------:|:------------------------:|
+|       1,000  |  519.32 KB |        6.71 |   166.7 rec/ms |      77.4 MB/s  |               4.39 MB    |
+|     100,000  |   51.30 MB |      514.46 |   194.6 rec/ms |      99.7 MB/s  |             440.50 MB    |
+|   1,000,000  |  515.88 MB |   51,020.00 |    19.6 rec/ms |      10.1 MB/s  |               4.30 GB    |
+
+> Peak heap scales with N because `Vec::<JsonTRow>::parse` collects all rows. Each nested `JsonTRow` carries heap-allocated strings for every sub-field. The ~8.5× ratio (peak / file) mirrors the simple-schema result, confirming the in-memory cost is dominated by string representation rather than schema complexity.
+
+### Step 3 — Validate (streaming, NullSink)
+
+Validation uses `validate_each` — no output buffering, O(1) heap irrespective of N.
+
+| Record Count | Validate (ms) | Throughput     | Clean rows | Peak heap (validate) |
+|:-------------|:-------------:|:--------------:|:----------:|:--------------------:|
+|       1,000  |         11.36 |    88.1 rec/ms |      1,000 |           **8.46 KB** |
+|     100,000  |      1,000.00 |    99.7 rec/ms |    100,000 |           **8.55 KB** |
+|   1,000,000  |     20,800.00 |    48.1 rec/ms |  1,000,000 |           **8.57 KB** |
+
+> Peak heap of **~8.5 KB** is constant — all four expression rules are evaluated in-place per row with no buffering.
+
+---
+
+### Comparison with Java (Round 1) — flat 5-field schema (Rust) vs marketplace schema (Java)
 
 > **Important caveats — these benchmarks are not directly comparable:**
 > - Java `benchmarkParseAndConvert` parses AND converts rows into typed Java POJOs via schema adapters; Rust produces raw positional `JsonTRow` values with no type conversion.
@@ -86,6 +133,25 @@ The pest parser materialises every token for every row into a `Pair<Rule>` tree 
 | Stringify    |  1,000,000   |  25,224.34    |   ~39.6 K    |    198.43  |   ~5,040 K     |
 
 Taking data throughput into account (bytes processed per second) narrows the gap considerably, since Java records are ~25× larger on disk. The record-count ratio overstates the difference; the byte-throughput ratio is a more honest comparison once schema complexity is equalised.
+
+---
+
+### Comparison with Java (Round 1) — equivalent marketplace schema
+
+Now that the Rust implementation uses the same marketplace Order schema (~541 B/rec JsonT), a byte-throughput comparison is meaningful.
+
+> **Caveats remain:** Java uses JMH warmup + 3×30 s averaging; Rust uses single-shot wall-clock. Java does full POJO conversion; Rust produces `JsonTRow`. Rust build+stringify includes row construction time.
+
+| Operation          | Record Count | Java (ms)   | Java MB/s  | Rust (ms)   | Rust MB/s  | Ratio (Rust/Java) |
+|:-------------------|:------------:|:-----------:|:----------:|:-----------:|:----------:|:-----------------:|
+| Parse              |    100,000   |   9,254.63  |  ~10.4     |     514.46  |  ~99.7     |  **~9.6×**        |
+| Parse              |  1,000,000   |  99,761.47  |  ~10.2     |  51,020.00  |  ~10.1     |  **~1.96×** ¹     |
+| Build + Stringify  |    100,000   |   2,006.63  |  ~50.8     |     664.92  |  ~77.2     |  **~3.0×**        |
+| Build + Stringify  |  1,000,000   |  25,224.34  |  ~40.4     |  35,880.00  |  ~14.4     |  **~0.7×** ²      |
+
+> ¹ At 1M rows the Rust parser is bottlenecked by collecting all parsed rows into a `Vec<JsonTRow>` (4.30 GB peak). The byte-processing rate drops from ~100 MB/s to ~10 MB/s, matching Java's steady-state rate. A streaming parse+discard would recover the higher rate.
+>
+> ² Rust build+stringify at 1M includes constructing all nested `String`/`JsonTRow`/`JsonTArray` allocations from scratch, which dominates. Java `benchmarkStringify` serialises already-materialised Java objects. The write-only path (`write_row`) is fast; the allocation cost of building complex nested rows at scale is the bottleneck.
 
 ---
 
