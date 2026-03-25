@@ -1,0 +1,379 @@
+// =============================================================================
+// validate/mod.rs — Row validation pipeline with non-blocking diagnostic sinks
+// =============================================================================
+//
+// # Responsibilities
+//
+//   1. Apply field-level constraints (required, value bounds, length, regex, …)
+//   2. Apply row-level rules from the schema's `validations` block
+//   3. Enforce uniqueness constraints across the batch
+//   4. Deliver every DiagnosticEvent to registered sinks asynchronously —
+//      sink I/O never stalls the validation loop
+//
+// # Severity contract
+//
+//   Fatal   — row is excluded from the returned Vec<JsonTRow>
+//   Warning — row is included but flagged
+//   Info    — lifecycle events (ProcessStarted, RowAccepted, ProcessCompleted)
+//
+// # Usage
+//
+//   // Build a pipeline (ConsoleSink is added by default)
+//   let pipeline = ValidationPipeline::builder(schema)
+//       .with_sink(Box::new(FileSink::new("errors.log").unwrap()))
+//       .build();
+//
+//   // Validate one or more batches
+//   let clean_rows = pipeline.validate_rows(parsed_rows);
+//
+//   // Flush and shut down the sink thread
+//   pipeline.finish()?;
+//
+// # Non-blocking design
+//
+//   An `mpsc::channel` decouples the validation loop from sink I/O.
+//   The background thread owns all sinks, drains the channel, and calls
+//   `emit()` per sink for every event.  Dropping the `Sender` (in `finish()`)
+//   closes the channel — the thread finishes draining, flushes all sinks,
+//   and terminates.
+// =============================================================================
+
+pub(crate) mod constraint;
+pub(crate) mod rule;
+
+use std::collections::HashSet;
+use std::sync::mpsc;
+use std::thread::JoinHandle;
+use std::time::Instant;
+
+use crate::ConsoleSink;
+use crate::diagnostic::{DiagnosticEvent, EventKind, Severity, SinkError};
+use crate::model::data::{JsonTRow, JsonTValue};
+use crate::model::field::JsonTField;
+use crate::model::schema::{JsonTSchema, SchemaKind};
+use crate::model::validation::JsonTValidationBlock;
+use crate::DiagnosticSink;
+
+// =============================================================================
+// ValidationPipeline
+// =============================================================================
+
+/// Row-validation pipeline bound to one schema.
+///
+/// Validates [`JsonTRow`] batches against field constraints and schema rules,
+/// returning only the rows that had no Fatal issues.  Diagnostic events are
+/// delivered asynchronously to all registered sinks so I/O latency never
+/// stalls the validation loop.
+///
+/// # Lifecycle
+/// 1. Build via [`ValidationPipeline::builder`].
+/// 2. Call [`validate_rows`] one or more times.
+/// 3. Call [`finish`] to flush all sinks and join the background thread.
+pub struct ValidationPipeline {
+    fields:      Vec<JsonTField>,
+    validation:  Option<JsonTValidationBlock>,
+    schema_name: String,
+    /// Sender half of the event channel.  Dropping this closes the channel
+    /// and signals the sink thread to finish.
+    tx:          mpsc::Sender<DiagnosticEvent>,
+    sink_thread: Option<JoinHandle<Option<SinkError>>>,
+}
+
+impl ValidationPipeline {
+    /// Create a [`ValidationPipelineBuilder`] for `schema`.
+    ///
+    /// A [`ConsoleSink`] is registered by default.
+    pub fn builder(schema: JsonTSchema) -> ValidationPipelineBuilder {
+        ValidationPipelineBuilder::new(schema)
+    }
+
+    /// Validate `rows` against the schema.
+    ///
+    /// Returns the rows that had no Fatal issues.  Rows with only Warning or
+    /// Info events are included in the output.  All diagnostic events are sent
+    /// to sinks asynchronously.
+    ///
+    /// Uniqueness is checked per-batch: each call to `validate_rows` starts
+    /// with fresh uniqueness state.
+    pub fn validate_rows(&self, rows: Vec<JsonTRow>) -> Vec<JsonTRow> {
+        let start            = Instant::now();
+        let total            = rows.len();
+        let mut clean        = Vec::<JsonTRow>::with_capacity(rows.len());
+        let mut valid_count  = 0usize;
+        let mut warn_count   = 0usize;
+        let mut invalid_count = 0usize;
+
+        // One HashSet per uniqueness rule; lives for the duration of this call.
+        let mut unique_sets: Vec<HashSet<Vec<String>>> = self
+            .validation
+            .as_ref()
+            .map(|v| vec![HashSet::new(); v.unique.len()])
+            .unwrap_or_default();
+
+        self.emit(DiagnosticEvent::info(EventKind::ProcessStarted {
+            source: self.schema_name.clone(),
+        }));
+
+        for (idx, row) in rows.into_iter().enumerate() {
+            let mut row_events: Vec<DiagnosticEvent> = Vec::new();
+
+            // ── Shape check ───────────────────────────────────────────────
+            if row.fields.len() != self.fields.len() {
+                row_events.push(
+                    DiagnosticEvent::fatal(EventKind::ShapeMismatch {
+                        field:    "(row)".into(),
+                        expected: format!("{} field(s)", self.fields.len()),
+                        actual:   format!("{} field(s)", row.fields.len()),
+                    })
+                    .at_row(idx)
+                    .with_source(&self.schema_name),
+                );
+            } else {
+                // ── Field constraints ─────────────────────────────────────
+                for (field, value) in self.fields.iter().zip(row.fields.iter()) {
+                    row_events.extend(constraint::check_field(field, value, idx));
+                }
+
+                // ── Row rules (skipped if any field check was fatal) ───────
+                if !has_fatal(&row_events) {
+                    if let Some(validation) = &self.validation {
+                        row_events.extend(rule::check_rules(
+                            &self.fields,
+                            validation,
+                            &row.fields,
+                            idx,
+                        ));
+                    }
+                }
+
+                // ── Uniqueness (skipped if any check was fatal) ────────────
+                if !has_fatal(&row_events) {
+                    if let Some(validation) = &self.validation {
+                        for (ui, paths) in validation.unique.iter().enumerate() {
+                            let key = build_unique_key(&self.fields, &row.fields, paths);
+                            if !unique_sets[ui].insert(key) {
+                                let field_names: Vec<String> =
+                                    paths.iter().map(|fp| fp.join()).collect();
+                                row_events.push(
+                                    DiagnosticEvent::fatal(EventKind::UniqueViolation {
+                                        fields:    field_names,
+                                        row_index: idx,
+                                    })
+                                    .at_row(idx)
+                                    .with_source(&self.schema_name),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Tally and emit ─────────────────────────────────────────────
+            let fatal_n = row_events.iter().filter(|e| e.is_fatal()).count();
+            let warn_n  = row_events
+                .iter()
+                .filter(|e| e.severity == Severity::Warning)
+                .count();
+
+            for event in row_events {
+                self.emit(event);
+            }
+
+            if fatal_n > 0 {
+                invalid_count += 1;
+                self.emit(
+                    DiagnosticEvent::fatal(EventKind::RowRejected {
+                        row_index:   idx,
+                        fatal_count: fatal_n,
+                    })
+                    .with_source(&self.schema_name),
+                );
+            } else {
+                clean.push(row);
+                if warn_n > 0 {
+                    warn_count += 1;
+                    self.emit(
+                        DiagnosticEvent::warning(EventKind::RowAcceptedWithWarnings {
+                            row_index:     idx,
+                            warning_count: warn_n,
+                        })
+                        .with_source(&self.schema_name),
+                    );
+                } else {
+                    valid_count += 1;
+                    self.emit(
+                        DiagnosticEvent::info(EventKind::RowAccepted { row_index: idx })
+                            .with_source(&self.schema_name),
+                    );
+                }
+            }
+        }
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        self.emit(DiagnosticEvent::info(EventKind::ProcessCompleted {
+            total_rows:   total,
+            valid_rows:   valid_count,
+            warning_rows: warn_count,
+            invalid_rows: invalid_count,
+            duration_ms,
+        }));
+
+        clean
+    }
+
+    /// Flush all sinks and join the background sink thread.
+    ///
+    /// **Must be called** after all `validate_rows` invocations to ensure
+    /// every event is delivered and every sink is flushed.
+    pub fn finish(mut self) -> Result<(), SinkError> {
+        // Dropping the sender closes the channel → sink thread will drain
+        // remaining events, flush all sinks, and exit.
+        drop(self.tx);
+
+        if let Some(handle) = self.sink_thread.take() {
+            match handle.join() {
+                Ok(Some(err)) => return Err(err),
+                Ok(None)      => {}
+                Err(_)        => {
+                    return Err(SinkError::Other("sink thread panicked".into()));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // ── Private ───────────────────────────────────────────────────────────────
+
+    /// Send an event to the background sink thread.
+    /// A send failure (thread crashed) is silently ignored.
+    #[inline]
+    fn emit(&self, event: DiagnosticEvent) {
+        let _ = self.tx.send(event);
+    }
+}
+
+// =============================================================================
+// ValidationPipelineBuilder
+// =============================================================================
+
+/// Builder for [`ValidationPipeline`].
+///
+/// A [`ConsoleSink`] is registered by default.  Call [`without_console`] to
+/// suppress it, then add only the sinks you want via [`with_sink`].
+pub struct ValidationPipelineBuilder {
+    schema:      JsonTSchema,
+    /// Whether to prepend a `ConsoleSink` when building.
+    has_console: bool,
+    /// User-supplied additional sinks.
+    extra_sinks: Vec<Box<dyn DiagnosticSink + Send>>,
+}
+
+impl ValidationPipelineBuilder {
+    /// Create a builder.  A `ConsoleSink` is included by default.
+    pub fn new(schema: JsonTSchema) -> Self {
+        Self {
+            schema,
+            has_console: true,
+            extra_sinks: Vec::new(),
+        }
+    }
+
+    /// Remove the default console sink.
+    ///
+    /// Useful when you only want file output, or in tests that must not produce
+    /// console noise.
+    pub fn without_console(mut self) -> Self {
+        self.has_console = false;
+        self
+    }
+
+    /// Register an additional sink.
+    ///
+    /// Multiple sinks can be registered; all receive every event.
+    pub fn with_sink(mut self, sink: Box<dyn DiagnosticSink + Send>) -> Self {
+        self.extra_sinks.push(sink);
+        self
+    }
+
+    /// Spawn the background sink thread and return a ready `ValidationPipeline`.
+    pub fn build(self) -> ValidationPipeline {
+        let fields: Vec<JsonTField> = match &self.schema.kind {
+            SchemaKind::Straight { fields } => fields.clone(),
+            // Derived-schema validation is not yet implemented.
+            SchemaKind::Derived { .. } => Vec::new(),
+        };
+        let validation  = self.schema.validation.clone();
+        let schema_name = self.schema.name.clone();
+
+        // Assemble the final sink list in declared order.
+        let mut sinks: Vec<Box<dyn DiagnosticSink + Send>> = Vec::new();
+        if self.has_console {
+            sinks.push(Box::new(ConsoleSink::new()));
+        }
+        sinks.extend(self.extra_sinks);
+
+        let (tx, rx) = mpsc::channel::<DiagnosticEvent>();
+
+        let sink_thread = std::thread::spawn(move || {
+            // Drain events until the sender is dropped (channel closed).
+            for event in rx {
+                for sink in &mut sinks {
+                    sink.emit(event.clone());
+                }
+            }
+            // Channel closed: flush all sinks, propagate the first error.
+            let mut last_err: Option<SinkError> = None;
+            for sink in &mut sinks {
+                if let Err(e) = sink.flush() {
+                    last_err = Some(e);
+                }
+            }
+            last_err
+        });
+
+        ValidationPipeline {
+            fields,
+            validation,
+            schema_name,
+            tx,
+            sink_thread: Some(sink_thread),
+        }
+    }
+}
+
+// =============================================================================
+// Private helpers
+// =============================================================================
+
+#[inline]
+fn has_fatal(events: &[DiagnosticEvent]) -> bool {
+    events.iter().any(|e| e.is_fatal())
+}
+
+/// Build a composite string key for a uniqueness constraint.
+///
+/// Only top-level (single-segment) field paths are currently supported.
+/// Nested paths produce a `"<nested>"` placeholder, which means duplicates
+/// across nested paths will never be detected — this is conservative and safe.
+fn build_unique_key(
+    fields: &[JsonTField],
+    values: &[JsonTValue],
+    paths:  &[crate::model::schema::FieldPath],
+) -> Vec<String> {
+    paths
+        .iter()
+        .map(|fp| {
+            let name = fp.join();
+            if name.contains('.') {
+                // Nested paths require object traversal — not yet supported.
+                return "<nested>".into();
+            }
+            if let Some(idx) = fields.iter().position(|f| f.name == name) {
+                if let Some(v) = values.get(idx) {
+                    return constraint::describe_value(v);
+                }
+            }
+            "<missing>".into()
+        })
+        .collect()
+}

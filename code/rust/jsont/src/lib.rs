@@ -11,6 +11,7 @@ pub mod builder;
 pub mod diagnostic;
 pub mod error;
 pub mod model;
+pub mod validate;
 
 // parse and stringify are implementation modules, not public API modules —
 // their logic is exposed through the trait impls on the model types.
@@ -188,3 +189,8 @@ pub trait DiagnosticSink {
     /// Flush any buffered output. Called by the pipeline at the end of processing.
     fn flush(&mut self) -> Result<(), diagnostic::SinkError>;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Validate pipeline re-exports
+// ─────────────────────────────────────────────────────────────────────────────
+pub use validate::{ValidationPipeline, ValidationPipelineBuilder};

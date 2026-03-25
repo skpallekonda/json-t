@@ -7,6 +7,7 @@ description = "JsonT schema, data model, builders, parser and stringifier"
 [dependencies]
 pest = "2"
 pest_derive = "2"
+regex = "1"
 rust_decimal = { version = "1", features = ["serde"] }
 thiserror = "1"
 
