@@ -197,6 +197,7 @@
     </build>
 
     <modules>
+        <module>jsont</module>
         <module>jsont-common</module>
         <module>jsont-parser</module>
         <module>jsont-annotations</module>
