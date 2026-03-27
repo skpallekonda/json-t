@@ -3,6 +3,7 @@ package io.github.datakore.jsont.builder;
 import io.github.datakore.jsont.error.BuildError;
 import io.github.datakore.jsont.model.FieldPath;
 import io.github.datakore.jsont.model.JsonTExpression;
+import io.github.datakore.jsont.model.JsonTRule;
 import io.github.datakore.jsont.model.JsonTValidationBlock;
 
 import java.util.ArrayList;
@@ -23,7 +24,7 @@ import java.util.List;
 public final class JsonTValidationBlockBuilder {
 
     private final List<List<FieldPath>> uniqueKeys = new ArrayList<>();
-    private final List<JsonTExpression> rules = new ArrayList<>();
+    private final List<JsonTRule> rules = new ArrayList<>();
 
     private JsonTValidationBlockBuilder() {}
 
@@ -74,8 +75,25 @@ public final class JsonTValidationBlockBuilder {
      */
     public JsonTValidationBlockBuilder rule(JsonTExpression expr) {
         if (expr == null) throw new IllegalArgumentException("rule expression must not be null");
-        rules.add(expr);
+        rules.add(JsonTRule.expression(expr));
         return this;
+    }
+
+    /**
+     * Adds a conditional requirement: when {@code condition} is {@code true}, all
+     * {@code requiredFields} must be present and non-null.
+     */
+    public JsonTValidationBlockBuilder conditionalRule(JsonTExpression condition, List<FieldPath> requiredFields) {
+        if (condition == null) throw new IllegalArgumentException("condition must not be null");
+        if (requiredFields == null || requiredFields.isEmpty())
+            throw new IllegalArgumentException("requiredFields must not be empty");
+        rules.add(JsonTRule.conditionalRequirement(condition, requiredFields));
+        return this;
+    }
+
+    /** Varargs overload for {@link #conditionalRule(JsonTExpression, List)}. */
+    public JsonTValidationBlockBuilder conditionalRule(JsonTExpression condition, FieldPath... requiredFields) {
+        return conditionalRule(condition, List.of(requiredFields));
     }
 
     // ─── Build ────────────────────────────────────────────────────────────────

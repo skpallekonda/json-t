@@ -8,16 +8,30 @@ import java.util.Objects;
  * Implementations are nested records matching Rust's enum variants.
  */
 public sealed interface JsonTValue
-        permits JsonTValue.Null, JsonTValue.Bool,
+        permits JsonTValue.Null, JsonTValue.Unspecified,
+                JsonTValue.Bool,
                 JsonTValue.I16, JsonTValue.I32, JsonTValue.I64,
                 JsonTValue.U16, JsonTValue.U32, JsonTValue.U64,
                 JsonTValue.D32, JsonTValue.D64, JsonTValue.D128,
-                JsonTValue.Text, JsonTValue.Array {
+                JsonTValue.Text, JsonTValue.Enum, JsonTValue.Array {
 
     // ─── Nested record implementations ────────────────────────────────────────
 
     record Null() implements JsonTValue {
         @Override public String toString() { return "null"; }
+    }
+
+    /** CDC sentinel — "this field was not changed". Serialises as {@code _}. */
+    record Unspecified() implements JsonTValue {
+        @Override public String toString() { return "_"; }
+    }
+
+    /** A named enum constant (e.g. {@code ACTIVE}). Serialises as the bare identifier. */
+    record Enum(String value) implements JsonTValue {
+        public Enum {
+            Objects.requireNonNull(value, "Enum value must not be null");
+        }
+        @Override public String toString() { return value; }
     }
 
     record Bool(boolean value) implements JsonTValue {
@@ -95,6 +109,8 @@ public sealed interface JsonTValue
     // ─── Static factories ─────────────────────────────────────────────────────
 
     static JsonTValue nullValue() { return new Null(); }
+    static JsonTValue unspecified() { return new Unspecified(); }
+    static JsonTValue enumValue(String v) { return new Enum(v); }
     static JsonTValue bool(boolean v) { return new Bool(v); }
     static JsonTValue i16(short v) { return new I16(v); }
     static JsonTValue i32(int v) { return new I32(v); }

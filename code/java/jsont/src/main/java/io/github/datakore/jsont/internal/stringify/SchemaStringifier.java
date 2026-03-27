@@ -79,6 +79,7 @@ public final class SchemaStringifier {
         if (c.maxItems()        != null) parts.add("maxItems = "         + c.maxItems());
         if (c.allowNullElements())       parts.add("allowNullElements = true");
         if (c.maxNullElements() != null) parts.add("maxNullElements = "  + c.maxNullElements());
+        if (c.constantValue()   != null) parts.add("constant = "         + ValueStringifier.stringifyValue(c.constantValue()));
         return " [" + String.join(", ", parts) + "]";
     }
 
@@ -129,8 +130,21 @@ public final class SchemaStringifier {
 
         if (!vb.rules().isEmpty()) {
             String rulesStr = vb.rules().stream()
-                    .map(e -> (ctx.opts.isPretty() ? c.deeper().indent() : "")
-                              + ValueStringifier.stringifyExpr(e))
+                    .map(r -> {
+                        String rStr;
+                        if (r instanceof JsonTRule.Expression e) {
+                            rStr = ValueStringifier.stringifyExpr(e.expr());
+                        } else if (r instanceof JsonTRule.ConditionalRequirement cr) {
+                            String cond = ValueStringifier.stringifyExpr(cr.condition());
+                            String flds = cr.requiredFields().stream()
+                                    .map(FieldPath::dotJoined)
+                                    .collect(Collectors.joining(", "));
+                            rStr = "if (" + cond + ") require (" + flds + ")";
+                        } else {
+                            rStr = r.toString();
+                        }
+                        return (ctx.opts.isPretty() ? c.deeper().indent() : "") + rStr;
+                    })
                     .collect(Collectors.joining(c.sep()));
             if (ctx.opts.isPretty()) {
                 parts.add(c.indent() + "rules:" + ctx.sp() + "{" + ctx.nl()

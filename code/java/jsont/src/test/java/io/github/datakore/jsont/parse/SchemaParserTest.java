@@ -268,10 +268,11 @@ class SchemaParserTest {
         JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
         var vb = ns.findSchema("Order").orElseThrow().validation().orElseThrow();
         assertEquals(1, vb.rules().size());
-        // rule should be AND expression
-        assertInstanceOf(JsonTExpression.Binary.class, vb.rules().get(0));
-        var binary = (JsonTExpression.Binary) vb.rules().get(0);
-        assertEquals(BinaryOp.AND, binary.op());
+        // rule should be a wrapped Expression containing an AND binary expression
+        assertInstanceOf(JsonTRule.Expression.class, vb.rules().get(0));
+        var expr = ((JsonTRule.Expression) vb.rules().get(0)).expr();
+        assertInstanceOf(JsonTExpression.Binary.class, expr);
+        assertEquals(BinaryOp.AND, ((JsonTExpression.Binary) expr).op());
     }
 
     // ── derived schemas ───────────────────────────────────────────────────────
@@ -433,6 +434,248 @@ class SchemaParserTest {
         assertTrue(ns.findSchema("B").isPresent());
     }
 
+    // ── P2.1: constant = <value> constraint ───────────────────────────────────
+
+    @Test void parseNamespace_constantValue_bool() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Item {
+                      fields {
+                        active: bool (constant = true),
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var c = ns.findSchema("Item").orElseThrow().findField("active").orElseThrow().constraints();
+        assertNotNull(c.constantValue());
+        assertEquals(JsonTValue.bool(true), c.constantValue());
+    }
+
+    @Test void parseNamespace_constantValue_integer() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Status {
+                      fields {
+                        code: i32 (constant = 42),
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var c = ns.findSchema("Status").orElseThrow().findField("code").orElseThrow().constraints();
+        assertNotNull(c.constantValue());
+        assertTrue(c.constantValue().isNumeric());
+        assertEquals(42.0, c.constantValue().toDouble(), 1e-9);
+    }
+
+    @Test void parseNamespace_constantValue_string() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Doc {
+                      fields {
+                        version: str (constant = "v1"),
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var c = ns.findSchema("Doc").orElseThrow().findField("version").orElseThrow().constraints();
+        assertNotNull(c.constantValue());
+        assertInstanceOf(JsonTValue.Text.class, c.constantValue());
+        assertEquals("v1", ((JsonTValue.Text) c.constantValue()).value());
+    }
+
+    @Test void parseNamespace_constantValue_null() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Doc {
+                      fields {
+                        tag: str (constant = null),
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var c = ns.findSchema("Doc").orElseThrow().findField("tag").orElseThrow().constraints();
+        assertNotNull(c.constantValue());
+        assertTrue(c.constantValue().isNull());
+    }
+
+    @Test void parseNamespace_constantValue_negativeNumber() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Temp {
+                      fields {
+                        offset: d64 (constant = -1.5),
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var c = ns.findSchema("Temp").orElseThrow().findField("offset").orElseThrow().constraints();
+        assertNotNull(c.constantValue());
+        assertEquals(-1.5, c.constantValue().toDouble(), 1e-9);
+    }
+
+    // ── P2.2: if (cond) require (fields) conditional validation ───────────────
+
+    @Test void parseNamespace_conditionalValidation_parsesAsConditionalRequirement() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Order {
+                      fields {
+                        qty: i32,
+                        note: str?,
+                      }
+                      validations {
+                        if (qty > 100) require (note)
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var vb = ns.findSchema("Order").orElseThrow().validation().orElseThrow();
+        assertEquals(1, vb.rules().size());
+        assertInstanceOf(JsonTRule.ConditionalRequirement.class, vb.rules().get(0));
+        var cr = (JsonTRule.ConditionalRequirement) vb.rules().get(0);
+        assertInstanceOf(JsonTExpression.Binary.class, cr.condition());
+        assertEquals(BinaryOp.GT, ((JsonTExpression.Binary) cr.condition()).op());
+        assertEquals(1, cr.requiredFields().size());
+        assertEquals("note", cr.requiredFields().get(0).leaf());
+    }
+
+    @Test void parseNamespace_conditionalValidation_multipleRequiredFields() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Order {
+                      fields {
+                        qty: i32,
+                        note: str?,
+                        reason: str?,
+                      }
+                      validations {
+                        if (qty > 100) require (note, reason)
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var vb = ns.findSchema("Order").orElseThrow().validation().orElseThrow();
+        var cr = (JsonTRule.ConditionalRequirement) vb.rules().get(0);
+        assertEquals(2, cr.requiredFields().size());
+        assertEquals("note",   cr.requiredFields().get(0).leaf());
+        assertEquals("reason", cr.requiredFields().get(1).leaf());
+    }
+
+    @Test void parseNamespace_conditionalValidation_coexistsWith_rule() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Order {
+                      fields {
+                        id: i64,
+                        qty: i32,
+                        note: str?,
+                      }
+                      validations {
+                        rule: qty > 0
+                        if (qty > 100) require (note)
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var vb = ns.findSchema("Order").orElseThrow().validation().orElseThrow();
+        assertEquals(2, vb.rules().size());
+        assertInstanceOf(JsonTRule.Expression.class, vb.rules().get(0));
+        assertInstanceOf(JsonTRule.ConditionalRequirement.class, vb.rules().get(1));
+    }
+
+    // ── P2.3: dotted field paths in expressions ────────────────────────────────
+
+    @Test void parseNamespace_dottedFieldPath_inRuleExpr() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Order {
+                      fields {
+                        id: i64,
+                        address: <Address>,
+                      }
+                      validations {
+                        rule: address.zip > 0
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var vb = ns.findSchema("Order").orElseThrow().validation().orElseThrow();
+        var expr = ((JsonTRule.Expression) vb.rules().get(0)).expr();
+        assertInstanceOf(JsonTExpression.Binary.class, expr);
+        var lhs = ((JsonTExpression.Binary) expr).lhs();
+        assertInstanceOf(JsonTExpression.FieldRef.class, lhs);
+        var path = ((JsonTExpression.FieldRef) lhs).path();
+        assertEquals("address.zip", path.dotJoined());
+    }
+
+    @Test void parseNamespace_dottedFieldPath_inFilterExpr() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Order {
+                      fields { id: i64, address: <Address> }
+                    }
+                    schema Local derived Order {
+                      filter: address.country == address.region
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var filter = (SchemaOperation.Filter) ns.findSchema("Local").orElseThrow().operations().get(0);
+        assertInstanceOf(JsonTExpression.Binary.class, filter.predicate());
+        var lhs = ((JsonTExpression.Binary) filter.predicate()).lhs();
+        assertInstanceOf(JsonTExpression.FieldRef.class, lhs);
+        assertEquals("address.country", ((JsonTExpression.FieldRef) lhs).path().dotJoined());
+    }
+
+    @Test void parseNamespace_dottedFieldPath_threeSegments() {
+        String dsl = """
+                namespace "" {
+                  catalog {
+                    schema Order {
+                      fields { id: i64 }
+                      validations {
+                        rule: a.b.c > 0
+                      }
+                    }
+                  }
+                }
+                """;
+        JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
+        var expr = ((JsonTRule.Expression)
+                ns.findSchema("Order").orElseThrow().validation().orElseThrow().rules().get(0)).expr();
+        var lhs = ((JsonTExpression.Binary) expr).lhs();
+        assertEquals("a.b.c", ((JsonTExpression.FieldRef) lhs).path().dotJoined());
+    }
+
     // ── error cases ───────────────────────────────────────────────────────────
 
     @Test void parseNamespace_emptyInput_throws() {
@@ -475,7 +718,8 @@ class SchemaParserTest {
         JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
         var rule = ns.findSchema("Order").orElseThrow().validation().orElseThrow().rules().get(0);
         // ANTLR4 left-recursive: `&&` has higher precedence than `||` (defined higher = lower index)
-        // Top-level should be OR
-        assertInstanceOf(JsonTExpression.Binary.class, rule);
+        // Top-level should be OR, wrapped in JsonTRule.Expression
+        assertInstanceOf(JsonTRule.Expression.class, rule);
+        assertInstanceOf(JsonTExpression.Binary.class, ((JsonTRule.Expression) rule).expr());
     }
 }

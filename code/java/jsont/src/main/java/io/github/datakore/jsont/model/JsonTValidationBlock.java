@@ -10,7 +10,8 @@ import java.util.Objects;
  * <ul>
  *   <li><b>Unique keys</b> — each entry is a group of field paths whose combined
  *       values must be distinct across all rows in a dataset.</li>
- *   <li><b>Rules</b> — boolean expressions that every row must satisfy.</li>
+ *   <li><b>Rules</b> — {@link JsonTRule} entries (boolean expressions or conditional
+ *       requirements) that every row must satisfy.</li>
  * </ul>
  *
  * <pre>{@code
@@ -18,15 +19,15 @@ import java.util.Objects;
  *   JsonTValidationBlock vb = JsonTValidationBlockBuilder.create()
  *       .unique(FieldPath.single("id"))
  *       .rule(JsonTExpression.binary(GT, fieldName("price"), literal(d64(0.0))))
+ *       .conditionalRule(
+ *           JsonTExpression.binary(EQ, fieldName("status"), literal(text("SHIPPED"))),
+ *           FieldPath.single("tracking"))
  *       .build();
- *
- *   vb.uniqueKeys()   // [[FieldPath("id")]]
- *   vb.rules()        // [Binary(GT, FieldRef(price), Literal(0.0))]
  * }</pre>
  */
 public record JsonTValidationBlock(
         List<List<FieldPath>> uniqueKeys,
-        List<JsonTExpression> rules
+        List<JsonTRule> rules
 ) {
     public JsonTValidationBlock {
         Objects.requireNonNull(uniqueKeys, "uniqueKeys must not be null");

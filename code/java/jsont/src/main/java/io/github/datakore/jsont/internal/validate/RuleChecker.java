@@ -5,8 +5,10 @@ import io.github.datakore.jsont.diagnostic.DiagnosticEventKind;
 import io.github.datakore.jsont.error.JsonTError;
 import io.github.datakore.jsont.model.BinaryOp;
 import io.github.datakore.jsont.model.EvalContext;
+import io.github.datakore.jsont.model.FieldPath;
 import io.github.datakore.jsont.model.JsonTExpression;
 import io.github.datakore.jsont.model.JsonTField;
+import io.github.datakore.jsont.model.JsonTRule;
 import io.github.datakore.jsont.model.JsonTValidationBlock;
 import io.github.datakore.jsont.model.JsonTValue;
 import io.github.datakore.jsont.model.UnaryOp;
@@ -30,32 +32,63 @@ public class RuleChecker {
             ctx.bind(fields.get(i).name(), rowValues.get(i));
         }
 
-        // Evaluate each rule
-        for (JsonTExpression rule : validation.rules()) {
-            try {
-                JsonTValue result = rule.evaluate(ctx);
-                if (result instanceof JsonTValue.Bool b) {
-                    if (!b.value()) {
+        // Evaluate each rule — dispatch on JsonTRule variant
+        for (JsonTRule rule : validation.rules()) {
+            if (rule instanceof JsonTRule.Expression e) {
+                try {
+                    JsonTValue result = e.expr().evaluate(ctx);
+                    if (result instanceof JsonTValue.Bool b) {
+                        if (!b.value()) {
+                            events.add(DiagnosticEvent.warning(
+                                    new DiagnosticEventKind.RuleViolation(
+                                            stringifyExpr(e.expr()),
+                                            "expression evaluated to false"))
+                                    .atRow(rowIndex));
+                        }
+                        // true = OK, no event
+                    } else {
                         events.add(DiagnosticEvent.warning(
                                 new DiagnosticEventKind.RuleViolation(
-                                        stringifyExpr(rule),
-                                        "expression evaluated to false"))
+                                        stringifyExpr(e.expr()),
+                                        "non-boolean result: " + typeName(result)))
                                 .atRow(rowIndex));
                     }
-                    // true = OK, no event
-                } else {
+                } catch (JsonTError.Eval err) {
                     events.add(DiagnosticEvent.warning(
                             new DiagnosticEventKind.RuleViolation(
-                                    stringifyExpr(rule),
-                                    "non-boolean result: " + typeName(result)))
+                                    stringifyExpr(e.expr()),
+                                    "evaluation error: " + err.getMessage()))
                             .atRow(rowIndex));
                 }
-            } catch (JsonTError.Eval e) {
-                events.add(DiagnosticEvent.warning(
-                        new DiagnosticEventKind.RuleViolation(
-                                stringifyExpr(rule),
-                                "evaluation error: " + e.getMessage()))
-                        .atRow(rowIndex));
+            } else if (rule instanceof JsonTRule.ConditionalRequirement cr) {
+                // Evaluate the condition; if true, all requiredFields must be non-null/non-unspecified
+                try {
+                    JsonTValue condResult = cr.condition().evaluate(ctx);
+                    if (condResult instanceof JsonTValue.Bool b && b.value()) {
+                        List<String> missing = new ArrayList<>();
+                        for (FieldPath fp : cr.requiredFields()) {
+                            String name = fp.leaf();
+                            JsonTValue val = ctx.lookup(name).orElse(null);
+                            if (val == null || val instanceof JsonTValue.Null
+                                    || val instanceof JsonTValue.Unspecified) {
+                                missing.add(name);
+                            }
+                        }
+                        if (!missing.isEmpty()) {
+                            events.add(DiagnosticEvent.fatal(
+                                    new DiagnosticEventKind.ConditionalRequirementViolation(
+                                            stringifyExpr(cr.condition()), missing))
+                                    .atRow(rowIndex));
+                        }
+                    }
+                    // condition false or non-bool → no violation
+                } catch (JsonTError.Eval err) {
+                    events.add(DiagnosticEvent.warning(
+                            new DiagnosticEventKind.RuleViolation(
+                                    stringifyExpr(cr.condition()),
+                                    "condition evaluation error: " + err.getMessage()))
+                            .atRow(rowIndex));
+                }
             }
         }
 

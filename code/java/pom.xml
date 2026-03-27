@@ -197,15 +197,6 @@
 
     <modules>
         <module>jsont</module>
-        <!--        <module>jsont-common</module>
-        <module>jsont-parser</module>
-        <module>jsont-annotations</module>
-        <module>jsont-adapters-api</module>
-        <module>jsont-processor</module>
-        <module>jsont-internal</module>
-        <module>jsont-core</module>
-        <module>jsont-benchmark</module>
-        <module>jsont-maven-plugin</module> -->
     </modules>
 
 </project>

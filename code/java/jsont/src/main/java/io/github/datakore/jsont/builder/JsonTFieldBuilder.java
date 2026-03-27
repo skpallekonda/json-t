@@ -4,6 +4,7 @@ import io.github.datakore.jsont.error.BuildError;
 import io.github.datakore.jsont.model.FieldConstraints;
 import io.github.datakore.jsont.model.FieldKind;
 import io.github.datakore.jsont.model.JsonTField;
+import io.github.datakore.jsont.model.JsonTValue;
 import io.github.datakore.jsont.model.ScalarType;
 
 /**
@@ -56,6 +57,9 @@ public final class JsonTFieldBuilder {
     private Integer maxItems;
     private boolean allowNullElements = false;
     private Integer maxNullElements;
+
+    // constant
+    private JsonTValue constantValue;
 
     private JsonTFieldBuilder(String name, FieldKind kind, ScalarType scalarType, String objectRef) {
         this.name = name;
@@ -193,6 +197,17 @@ public final class JsonTFieldBuilder {
         return this;
     }
 
+    // ─── Constant constraint ──────────────────────────────────────────────────
+
+    /**
+     * Field must always equal this exact value. Any mismatch produces a Fatal diagnostic.
+     * Useful for schema versioning fields (e.g. {@code version = "v1"}).
+     */
+    public JsonTFieldBuilder constantValue(JsonTValue value) {
+        this.constantValue = value;
+        return this;
+    }
+
     // ─── Build ────────────────────────────────────────────────────────────────
 
     /**
@@ -225,7 +240,8 @@ public final class JsonTFieldBuilder {
                 required,
                 maxPrecision,
                 minItems, maxItems,
-                allowNullElements, maxNullElements
+                allowNullElements, maxNullElements,
+                constantValue
         );
 
         return new JsonTField(name, kind, scalarType, objectRef, optional, constraints);

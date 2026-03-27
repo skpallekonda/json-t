@@ -39,6 +39,18 @@ public class ConstraintChecker {
             return events;
         }
 
+        // 4a. constantValue — Fatal if the row value doesn't equal the declared constant
+        if (c.constantValue() != null && !value.equals(c.constantValue())) {
+            events.add(DiagnosticEvent.fatal(
+                    new DiagnosticEventKind.ConstraintViolation(
+                            field.name(),
+                            "constant = " + c.constantValue(),
+                            "value " + describeValue(value)
+                                    + " does not match declared constant " + c.constantValue()))
+                    .atRow(rowIndex));
+            return events;
+        }
+
         // 5. minValue
         if (c.minValue() != null && value.isNumeric()) {
             double minV = c.minValue();

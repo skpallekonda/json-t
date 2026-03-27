@@ -17,8 +17,9 @@ import java.util.List;
  * string-escape state to extract complete {@code {…}} row boundaries without
  * loading the entire input into memory.
  *
- * <p>All-caps ASCII identifiers ({@code ACTIVE}, {@code INACTIVE}) are stored
- * as {@link JsonTValue.Text} since the Java model has no {@code Enum} variant.
+ * <p>All-caps ASCII identifiers ({@code ACTIVE}, {@code INACTIVE}) are parsed
+ * as {@link JsonTValue.Enum} to match the Rust model.
+ * The CDC sentinel {@code _} is parsed as {@link JsonTValue.Unspecified}.
  * Nested objects {@code {…}} are stored as {@link JsonTValue.Array} of their
  * inner values since the Java model has no {@code Object} variant.
  */
@@ -272,7 +273,7 @@ public final class RowScanner {
             if (c == '"') return parseString();
             if (c == '[') return parseArray();
             if (c == '{') return parseNestedObject();
-            if (c == '_') { pos++; return JsonTValue.nullValue(); }
+            if (c == '_') { pos++; return JsonTValue.unspecified(); }
 
             // keywords: true, false, null, nil
             if (matchKeyword("true"))  return JsonTValue.bool(true);
@@ -373,7 +374,7 @@ public final class RowScanner {
                 if (Character.isUpperCase(c) || Character.isDigit(c) || c == '_') pos++;
                 else break;
             }
-            return JsonTValue.text(src.substring(start, pos));
+            return JsonTValue.enumValue(src.substring(start, pos));
         }
     }
 }

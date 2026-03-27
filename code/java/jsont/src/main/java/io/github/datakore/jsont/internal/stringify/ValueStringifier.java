@@ -25,6 +25,8 @@ public final class ValueStringifier {
         if (v instanceof JsonTValue.D128  n)      return n.value().toPlainString();
         if (v instanceof JsonTValue.Text  t)      return quoteString(t.value());
         if (v instanceof JsonTValue.Array a)      return stringifyArray(a.elements());
+        if (v instanceof JsonTValue.Unspecified)  return "_";
+        if (v instanceof JsonTValue.Enum  e)      return e.value();
         throw new IllegalArgumentException("Unknown JsonTValue: " + v);
     }
 

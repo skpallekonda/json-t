@@ -29,11 +29,12 @@ public record FieldConstraints(
         Integer minItems,
         Integer maxItems,
         boolean allowNullElements,
-        Integer maxNullElements
+        Integer maxNullElements,
+        JsonTValue constantValue
 ) {
     /** A fully-unconstrained sentinel (all nulls / false). */
     public static final FieldConstraints NONE = new FieldConstraints(
-            null, null, null, null, null, false, null, null, null, false, null
+            null, null, null, null, null, false, null, null, null, false, null, null
     );
 
     /** Returns {@code true} if at least one constraint is active. */
@@ -45,6 +46,7 @@ public record FieldConstraints(
                 || maxPrecision != null
                 || minItems != null || maxItems != null
                 || allowNullElements
-                || maxNullElements != null;
+                || maxNullElements != null
+                || constantValue != null;
     }
 }

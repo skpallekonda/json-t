@@ -237,6 +237,9 @@ public final class SchemaVisitor extends JsonTSchemaBaseVisitor<Object> {
         if (ctx instanceof JsonTSchemaParser.MaxNullItemsItemContext c) {
             return fb.maxNullElements(Integer.parseInt(c.INT_LITERAL().getText()));
         }
+        if (ctx instanceof JsonTSchemaParser.ConstantValueItemContext c) {
+            return fb.constantValue(parseConstraintLiteral(c.constraint_literal()));
+        }
         throw new JsonTError.Parse("Unknown constraint type: " + ctx.getText());
     }
 
@@ -246,6 +249,20 @@ public final class SchemaVisitor extends JsonTSchemaBaseVisitor<Object> {
                 : ctx.FLOAT_LITERAL().getText();
         double value = Double.parseDouble(text);
         return ctx.MINUS() != null ? -value : value;
+    }
+
+    private JsonTValue parseConstraintLiteral(JsonTSchemaParser.Constraint_literalContext ctx) {
+        if (ctx.BOOL_LITERAL() != null) return JsonTValue.bool("true".equals(ctx.BOOL_LITERAL().getText()));
+        if (ctx.NULL_LITERAL() != null) return JsonTValue.nullValue();
+        if (ctx.STRING_LITERAL() != null) {
+            String raw = ctx.STRING_LITERAL().getText();
+            return JsonTValue.text(raw.substring(1, raw.length() - 1));
+        }
+        // numeric (INT or FLOAT, optionally negated)
+        String text = ctx.INT_LITERAL() != null ? ctx.INT_LITERAL().getText() : ctx.FLOAT_LITERAL().getText();
+        double val = Double.parseDouble(text);
+        if (ctx.MINUS() != null) val = -val;
+        return JsonTValue.d64(val);
     }
 
     // ── Validation block ──────────────────────────────────────────────────────
@@ -261,6 +278,11 @@ public final class SchemaVisitor extends JsonTSchemaBaseVisitor<Object> {
             } else if (itemCtx.rule_validation() != null) {
                 var expr = (JsonTExpression) visit(itemCtx.rule_validation().expr());
                 vbb.rule(expr);
+            } else if (itemCtx.conditional_validation() != null) {
+                var cv = itemCtx.conditional_validation();
+                var cond = (JsonTExpression) visit(cv.expr());
+                var fields = buildFieldPathList(cv.field_path_list());
+                vbb.conditionalRule(cond, fields);
             }
         }
 
@@ -426,6 +448,11 @@ public final class SchemaVisitor extends JsonTSchemaBaseVisitor<Object> {
 
     @Override
     public Object visitFieldRefExpr(JsonTSchemaParser.FieldRefExprContext ctx) {
-        return JsonTExpression.fieldName(ctx.getText());
+        List<TerminalNode> idents = ctx.IDENT();
+        if (idents.size() == 1) return JsonTExpression.fieldName(idents.get(0).getText());
+        String first = idents.get(0).getText();
+        String[] rest = new String[idents.size() - 1];
+        for (int i = 1; i < idents.size(); i++) rest[i - 1] = idents.get(i).getText();
+        return JsonTExpression.field(FieldPath.of(first, rest));
     }
 }

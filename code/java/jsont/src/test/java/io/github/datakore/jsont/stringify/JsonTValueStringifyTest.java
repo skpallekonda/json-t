@@ -88,4 +88,14 @@ class JsonTValueStringifyTest {
     @Test void array_empty() {
         assertEquals("[]", JsonTStringifier.stringify(array(List.of())));
     }
+
+    // ─── P1 variants ──────────────────────────────────────────────────────────
+
+    @Test void unspecified_value() {
+        assertEquals("_", JsonTStringifier.stringify(unspecified()));
+    }
+
+    @Test void enum_value() {
+        assertEquals("ACTIVE", JsonTStringifier.stringify(enumValue("ACTIVE")));
+    }
 }

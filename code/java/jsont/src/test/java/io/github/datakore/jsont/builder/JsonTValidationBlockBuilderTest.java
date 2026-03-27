@@ -4,6 +4,7 @@ import io.github.datakore.jsont.error.BuildError;
 import io.github.datakore.jsont.model.BinaryOp;
 import io.github.datakore.jsont.model.FieldPath;
 import io.github.datakore.jsont.model.JsonTExpression;
+import io.github.datakore.jsont.model.JsonTRule;
 import io.github.datakore.jsont.model.JsonTValidationBlock;
 import io.github.datakore.jsont.model.JsonTValue;
 import org.junit.jupiter.api.Test;
@@ -68,7 +69,9 @@ class JsonTValidationBlockBuilderTest {
                 .build();
 
         assertEquals(1, vb.rules().size());
-        assertSame(expr, vb.rules().get(0));
+        // rule() wraps the expression in JsonTRule.Expression
+        assertInstanceOf(JsonTRule.Expression.class, vb.rules().get(0));
+        assertSame(expr, ((JsonTRule.Expression) vb.rules().get(0)).expr());
         assertTrue(vb.uniqueKeys().isEmpty());
     }
 

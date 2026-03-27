@@ -64,7 +64,8 @@ field_name
     | B64 | OID | HEX
     | MIN_VALUE | MAX_VALUE | MIN_LENGTH | MAX_LENGTH
     | PATTERN | REQUIRED | MAX_PRECISION | MIN_ITEMS | MAX_ITEMS
-    | ALLOW_NULLS | MAX_NULL_ITEMS
+    | ALLOW_NULLS | MAX_NULL_ITEMS | CONSTANT
+    | IF | REQUIRE
     ;
 
 field_type_spec
@@ -105,6 +106,14 @@ constraint_item
     | MAX_ITEMS EQ INT_LITERAL        # MaxItemsItem
     | ALLOW_NULLS                     # AllowNullsItem
     | MAX_NULL_ITEMS EQ INT_LITERAL   # MaxNullItemsItem
+    | CONSTANT EQ constraint_literal  # ConstantValueItem
+    ;
+
+constraint_literal
+    : MINUS? (INT_LITERAL | FLOAT_LITERAL)
+    | BOOL_LITERAL
+    | STRING_LITERAL
+    | NULL_LITERAL
     ;
 
 signed_number
@@ -120,6 +129,7 @@ validations_block
 validation_item
     : unique_validation
     | rule_validation
+    | conditional_validation
     ;
 
 unique_validation
@@ -128,6 +138,10 @@ unique_validation
 
 rule_validation
     : RULE COLON expr COMMA?
+    ;
+
+conditional_validation
+    : IF LPAREN expr RPAREN REQUIRE LPAREN field_path_list RPAREN COMMA?
     ;
 
 // ─── Derived schema operations ────────────────────────────────────────────────
@@ -195,7 +209,7 @@ expr
     | INT_LITERAL                                   # IntLiteralExpr
     | FLOAT_LITERAL                                 # FloatLiteralExpr
     | STRING_LITERAL                                # StringLiteralExpr
-    | IDENT                                         # FieldRefExpr
+    | IDENT (DOT IDENT)*                            # FieldRefExpr
     ;
 
 // ─── Keywords (must appear before IDENT in lexer) ─────────────────────────────
@@ -239,6 +253,11 @@ MIN_ITEMS      : 'minItems' ;
 MAX_ITEMS      : 'maxItems' ;
 ALLOW_NULLS    : 'allowNulls' ;
 MAX_NULL_ITEMS : 'maxNullItems' ;
+CONSTANT       : 'constant' ;
+
+// Conditional validation keywords
+IF      : 'if' ;
+REQUIRE : 'require' ;
 
 // Literals
 NULL_LITERAL  : 'null' ;

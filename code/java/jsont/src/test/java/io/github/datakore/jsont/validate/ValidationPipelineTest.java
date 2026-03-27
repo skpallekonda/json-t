@@ -317,4 +317,94 @@ class ValidationPipelineTest {
         // Should have at least ProcessStarted + 2 RowAccepted + ProcessCompleted
         assertTrue(mem.size() >= 4);
     }
+
+    // ─── constantValue (P1) ───────────────────────────────────────────────────
+
+    @Test
+    void constantValue_match_passes() throws Exception {
+        JsonTSchema schema = JsonTSchemaBuilder.straight("Test")
+                .fieldFrom(JsonTFieldBuilder.scalar("status", ScalarType.I32)
+                        .constantValue(JsonTValue.i32(1)))
+                .build();
+        MemorySink mem = new MemorySink();
+        ValidationPipeline p = ValidationPipeline.builder(schema)
+                .withoutConsole()
+                .withSink(mem)
+                .build();
+        List<JsonTRow> clean = p.validateRows(List.of(
+                JsonTRow.of(JsonTValue.i32(1))
+        ));
+        assertEquals(1, clean.size());
+        assertTrue(mem.fatalEvents().isEmpty());
+    }
+
+    @Test
+    void constantValue_mismatch_rejectsRow() throws Exception {
+        JsonTSchema schema = JsonTSchemaBuilder.straight("Test")
+                .fieldFrom(JsonTFieldBuilder.scalar("status", ScalarType.I32)
+                        .constantValue(JsonTValue.i32(1)))
+                .build();
+        MemorySink mem = new MemorySink();
+        ValidationPipeline p = ValidationPipeline.builder(schema)
+                .withoutConsole()
+                .withSink(mem)
+                .build();
+        List<JsonTRow> clean = p.validateRows(List.of(
+                JsonTRow.of(JsonTValue.i32(99))
+        ));
+        assertEquals(0, clean.size());
+        assertFalse(mem.fatalEvents().isEmpty());
+    }
+
+    // ─── ConditionalRequirement (P1) ─────────────────────────────────────────
+
+    @Test
+    void conditionalRule_notTriggered_passes() throws Exception {
+        // condition: qty > 100 — qty=5 is false → required field "note" not enforced
+        JsonTSchema schema = JsonTSchemaBuilder.straight("Test")
+                .fieldFrom(JsonTFieldBuilder.scalar("qty", ScalarType.I32))
+                .fieldFrom(JsonTFieldBuilder.scalar("note", ScalarType.STR).optional())
+                .validationFrom(JsonTValidationBlockBuilder.create()
+                        .conditionalRule(
+                                JsonTExpression.binary(BinaryOp.GT,
+                                        JsonTExpression.fieldName("qty"),
+                                        JsonTExpression.literal(JsonTValue.i32(100))),
+                                FieldPath.single("note")))
+                .build();
+        MemorySink mem = new MemorySink();
+        ValidationPipeline p = ValidationPipeline.builder(schema)
+                .withoutConsole()
+                .withSink(mem)
+                .build();
+        List<JsonTRow> clean = p.validateRows(List.of(
+                JsonTRow.of(JsonTValue.i32(5), JsonTValue.nullValue())
+        ));
+        assertEquals(1, clean.size());
+        assertTrue(mem.fatalEvents().isEmpty());
+    }
+
+    @Test
+    void conditionalRule_triggered_rejectsRow() throws Exception {
+        // condition: qty > 100 — qty=200 is true → "note" is null → ConditionalRequirementViolation
+        JsonTSchema schema = JsonTSchemaBuilder.straight("Test")
+                .fieldFrom(JsonTFieldBuilder.scalar("qty", ScalarType.I32))
+                .fieldFrom(JsonTFieldBuilder.scalar("note", ScalarType.STR).optional())
+                .validationFrom(JsonTValidationBlockBuilder.create()
+                        .conditionalRule(
+                                JsonTExpression.binary(BinaryOp.GT,
+                                        JsonTExpression.fieldName("qty"),
+                                        JsonTExpression.literal(JsonTValue.i32(100))),
+                                FieldPath.single("note")))
+                .build();
+        MemorySink mem = new MemorySink();
+        ValidationPipeline p = ValidationPipeline.builder(schema)
+                .withoutConsole()
+                .withSink(mem)
+                .build();
+        List<JsonTRow> clean = p.validateRows(List.of(
+                JsonTRow.of(JsonTValue.i32(200), JsonTValue.nullValue())
+        ));
+        assertEquals(0, clean.size());
+        assertFalse(mem.fatalEvents().isEmpty());
+    }
 }

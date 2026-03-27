@@ -65,14 +65,14 @@ class RowScannerTest {
         assertEquals(nullValue(), rows.get(0).get(0));
     }
 
-    @Test void parseRows_unspecified_mapsToNull() {
+    @Test void parseRows_unspecified_emitsUnspecified() {
         List<JsonTRow> rows = collectRows("{_}");
-        assertEquals(nullValue(), rows.get(0).get(0));
+        assertEquals(unspecified(), rows.get(0).get(0));
     }
 
-    @Test void parseRows_enumConstant_storedAsText() {
+    @Test void parseRows_enumConstant_emitsEnum() {
         List<JsonTRow> rows = collectRows("{ACTIVE}");
-        assertEquals(text("ACTIVE"), rows.get(0).get(0));
+        assertEquals(enumValue("ACTIVE"), rows.get(0).get(0));
     }
 
     @Test void parseRows_floatValue() {
@@ -138,7 +138,7 @@ class RowScannerTest {
         assertEquals(text("Alice"), r.get(1));
         assertEquals(bool(true),  r.get(2));
         assertEquals(nullValue(), r.get(3));
-        assertEquals(text("ACTIVE"), r.get(4));
+        assertEquals(enumValue("ACTIVE"), r.get(4));
     }
 
     // ── parseRowsStreaming ────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import io.github.datakore.jsont.model.FieldPath;
 import io.github.datakore.jsont.model.JsonTExpression;
 import io.github.datakore.jsont.model.JsonTField;
 import io.github.datakore.jsont.model.JsonTRow;
+import io.github.datakore.jsont.model.JsonTRule;
 import io.github.datakore.jsont.model.JsonTSchema;
 import io.github.datakore.jsont.model.JsonTValue;
 import io.github.datakore.jsont.model.SchemaKind;
@@ -99,11 +100,19 @@ public final class RowTransformer {
         // 2. Check validation rules
         if (schema.validation().isPresent()) {
             var vb = schema.validation().get();
-            for (JsonTExpression rule : vb.rules()) {
-                for (String ref : OperationApplicator.collectFieldRefs(rule)) {
-                    if (!fieldNames.contains(ref)) {
-                        throw new JsonTError.SchemaInvalid(
-                                "Rule references unknown field: " + ref);
+            for (JsonTRule rule : vb.rules()) {
+                List<JsonTExpression> exprs = new ArrayList<>();
+                if (rule instanceof JsonTRule.Expression e) {
+                    exprs.add(e.expr());
+                } else if (rule instanceof JsonTRule.ConditionalRequirement cr) {
+                    exprs.add(cr.condition());
+                }
+                for (JsonTExpression expr : exprs) {
+                    for (String ref : OperationApplicator.collectFieldRefs(expr)) {
+                        if (!fieldNames.contains(ref)) {
+                            throw new JsonTError.SchemaInvalid(
+                                    "Rule references unknown field: " + ref);
+                        }
                     }
                 }
             }
@@ -198,11 +207,20 @@ public final class RowTransformer {
         // 4. If derived schema has validation block, check against output fields
         if (schema.validation().isPresent()) {
             var vb = schema.validation().get();
-            for (JsonTExpression rule : vb.rules()) {
-                for (String ref : OperationApplicator.collectFieldRefs(rule)) {
-                    if (!currentFields.contains(ref)) {
-                        throw new JsonTError.SchemaInvalid(
-                                "Rule references unknown field: " + ref);
+            for (JsonTRule rule : vb.rules()) {
+                // Extract the expression(s) to validate field refs against the output schema
+                List<JsonTExpression> exprs = new ArrayList<>();
+                if (rule instanceof JsonTRule.Expression e) {
+                    exprs.add(e.expr());
+                } else if (rule instanceof JsonTRule.ConditionalRequirement cr) {
+                    exprs.add(cr.condition());
+                }
+                for (JsonTExpression expr : exprs) {
+                    for (String ref : OperationApplicator.collectFieldRefs(expr)) {
+                        if (!currentFields.contains(ref)) {
+                            throw new JsonTError.SchemaInvalid(
+                                    "Rule references unknown field: " + ref);
+                        }
                     }
                 }
             }

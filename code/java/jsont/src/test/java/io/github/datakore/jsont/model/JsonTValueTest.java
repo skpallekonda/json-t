@@ -180,4 +180,51 @@ class JsonTValueTest {
         assertEquals(JsonTValue.text("a"), JsonTValue.text("a"));
         assertEquals(JsonTValue.nullValue(), JsonTValue.nullValue());
     }
+
+    // ─── Unspecified (P1) ─────────────────────────────────────────────────────
+
+    @Test
+    void unspecified_isDistinctFromNull() {
+        JsonTValue v = JsonTValue.unspecified();
+        assertFalse(v.isNull());
+        assertInstanceOf(JsonTValue.Unspecified.class, v);
+        assertEquals("_", v.toString());
+    }
+
+    @Test
+    void unspecified_equality() {
+        assertEquals(JsonTValue.unspecified(), JsonTValue.unspecified());
+        assertNotEquals(JsonTValue.unspecified(), JsonTValue.nullValue());
+    }
+
+    // ─── Enum (P1) ────────────────────────────────────────────────────────────
+
+    @Test
+    void enumValue_wrapsString() {
+        JsonTValue v = JsonTValue.enumValue("ACTIVE");
+        assertInstanceOf(JsonTValue.Enum.class, v);
+        assertEquals("ACTIVE", ((JsonTValue.Enum) v).value());
+        assertEquals("ACTIVE", v.toString());
+    }
+
+    @Test
+    void enumValue_requiresNonNull() {
+        assertThrows(NullPointerException.class, () -> JsonTValue.enumValue(null));
+    }
+
+    @Test
+    void sealedDispatch_includesUnspecifiedAndEnum() {
+        JsonTValue u = JsonTValue.unspecified();
+        String labelU;
+        if      (u instanceof JsonTValue.Unspecified) labelU = "unspecified";
+        else if (u instanceof JsonTValue.Enum)        labelU = "enum";
+        else                                          labelU = "other";
+        assertEquals("unspecified", labelU);
+
+        JsonTValue e = JsonTValue.enumValue("STATUS");
+        String labelE;
+        if      (e instanceof JsonTValue.Enum ev) labelE = ev.value();
+        else                                      labelE = "other";
+        assertEquals("STATUS", labelE);
+    }
 }
