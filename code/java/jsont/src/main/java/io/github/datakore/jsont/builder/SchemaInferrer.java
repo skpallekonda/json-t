@@ -7,20 +7,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Infers a straight {@link JsonTSchema} from a sample of {@link JsonTRow} values.
+ * Infers a straight {@link JsonTSchema} from a sample of data rows.
  *
- * <p>Type inference rules per column:
- * <ul>
- *   <li>All booleans → {@code Bool}</li>
- *   <li>All integers → widest integer type (I16 → I32 → I64); unsigned types promoted</li>
- *   <li>All floats → widest float type (D32 → D64 → D128)</li>
- *   <li>Mixed int+float → {@code D64}</li>
- *   <li>Any string → {@code Str}</li>
- *   <li>All unknown/empty → {@code Str}</li>
- * </ul>
- *
- * <p>A column is marked optional when its null fraction exceeds
- * {@link #nullableThreshold} (default {@code 0.0} = any null triggers optional).
+ * <p>Numeric types widen to accommodate the column (I16 → I32 → I64, D32 → D64 → D128).
+ * Mixed int+float columns become {@code D64}. Any string in a column wins over numerics.
+ * A column is marked optional when its null fraction exceeds {@link #nullableThreshold}
+ * (default {@code 0.0} — any null triggers optional).
  *
  * <pre>{@code
  *   JsonTSchema schema = SchemaInferrer.create()
@@ -66,8 +58,6 @@ public final class SchemaInferrer {
     /**
      * Infers a schema using auto-generated field names ({@code field_0}, {@code field_1}, …).
      *
-     * @param rows the sample data rows (may be empty)
-     * @return the inferred straight schema
      * @throws BuildError if rows have inconsistent widths
      */
     public JsonTSchema infer(List<JsonTRow> rows) throws BuildError {
@@ -77,10 +67,7 @@ public final class SchemaInferrer {
     /**
      * Infers a schema using the supplied field name hints.
      *
-     * @param rows  the sample data rows (may be empty)
-     * @param names field name hints — count must match the row width
-     * @return the inferred straight schema
-     * @throws BuildError if name count differs from row width, or rows have inconsistent widths
+     * @throws BuildError if hint count differs from row width, or rows have inconsistent widths
      */
     public JsonTSchema inferWithNames(List<JsonTRow> rows, List<String> names) throws BuildError {
         return inferInner(rows, names);
@@ -142,12 +129,6 @@ public final class SchemaInferrer {
         return width;
     }
 
-    /**
-     * Infers the best {@link ScalarType} for a column of non-null, non-unspecified values.
-     * Integer widening: I16 → I32 → I64; unsigned promoted by one signed step.
-     * Float widening: D32 → D64 → D128. Mixed int+float → D64.
-     * String wins over any other type. All-boolean → Bool. Unknown → Str.
-     */
     private static ScalarType inferType(List<JsonTValue> values) {
         boolean hasInt = false, hasFloat = false, hasString = false, hasBool = false, hasOther = false;
         int intWidth = 0;   // max of 16, 32, 64

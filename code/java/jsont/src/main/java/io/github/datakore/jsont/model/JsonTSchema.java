@@ -61,28 +61,15 @@ public final class JsonTSchema {
     /** Returns whether this is a straight or derived schema. */
     public SchemaKind kind() { return kind; }
 
-    /**
-     * Field list — non-empty for {@code STRAIGHT} schemas, always empty for {@code DERIVED}.
-     */
     public List<JsonTField> fields() { return fields; }
 
-    /**
-     * The parent schema name this schema is derived from.
-     *
-     * @return {@link Optional#empty()} for straight schemas
-     */
+    /** Empty for straight schemas. */
     public Optional<String> derivedFrom() { return Optional.ofNullable(derivedFrom); }
 
-    /**
-     * Ordered sequence of operations that transform the parent schema's rows.
-     * Always empty for straight schemas.
-     */
+    /** Transformation operations, applied in order. Empty for straight schemas. */
     public List<SchemaOperation> operations() { return operations; }
 
-    /**
-     * Optional validation block (uniqueness constraints + boolean rules).
-     * Always empty for derived schemas.
-     */
+    /** Uniqueness constraints and boolean rules. Empty for derived schemas. */
     public Optional<JsonTValidationBlock> validation() { return Optional.ofNullable(validation); }
 
     /** Returns {@code true} for straight schemas. */

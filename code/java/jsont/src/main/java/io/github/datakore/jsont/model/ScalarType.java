@@ -44,13 +44,7 @@ public enum ScalarType {
         return keyword;
     }
 
-    /**
-     * Looks up a ScalarType by its keyword string.
-     *
-     * @param keyword the keyword to look up (e.g. "i32")
-     * @return the matching ScalarType
-     * @throws IllegalArgumentException if the keyword is not recognised
-     */
+    /** @throws IllegalArgumentException if the keyword is not recognised */
     public static ScalarType fromKeyword(String keyword) {
         for (ScalarType t : values()) {
             if (t.keyword.equals(keyword)) {

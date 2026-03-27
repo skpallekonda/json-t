@@ -36,13 +36,7 @@ public final class JsonTValidationBlockBuilder {
     // ─── Uniqueness constraints ───────────────────────────────────────────────
 
     /**
-     * Adds a compound uniqueness key: the combination of all listed field paths
-     * must be distinct across all rows in the dataset.
-     *
-     * <p>For a single-field uniqueness constraint, pass one {@link FieldPath}.
-     * For a compound key, pass multiple paths.
-     *
-     * @param paths one or more field paths that form the key
+     * Adds a uniqueness key — the combination of field paths must be distinct across all rows.
      */
     public JsonTValidationBlockBuilder unique(List<FieldPath> paths) {
         if (paths == null || paths.isEmpty())
@@ -56,23 +50,14 @@ public final class JsonTValidationBlockBuilder {
         return unique(List.of(paths));
     }
 
-    /**
-     * Shorthand for a single-field uniqueness constraint.
-     *
-     * <pre>{@code .unique("id") }</pre>
-     */
+    /** Shorthand for a single-field uniqueness constraint. */
     public JsonTValidationBlockBuilder unique(String fieldName) {
         return unique(FieldPath.single(fieldName));
     }
 
     // ─── Boolean rule constraints ─────────────────────────────────────────────
 
-    /**
-     * Adds a row-level rule expression. Every row must evaluate this expression
-     * to {@code Bool(true)}; rows that fail are reported as validation errors.
-     *
-     * @param expr a boolean-returning expression
-     */
+    /** Adds a row-level boolean rule — rows that evaluate to false are rejected. */
     public JsonTValidationBlockBuilder rule(JsonTExpression expr) {
         if (expr == null) throw new IllegalArgumentException("rule expression must not be null");
         rules.add(JsonTRule.expression(expr));
@@ -98,13 +83,7 @@ public final class JsonTValidationBlockBuilder {
 
     // ─── Build ────────────────────────────────────────────────────────────────
 
-    /**
-     * Validates state and returns an immutable {@link JsonTValidationBlock}.
-     *
-     * <p>Called internally by {@link JsonTSchemaBuilder#validationFrom}.
-     *
-     * @throws BuildError if neither unique keys nor rules have been added
-     */
+    /** @throws BuildError if neither unique keys nor rules have been added */
     JsonTValidationBlock build() throws BuildError {
         if (uniqueKeys.isEmpty() && rules.isEmpty())
             throw new BuildError("Validation block must declare at least one unique key or rule");

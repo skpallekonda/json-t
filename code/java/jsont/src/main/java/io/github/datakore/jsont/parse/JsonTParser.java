@@ -40,26 +40,14 @@ public final class JsonTParser {
 
     private JsonTParser() {}
 
-    /**
-     * Parses a namespace schema DSL document.
-     *
-     * @param input the full namespace DSL text
-     * @return the parsed namespace model
-     * @throws JsonTError.Parse on any grammar or semantic error
-     */
+    /** @throws JsonTError.Parse on grammar or semantic error */
     public static JsonTNamespace parseNamespace(String input) {
         return SchemaVisitor.parseNamespace(input);
     }
 
     /**
-     * Parses all data rows from an in-memory string.
+     * Parses all data rows from a string. Numbers are emitted as {@code D64} (no schema context).
      *
-     * <p>Each {@code {v1, v2, ...}} block calls {@code consumer} once.
-     * Numbers are always emitted as {@code D64} (no schema context).
-     *
-     * @param input    rows text (e.g. {@code "{1,\"a\"},{2,\"b\"}"})
-     * @param consumer called once per completed row
-     * @return number of rows parsed
      * @throws JsonTError.Parse on malformed input
      */
     public static int parseRows(String input, RowConsumer consumer) {
@@ -67,14 +55,9 @@ public final class JsonTParser {
     }
 
     /**
-     * Parses data rows from a {@link Reader} with O(1) memory overhead.
+     * Streams rows from a {@link Reader} with O(1) memory. The reader is not closed.
      *
-     * <p>The reader is NOT closed by this method.
-     *
-     * @param reader   source of row data (e.g. {@code BufferedReader(new FileReader(...))})
-     * @param consumer called once per completed row
-     * @return number of rows parsed
-     * @throws IOException      on I/O read failure
+     * @throws IOException      on read failure
      * @throws JsonTError.Parse on malformed row data
      */
     public static int parseRowsStreaming(Reader reader, RowConsumer consumer) throws IOException {
@@ -83,11 +66,7 @@ public final class JsonTParser {
 
     /**
      * Returns a lazy {@link RowIter} over rows from {@code reader}.
-     *
-     * <p>The caller is responsible for closing the iterator (which also closes the reader).
-     *
-     * @param reader source of row data
-     * @return a lazy row iterator
+     * Caller must close the iterator (closes the reader with it).
      */
     public static RowIter rowIter(Reader reader) {
         return new RowIter(reader);

@@ -96,19 +96,13 @@ public final class JsonTFieldBuilder {
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
 
-    /**
-     * Marks the field as optional (may be absent or null in a row).
-     * Equivalent to appending {@code ?} to the field type in schema text.
-     */
+    /** Marks the field as optional (may be absent or null in a row). */
     public JsonTFieldBuilder optional() {
         this.optional = true;
         return this;
     }
 
-    /**
-     * Promotes this field to an array type.
-     * {@code SCALAR} becomes {@code ARRAY_SCALAR}; {@code OBJECT} becomes {@code ARRAY_OBJECT}.
-     */
+    /** Promotes this field to an array type. Idempotent. */
     public JsonTFieldBuilder asArray() {
         this.kind = switch (kind) {
             case SCALAR -> FieldKind.ARRAY_SCALAR;
@@ -210,13 +204,7 @@ public final class JsonTFieldBuilder {
 
     // ─── Build ────────────────────────────────────────────────────────────────
 
-    /**
-     * Validates the builder state and constructs a {@link JsonTField}.
-     *
-     * <p>Called internally by {@link JsonTSchemaBuilder#fieldFrom}.
-     *
-     * @throws BuildError if the configuration is invalid
-     */
+    /** @throws BuildError if the configuration is invalid */
     JsonTField build() throws BuildError {
         if (name == null || name.isBlank())
             throw new BuildError("Field name must not be blank");

@@ -77,11 +77,9 @@ public final class JsonTSchemaBuilder {
     // ─── Straight-schema methods ──────────────────────────────────────────────
 
     /**
-     * Builds and adds a field from the supplied builder.
+     * Builds and adds a field.
      *
-     * @param builder field builder (constraints already configured)
-     * @return this builder
-     * @throws BuildError if this is a derived schema, or if the field is misconfigured
+     * @throws BuildError if called on a derived schema, or if the field is misconfigured
      */
     public JsonTSchemaBuilder fieldFrom(JsonTFieldBuilder builder) throws BuildError {
         if (kind == SchemaKind.DERIVED)
@@ -94,9 +92,7 @@ public final class JsonTSchemaBuilder {
     /**
      * Attaches a validation block (uniqueness keys + rules).
      *
-     * @param builder validation block builder (already configured)
-     * @return this builder
-     * @throws BuildError if this is a derived schema, or if the block is misconfigured
+     * @throws BuildError if called on a derived schema, or if the block is misconfigured
      */
     public JsonTSchemaBuilder validationFrom(JsonTValidationBlockBuilder builder) throws BuildError {
         if (kind == SchemaKind.DERIVED)
@@ -110,11 +106,9 @@ public final class JsonTSchemaBuilder {
 
     /**
      * Appends a schema operation (rename, exclude, project, filter, transform).
-     * Operations are applied in declaration order when a row is transformed.
+     * Operations run in declaration order at transform time.
      *
-     * @param op the operation to append
-     * @return this builder
-     * @throws BuildError if this is a straight schema
+     * @throws BuildError if called on a straight schema
      */
     public JsonTSchemaBuilder operation(SchemaOperation op) throws BuildError {
         if (kind == SchemaKind.STRAIGHT)
@@ -126,15 +120,7 @@ public final class JsonTSchemaBuilder {
 
     // ─── Build ────────────────────────────────────────────────────────────────
 
-    /**
-     * Validates state and constructs an immutable {@link JsonTSchema}.
-     *
-     * @throws BuildError if the schema is misconfigured:
-     *   <ul>
-     *     <li>Straight: no fields declared</li>
-     *     <li>Derived: no parent name, or duplicate field declarations</li>
-     *   </ul>
-     */
+    /** @throws BuildError if the schema is misconfigured (e.g. no fields, duplicate names) */
     public JsonTSchema build() throws BuildError {
         validateName();
         switch (kind) {

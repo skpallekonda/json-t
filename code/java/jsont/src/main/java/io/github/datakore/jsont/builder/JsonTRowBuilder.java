@@ -8,32 +8,25 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Fluent builder for {@link JsonTRow}, with an optional schema-aware mode that
- * validates value types at push time.
+ * Fluent row builder. Use {@link #create()} for free-form rows, or {@link #withSchema}
+ * for type-checked construction.
  *
- * <h2>Untyped mode (no schema)</h2>
  * <pre>{@code
+ *   // untyped
  *   JsonTRow row = JsonTRowBuilder.create()
  *       .push(JsonTValue.i64(1L))
  *       .push(JsonTValue.text("Alice"))
  *       .build();
- * }</pre>
  *
- * <h2>Schema-aware mode</h2>
- * <pre>{@code
+ *   // schema-aware — validates each value against the corresponding field type
  *   JsonTRow row = JsonTRowBuilder.withSchema(personSchema)
- *       .pushChecked(JsonTValue.i64(1L))       // validated against field 0
- *       .pushChecked(JsonTValue.text("Alice"))  // validated against field 1
- *       .buildChecked();                        // validates row completeness
+ *       .pushChecked(JsonTValue.i64(1L))
+ *       .pushChecked(JsonTValue.text("Alice"))
+ *       .buildChecked();
  * }</pre>
  *
- * <p>In schema-aware mode:
- * <ul>
- *   <li>{@link JsonTValue.Null} and {@link JsonTValue.Unspecified} always pass type validation
- *       (null-checking is deferred to the validation pipeline).</li>
- *   <li>Pushing more values than the schema has fields throws {@link BuildError}.</li>
- *   <li>{@link #buildChecked()} throws {@link BuildError} if a required field has no value.</li>
- * </ul>
+ * <p>Null and Unspecified always pass type checks — null enforcement is left to the
+ * validation pipeline.
  */
 public final class JsonTRowBuilder {
 
@@ -58,12 +51,7 @@ public final class JsonTRowBuilder {
 
     // ─── Untyped mode ─────────────────────────────────────────────────────────
 
-    /**
-     * Appends a value without any schema validation. Always succeeds.
-     *
-     * @param value the value to append (must not be null)
-     * @return this builder
-     */
+    /** Appends a value. No validation. */
     public JsonTRowBuilder push(JsonTValue value) {
         Objects.requireNonNull(value, "value must not be null");
         values.add(value);
@@ -76,12 +64,9 @@ public final class JsonTRowBuilder {
     // ─── Schema-aware mode ────────────────────────────────────────────────────
 
     /**
-     * Appends a value and validates it against the next field in the schema.
+     * Appends a value and validates it against the next schema field.
      *
-     * @param value the value to append
-     * @return this builder
-     * @throws BuildError if pushing beyond the schema field count, or if the value's
-     *                    type is incompatible with the expected field type
+     * @throws BuildError on type mismatch or if already at the field limit
      */
     public JsonTRowBuilder pushChecked(JsonTValue value) throws BuildError {
         Objects.requireNonNull(value, "value must not be null");
@@ -98,10 +83,9 @@ public final class JsonTRowBuilder {
     }
 
     /**
-     * Validates row completeness and builds the row.
+     * Builds the row, checking that all required fields were pushed.
      *
-     * @return the completed row
-     * @throws BuildError if any required (non-optional) field has no value
+     * @throws BuildError if a required field has no value
      */
     public JsonTRow buildChecked() throws BuildError {
         if (schema != null) {

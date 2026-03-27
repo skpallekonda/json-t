@@ -152,8 +152,6 @@ public sealed interface JsonTExpression
     /**
      * Evaluates this expression against the given context.
      *
-     * @param ctx named bindings for field references
-     * @return the computed value
      * @throws JsonTError.Eval on unbound field, type mismatch, or div-by-zero
      */
     JsonTValue evaluate(EvalContext ctx);

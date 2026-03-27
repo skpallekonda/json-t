@@ -11,9 +11,7 @@ import java.util.Set;
 
 /**
  * An immutable, name-keyed registry of {@link JsonTSchema} instances.
- *
- * <p>Acts as the runtime resolution point for schema references in derived schemas
- * and transformations. Equivalent to Rust's {@code SchemaRegistry}.
+ * Used to resolve schema references in derived schemas and transformations.
  *
  * <pre>{@code
  *   // Build from a namespace parsed from disk

@@ -5,8 +5,6 @@ import java.util.Objects;
 /**
  * An immutable field definition within a straight schema.
  *
- * <p>Created exclusively by {@code JsonTFieldBuilder.build()} — do not construct directly.
- *
  * <pre>{@code
  *   JsonTField id = JsonTFieldBuilder.scalar("id", ScalarType.I64).build();
  *   //  id.name()        -> "id"

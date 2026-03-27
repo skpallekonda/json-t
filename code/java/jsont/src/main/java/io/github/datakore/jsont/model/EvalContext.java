@@ -6,11 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Holds named bindings for expression evaluation.
- *
- * <p>Use {@link #create()} to start building a context, then chain {@link #bind}
- * calls — each returns the same mutable instance (fluent style matching Rust's
- * {@code EvalContext::new().bind(...)}):
+ * Named bindings used when evaluating a {@link JsonTExpression}.
  *
  * <pre>{@code
  *   EvalContext ctx = EvalContext.create()
@@ -20,8 +16,8 @@ import java.util.Optional;
  *   JsonTValue result = expr.evaluate(ctx);
  * }</pre>
  *
- * <p>Once passed to {@link JsonTExpression#evaluate}, a context should not be
- * mutated further. Use {@link #snapshot()} to obtain an immutable copy.
+ * <p>After passing a context to {@link JsonTExpression#evaluate}, use
+ * {@link #snapshot()} if you need an immutable copy.
  */
 public final class EvalContext {
 
@@ -39,22 +35,14 @@ public final class EvalContext {
         return new EvalContext();
     }
 
-    /**
-     * Binds {@code name} to {@code value} and returns {@code this} (fluent).
-     *
-     * @param name  field name
-     * @param value the value to bind
-     * @return this context
-     */
+    /** Binds a field name to a value. Fluent — returns {@code this}. */
     public EvalContext bind(String name, JsonTValue value) {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("name must not be blank");
         bindings.put(name, value);
         return this;
     }
 
-    /**
-     * Returns the value bound to {@code name}, or {@link Optional#empty()} if absent.
-     */
+    /** Returns the value bound to {@code name}, or empty if absent. */
     public Optional<JsonTValue> lookup(String name) {
         return Optional.ofNullable(bindings.get(name));
     }
