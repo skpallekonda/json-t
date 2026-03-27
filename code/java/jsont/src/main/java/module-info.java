@@ -30,11 +30,11 @@ module io.github.datakore.jsont {
     exports io.github.datakore.jsont.error;
 
     // ── Phases to come ───────────────────────────────────────────────────────
-    // exports io.github.datakore.jsont.parse;
+    exports io.github.datakore.jsont.parse;
     exports io.github.datakore.jsont.stringify;
-    // exports io.github.datakore.jsont.validate;
-    // exports io.github.datakore.jsont.transform;
-    // exports io.github.datakore.jsont.diagnostic;
+    exports io.github.datakore.jsont.validate;
+    exports io.github.datakore.jsont.transform;
+    exports io.github.datakore.jsont.diagnostic;
 
     // ── io.github.datakore.jsont.internal  is NOT exported ──────────────────
 

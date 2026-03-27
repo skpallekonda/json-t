@@ -3,11 +3,11 @@ grammar JsonTSchema;
 // ─── Top-level ────────────────────────────────────────────────────────────────
 
 namespace_def
-    : NAMESPACE IDENT LBRACE catalog_def* RBRACE EOF
+    : NAMESPACE STRING_LITERAL? LBRACE catalog_def* RBRACE EOF
     ;
 
 catalog_def
-    : CATALOG IDENT LBRACE catalog_item* RBRACE
+    : CATALOG LBRACE catalog_item* RBRACE
     ;
 
 catalog_item
@@ -50,7 +50,21 @@ fields_block
     ;
 
 field_def
-    : IDENT COLON field_type_spec COMMA?
+    : field_name COLON field_type_spec COMMA?
+    ;
+
+// Allow scalar type keywords as field names (e.g. "email", "date", "ts")
+field_name
+    : IDENT
+    | I16 | I32 | I64 | U16 | U32 | U64
+    | D32 | D64 | D128
+    | BOOL | STR | NSTR
+    | URI | UUID | EMAIL | HOSTNAME | IPV4 | IPV6
+    | DATE | TIME | DTM | TS | TSZ | DUR | INST
+    | B64 | OID | HEX
+    | MIN_VALUE | MAX_VALUE | MIN_LENGTH | MAX_LENGTH
+    | PATTERN | REQUIRED | MAX_PRECISION | MIN_ITEMS | MAX_ITEMS
+    | ALLOW_NULLS | MAX_NULL_ITEMS
     ;
 
 field_type_spec
@@ -80,17 +94,21 @@ constraints
     ;
 
 constraint_item
-    : MIN_VALUE EQ number_literal
-    | MAX_VALUE EQ number_literal
-    | MIN_LENGTH EQ INT_LITERAL
-    | MAX_LENGTH EQ INT_LITERAL
-    | PATTERN EQ STRING_LITERAL
-    | REQUIRED
-    | MAX_PRECISION EQ INT_LITERAL
-    | MIN_ITEMS EQ INT_LITERAL
-    | MAX_ITEMS EQ INT_LITERAL
-    | ALLOW_NULLS
-    | MAX_NULL_ITEMS EQ INT_LITERAL
+    : MIN_VALUE EQ signed_number      # MinValueItem
+    | MAX_VALUE EQ signed_number      # MaxValueItem
+    | MIN_LENGTH EQ INT_LITERAL       # MinLengthItem
+    | MAX_LENGTH EQ INT_LITERAL       # MaxLengthItem
+    | PATTERN EQ STRING_LITERAL       # PatternItem
+    | REQUIRED                        # RequiredItem
+    | MAX_PRECISION EQ INT_LITERAL    # MaxPrecisionItem
+    | MIN_ITEMS EQ INT_LITERAL        # MinItemsItem
+    | MAX_ITEMS EQ INT_LITERAL        # MaxItemsItem
+    | ALLOW_NULLS                     # AllowNullsItem
+    | MAX_NULL_ITEMS EQ INT_LITERAL   # MaxNullItemsItem
+    ;
+
+signed_number
+    : MINUS? (INT_LITERAL | FLOAT_LITERAL)
     ;
 
 // ─── Validations block ────────────────────────────────────────────────────────
@@ -145,7 +163,7 @@ field_path_list
     ;
 
 field_path
-    : IDENT (DOT IDENT)*
+    : field_name (DOT field_name)*
     ;
 
 // ─── Enum ─────────────────────────────────────────────────────────────────────
@@ -159,30 +177,28 @@ enum_values
     ;
 
 // ─── Expressions ──────────────────────────────────────────────────────────────
+// ANTLR4 left-recursive: alternatives listed FIRST have HIGHER precedence (bind tighter).
+// So list highest-precedence operators first.
 
 expr
-    : expr AND_OP expr                                  # BinaryAndExpr
-    | expr OR_OP expr                                   # BinaryOrExpr
-    | expr (EQ_OP | NE_OP) expr                        # EqualityExpr
-    | expr (LT_OP | LE_OP | GT_OP | GE_OP) expr        # ComparisonExpr
-    | expr (PLUS | MINUS) expr                          # AddSubExpr
-    | expr (STAR | SLASH) expr                          # MulDivExpr
-    | NOT_OP expr                                       # NotExpr
-    | MINUS expr                                        # NegExpr
-    | LPAREN expr RPAREN                                # ParenExpr
-    | NULL_LITERAL                                      # NullLiteralExpr
-    | BOOL_LITERAL                                      # BoolLiteralExpr
-    | number_literal                                    # NumberLiteralExpr
-    | STRING_LITERAL                                    # StringLiteralExpr
-    | IDENT                                             # FieldRefExpr
+    : expr (STAR | SLASH) expr                      # MulDivExpr
+    | expr (PLUS | MINUS) expr                      # AddSubExpr
+    | expr (LT | LE_OP | GT | GE_OP) expr          # ComparisonExpr
+    | expr (EQ_OP | NE_OP) expr                    # EqualityExpr
+    | expr AND_OP expr                              # BinaryAndExpr
+    | expr OR_OP expr                               # BinaryOrExpr
+    | NOT_OP expr                                   # NotExpr
+    | MINUS expr                                    # NegExpr
+    | LPAREN expr RPAREN                            # ParenExpr
+    | NULL_LITERAL                                  # NullLiteralExpr
+    | BOOL_LITERAL                                  # BoolLiteralExpr
+    | INT_LITERAL                                   # IntLiteralExpr
+    | FLOAT_LITERAL                                 # FloatLiteralExpr
+    | STRING_LITERAL                                # StringLiteralExpr
+    | IDENT                                         # FieldRefExpr
     ;
 
-number_literal
-    : INT_LITERAL
-    | FLOAT_LITERAL
-    ;
-
-// ─── Keywords ─────────────────────────────────────────────────────────────────
+// ─── Keywords (must appear before IDENT in lexer) ─────────────────────────────
 
 NAMESPACE   : 'namespace' ;
 CATALOG     : 'catalog' ;
@@ -200,91 +216,71 @@ TRANSFORM   : 'transform' ;
 ENUM        : 'enum' ;
 
 // Scalar type keywords
-I16         : 'i16' ;
-I32         : 'i32' ;
-I64         : 'i64' ;
-U16         : 'u16' ;
-U32         : 'u32' ;
-U64         : 'u64' ;
-D32         : 'd32' ;
-D64         : 'd64' ;
-D128        : 'd128' ;
-BOOL        : 'bool' ;
-STR         : 'str' ;
-NSTR        : 'nstr' ;
-URI         : 'uri' ;
-UUID        : 'uuid' ;
-EMAIL       : 'email' ;
-HOSTNAME    : 'hostname' ;
-IPV4        : 'ipv4' ;
-IPV6        : 'ipv6' ;
-DATE        : 'date' ;
-TIME        : 'time' ;
-DTM         : 'dtm' ;
-TS          : 'ts' ;
-TSZ         : 'tsz' ;
-DUR         : 'dur' ;
-INST        : 'inst' ;
-B64         : 'b64' ;
-OID         : 'oid' ;
-HEX         : 'hex' ;
+I16      : 'i16' ;   I32   : 'i32' ;   I64  : 'i64' ;
+U16      : 'u16' ;   U32   : 'u32' ;   U64  : 'u64' ;
+D32      : 'd32' ;   D64   : 'd64' ;   D128 : 'd128' ;
+BOOL     : 'bool' ;  STR   : 'str' ;   NSTR : 'nstr' ;
+URI      : 'uri' ;   UUID  : 'uuid' ;  EMAIL : 'email' ;
+HOSTNAME : 'hostname' ; IPV4 : 'ipv4' ; IPV6 : 'ipv6' ;
+DATE     : 'date' ;  TIME  : 'time' ;  DTM  : 'dtm' ;
+TS       : 'ts' ;    TSZ   : 'tsz' ;   DUR  : 'dur' ;
+INST     : 'inst' ;  B64   : 'b64' ;   OID  : 'oid' ;
+HEX      : 'hex' ;
 
 // Constraint keywords
-MIN_VALUE       : 'minValue' ;
-MAX_VALUE       : 'maxValue' ;
-MIN_LENGTH      : 'minLength' ;
-MAX_LENGTH      : 'maxLength' ;
-PATTERN         : 'pattern' ;
-REQUIRED        : 'required' ;
-MAX_PRECISION   : 'maxPrecision' ;
-MIN_ITEMS       : 'minItems' ;
-MAX_ITEMS       : 'maxItems' ;
-ALLOW_NULLS     : 'allowNulls' ;
-MAX_NULL_ITEMS  : 'maxNullItems' ;
+MIN_VALUE      : 'minValue' ;
+MAX_VALUE      : 'maxValue' ;
+MIN_LENGTH     : 'minLength' ;
+MAX_LENGTH     : 'maxLength' ;
+PATTERN        : 'pattern' ;
+REQUIRED       : 'required' ;
+MAX_PRECISION  : 'maxPrecision' ;
+MIN_ITEMS      : 'minItems' ;
+MAX_ITEMS      : 'maxItems' ;
+ALLOW_NULLS    : 'allowNulls' ;
+MAX_NULL_ITEMS : 'maxNullItems' ;
 
 // Literals
-NULL_LITERAL    : 'null' ;
-BOOL_LITERAL    : 'true' | 'false' ;
-INT_LITERAL     : '-'? [0-9]+ ;
-FLOAT_LITERAL   : '-'? [0-9]+ '.' [0-9]+ ([eE] [+-]? [0-9]+)? ;
-STRING_LITERAL  : '"' (~["\\\r\n] | '\\' .)* '"' ;
+NULL_LITERAL  : 'null' ;
+BOOL_LITERAL  : 'true' | 'false' ;
+INT_LITERAL   : [0-9]+ ;
+FLOAT_LITERAL : [0-9]+ '.' [0-9]+ ([eE] [+-]? [0-9]+)? ;
+STRING_LITERAL: '"' (~["\\\r\n] | '\\' .)* '"' ;
 
-// Operators
+// Multi-char operators (defined BEFORE single-char to get longer match)
 EQ_OP   : '==' ;
 NE_OP   : '!=' ;
 LE_OP   : '<=' ;
 GE_OP   : '>=' ;
-LT_OP   : '<' ;
-GT_OP   : '>' ;
 AND_OP  : '&&' ;
 OR_OP   : '||' ;
 NOT_OP  : '!' ;
+ARROW   : '->' ;
+ARRAY_SUFFIX   : '[]' ;
+OPTIONAL_SUFFIX: '?' ;
+
+// Single-char operators and punctuation
 PLUS    : '+' ;
 MINUS   : '-' ;
 STAR    : '*' ;
 SLASH   : '/' ;
-ARROW   : '->' ;
+LBRACE  : '{' ;
+RBRACE  : '}' ;
+LPAREN  : '(' ;
+RPAREN  : ')' ;
+LBRACKET: '[' ;
+RBRACKET: ']' ;
+LT      : '<' ;
+GT      : '>' ;
+COLON   : ':' ;
+COMMA   : ',' ;
+DOT     : '.' ;
+EQ      : '=' ;
 
-// Punctuation
-LBRACE          : '{' ;
-RBRACE          : '}' ;
-LPAREN          : '(' ;
-RPAREN          : ')' ;
-LBRACKET        : '[' ;
-RBRACKET        : ']' ;
-LT              : '<' ;
-GT              : '>' ;
-COLON           : ':' ;
-COMMA           : ',' ;
-DOT             : '.' ;
-EQ              : '=' ;
-OPTIONAL_SUFFIX : '?' ;
-ARRAY_SUFFIX    : '[]' ;
+// Identifiers (MUST be after all keywords)
+IDENT : [a-zA-Z_][a-zA-Z0-9_]* ;
 
-// Identifier (must come after all keywords)
-IDENT   : [a-zA-Z_] [a-zA-Z0-9_]* ;
-
-// Whitespace and comments
-WS      : [ \t\r\n]+ -> skip ;
-LINE_COMMENT    : '//' ~[\r\n]* -> skip ;
-BLOCK_COMMENT   : '/*' .*? '*/' -> skip ;
+// Skip whitespace and comments
+WS           : [ \t\r\n]+ -> skip ;
+LINE_COMMENT : '//' ~[\r\n]* -> skip ;
+BLOCK_COMMENT: '/*' .*? '*/' -> skip ;

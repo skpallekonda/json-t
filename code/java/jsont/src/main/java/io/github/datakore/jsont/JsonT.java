@@ -4,11 +4,15 @@ import io.github.datakore.jsont.builder.JsonTSchemaBuilder;
 import io.github.datakore.jsont.model.JsonTNamespace;
 import io.github.datakore.jsont.model.JsonTRow;
 import io.github.datakore.jsont.model.JsonTSchema;
+import io.github.datakore.jsont.parse.JsonTParser;
+import io.github.datakore.jsont.parse.RowConsumer;
+import io.github.datakore.jsont.parse.RowIter;
 import io.github.datakore.jsont.stringify.JsonTStringifier;
 import io.github.datakore.jsont.stringify.RowWriter;
 import io.github.datakore.jsont.stringify.StringifyOptions;
 
 import java.io.IOException;
+import java.io.Reader;
 import java.io.Writer;
 
 /**
@@ -72,5 +76,27 @@ public final class JsonT {
      */
     public static void writeRows(Iterable<JsonTRow> rows, Writer w) throws IOException {
         RowWriter.writeRows(rows, w);
+    }
+
+    // ── Parse convenience ─────────────────────────────────────────────────────
+
+    /** Parses a namespace schema DSL document. Throws {@link io.github.datakore.jsont.error.JsonTError.Parse} on invalid input. */
+    public static JsonTNamespace parseNamespace(String input) {
+        return JsonTParser.parseNamespace(input);
+    }
+
+    /** Parses data rows from a string. Returns row count. */
+    public static int parseRows(String input, RowConsumer consumer) {
+        return JsonTParser.parseRows(input, consumer);
+    }
+
+    /** Parses data rows from a Reader (streaming, O(1) memory). Throws {@link java.io.IOException}. */
+    public static int parseRowsStreaming(Reader reader, RowConsumer consumer) throws IOException {
+        return JsonTParser.parseRowsStreaming(reader, consumer);
+    }
+
+    /** Returns a lazy row iterator over {@code reader}. Caller must close the iterator. */
+    public static RowIter rowIter(Reader reader) {
+        return JsonTParser.rowIter(reader);
     }
 }

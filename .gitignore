@@ -37,5 +37,6 @@ cargo-at-coder.json
 
 # --- Claude Code & Tooling ---
 CLAUDE.md
+STATE.md
 settings.local.json
 .claude/

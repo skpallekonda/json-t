@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xmlns="http://maven.apache.org/POM/4.0.0"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.github.datakore</groupId>
@@ -47,7 +46,7 @@
     <!-- Project Metadata -->
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -198,7 +197,7 @@
 
     <modules>
         <module>jsont</module>
-        <module>jsont-common</module>
+        <!--        <module>jsont-common</module>
         <module>jsont-parser</module>
         <module>jsont-annotations</module>
         <module>jsont-adapters-api</module>
@@ -206,7 +205,7 @@
         <module>jsont-internal</module>
         <module>jsont-core</module>
         <module>jsont-benchmark</module>
-        <module>jsont-maven-plugin</module>
+        <module>jsont-maven-plugin</module> -->
     </modules>
 
 </project>
