@@ -216,6 +216,60 @@ class DiagnosticEventTest {
         assertDoesNotThrow(() -> sink.emit(DiagnosticEvent.info(new DiagnosticEventKind.Notice("test"))));
     }
 
+    // ─── DiagnosticSink.fanOut ─────────────────────────────────────────────────
+
+    @Test
+    void fanOut_emitsToAllSinks() {
+        MemorySink a = new MemorySink();
+        MemorySink b = new MemorySink();
+        MemorySink c = new MemorySink();
+        DiagnosticSink fan = DiagnosticSink.fanOut(a, b, c);
+
+        fan.emit(DiagnosticEvent.fatal(new DiagnosticEventKind.RequiredFieldMissing("id")));
+        fan.emit(DiagnosticEvent.warning(new DiagnosticEventKind.Notice("warn")));
+        fan.emit(DiagnosticEvent.info(new DiagnosticEventKind.Notice("info")));
+
+        assertEquals(3, a.size());
+        assertEquals(3, b.size());
+        assertEquals(3, c.size());
+    }
+
+    @Test
+    void fanOut_severityFiltering_perSink() {
+        MemorySink fatals   = new MemorySink();
+        MemorySink warnings = new MemorySink();
+        DiagnosticSink fan = DiagnosticSink.fanOut(fatals, warnings);
+
+        fan.emit(DiagnosticEvent.fatal(new DiagnosticEventKind.RequiredFieldMissing("x")));
+        fan.emit(DiagnosticEvent.warning(new DiagnosticEventKind.Notice("w")));
+
+        // both sinks received all events — filtering is the caller's responsibility
+        assertEquals(1, fatals.fatalEvents().size());
+        assertEquals(1, warnings.warningEvents().size());
+        assertEquals(2, fatals.size());
+        assertEquals(2, warnings.size());
+    }
+
+    @Test
+    void fanOut_singleSink_behavesLikeDirect() {
+        MemorySink direct = new MemorySink();
+        MemorySink via    = new MemorySink();
+        DiagnosticSink fan = DiagnosticSink.fanOut(via);
+
+        DiagnosticEvent e = DiagnosticEvent.fatal(new DiagnosticEventKind.Notice("x"));
+        direct.emit(e);
+        fan.emit(e);
+
+        assertEquals(direct.size(), via.size());
+        assertEquals(direct.events().get(0), via.events().get(0));
+    }
+
+    @Test
+    void fanOut_emptySinks_doesNotThrow() {
+        DiagnosticSink fan = DiagnosticSink.fanOut();
+        assertDoesNotThrow(() -> fan.emit(DiagnosticEvent.info(new DiagnosticEventKind.Notice("x"))));
+    }
+
     // ─── FileSink ─────────────────────────────────────────────────────────────
 
     @Test

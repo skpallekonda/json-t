@@ -6,6 +6,9 @@ import io.github.datakore.jsont.stringify.JsonTStringifier;
 import io.github.datakore.jsont.stringify.StringifyOptions;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
+import static io.github.datakore.jsont.model.JsonTValue.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SchemaParserTest {
@@ -674,6 +677,62 @@ class SchemaParserTest {
                 ns.findSchema("Order").orElseThrow().validation().orElseThrow().rules().get(0)).expr();
         var lhs = ((JsonTExpression.Binary) expr).lhs();
         assertEquals("a.b.c", ((JsonTExpression.FieldRef) lhs).path().dotJoined());
+    }
+
+    // ── B8: full document (namespace block + data rows in one string) ──────────
+
+    @Test void parseDocument_namespaceThenDataRows() {
+        String full = """
+                namespace "https://doc.example" {
+                  catalog {
+                    schema Order {
+                      fields { id: i64, product: str, qty: i32 }
+                    }
+                  }
+                }
+                {1,"Widget",10},{2,"Gadget",5},{3,"Doohickey",3}
+                """;
+        var doc = JsonTParser.parseDocument(full);
+
+        assertEquals("https://doc.example", doc.namespace().baseUrl());
+        assertNotNull(doc.namespace().findSchema("Order").orElseThrow());
+        assertEquals(3, doc.rowCount());
+        assertEquals(3, doc.rows().size());
+        assertEquals(d64(1.0), doc.rows().get(0).get(0));
+        assertEquals(text("Widget"), doc.rows().get(0).get(1));
+        assertEquals(d64(3.0), doc.rows().get(2).get(0));
+    }
+
+    @Test void parseDocument_emptyRowSection_zeroRows() {
+        String full = """
+                namespace "" {
+                  catalog {
+                    schema Ping { fields { id: i32 } }
+                  }
+                }
+                """;
+        var doc = JsonTParser.parseDocument(full);
+        assertEquals(1, doc.namespace().schemaCount());
+        assertEquals(0, doc.rowCount());
+    }
+
+    @Test void parseDocument_schemaAndRowsRoundTrip() {
+        String ns = """
+                namespace "" {
+                  catalog {
+                    schema Item { fields { code: str, price: d64 } }
+                  }
+                }
+                """;
+        String rowData = "{\"ABC\",9.99},{\"XYZ\",14.50}";
+        var doc = JsonTParser.parseDocument(ns + rowData);
+
+        var schema = doc.namespace().findSchema("Item").orElseThrow();
+        assertEquals(2, schema.fieldCount());
+        List<JsonTRow> rows = doc.rows();
+        assertEquals(2, rows.size());
+        assertEquals(text("ABC"),  rows.get(0).get(0));
+        assertEquals(d64(14.50),   rows.get(1).get(1));
     }
 
     // ── error cases ───────────────────────────────────────────────────────────

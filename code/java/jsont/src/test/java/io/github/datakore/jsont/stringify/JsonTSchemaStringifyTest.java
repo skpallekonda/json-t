@@ -191,4 +191,109 @@ class JsonTSchemaStringifyTest {
         assertTrue(text.contains("minItems = 1"));
         assertTrue(text.contains("maxItems = 10"));
     }
+
+    // ── B5: constantValue constraint stringification ───────────────────────────
+
+    @Test void constantValue_numeric() throws Exception {
+        JsonTSchema s = JsonTSchemaBuilder.straight("Status")
+                .fieldFrom(JsonTFieldBuilder.scalar("code", ScalarType.I32).constantValue(JsonTValue.i32(42)))
+                .build();
+        String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        assertTrue(text.contains("constant = 42"), text);
+    }
+
+    @Test void constantValue_string() throws Exception {
+        JsonTSchema s = JsonTSchemaBuilder.straight("Doc")
+                .fieldFrom(JsonTFieldBuilder.scalar("version", ScalarType.STR).constantValue(JsonTValue.text("v1")))
+                .build();
+        String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        assertTrue(text.contains("constant = \"v1\""), text);
+    }
+
+    @Test void constantValue_bool() throws Exception {
+        JsonTSchema s = JsonTSchemaBuilder.straight("Flag")
+                .fieldFrom(JsonTFieldBuilder.scalar("active", ScalarType.BOOL).constantValue(JsonTValue.bool(true)))
+                .build();
+        String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        assertTrue(text.contains("constant = true"), text);
+    }
+
+    @Test void constantValue_null() throws Exception {
+        JsonTSchema s = JsonTSchemaBuilder.straight("Tag")
+                .fieldFrom(JsonTFieldBuilder.scalar("note", ScalarType.STR).constantValue(JsonTValue.nullValue()))
+                .build();
+        String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        assertTrue(text.contains("constant = null"), text);
+    }
+
+    // ── B4: ConditionalRequirement stringification ────────────────────────────
+
+    @Test void conditionalRequirement_stringified() throws Exception {
+        JsonTSchema s = JsonTSchemaBuilder.straight("Order")
+                .fieldFrom(JsonTFieldBuilder.scalar("qty",  ScalarType.I32))
+                .fieldFrom(JsonTFieldBuilder.scalar("note", ScalarType.STR).optional())
+                .validationFrom(JsonTValidationBlockBuilder.create()
+                        .conditionalRule(
+                                JsonTExpression.binary(BinaryOp.GT,
+                                        JsonTExpression.fieldName("qty"),
+                                        JsonTExpression.literal(JsonTValue.i32(100))),
+                                FieldPath.single("note")))
+                .build();
+        String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        assertTrue(text.contains("if (qty > 100) require (note)"), text);
+    }
+
+    @Test void conditionalRequirement_multipleFields_stringified() throws Exception {
+        JsonTSchema s = JsonTSchemaBuilder.straight("Order")
+                .fieldFrom(JsonTFieldBuilder.scalar("qty",    ScalarType.I32))
+                .fieldFrom(JsonTFieldBuilder.scalar("note",   ScalarType.STR).optional())
+                .fieldFrom(JsonTFieldBuilder.scalar("reason", ScalarType.STR).optional())
+                .validationFrom(JsonTValidationBlockBuilder.create()
+                        .conditionalRule(
+                                JsonTExpression.binary(BinaryOp.GT,
+                                        JsonTExpression.fieldName("qty"),
+                                        JsonTExpression.literal(JsonTValue.i32(100))),
+                                FieldPath.single("note"), FieldPath.single("reason")))
+                .build();
+        String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        assertTrue(text.contains("if (qty > 100) require (note, reason)"), text);
+    }
+
+    // ── B3: Schema stringify round-trip ───────────────────────────────────────
+
+    @Test void roundTrip_straightSchema_stableOnSecondStringify() throws Exception {
+        JsonTSchema s = JsonTSchemaBuilder.straight("Order")
+                .fieldFrom(JsonTFieldBuilder.scalar("id",      ScalarType.I64))
+                .fieldFrom(JsonTFieldBuilder.scalar("product", ScalarType.STR).optional())
+                .fieldFrom(JsonTFieldBuilder.scalar("qty",     ScalarType.I32).minValue(1.0).maxValue(999.0))
+                .validationFrom(JsonTValidationBlockBuilder.create()
+                        .unique("id")
+                        .rule(JsonTExpression.binary(BinaryOp.GT,
+                                JsonTExpression.fieldName("qty"),
+                                JsonTExpression.literal(JsonTValue.i32(0)))))
+                .build();
+        String first  = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        String second = JsonTStringifier.stringify(s, StringifyOptions.compact());
+        assertEquals(first, second, "Schema stringification must be stable (idempotent)");
+    }
+
+    @Test void roundTrip_namespace_stringifyIsStable() throws Exception {
+        // The stringify output is stable: stringifying the same model twice yields
+        // identical text (idempotent serialisation).
+        JsonTNamespace ns = JsonTNamespaceBuilder.create()
+                .baseUrl("https://test.example")
+                .catalog(JsonTCatalogBuilder.create()
+                        .schema(JsonTSchemaBuilder.straight("Item")
+                                .fieldFrom(JsonTFieldBuilder.scalar("id",    ScalarType.I64))
+                                .fieldFrom(JsonTFieldBuilder.scalar("label", ScalarType.STR).minLength(1).maxLength(100))
+                                .build())
+                        .build())
+                .build();
+        String first  = JsonTStringifier.stringify(ns, StringifyOptions.compact());
+        String second = JsonTStringifier.stringify(ns, StringifyOptions.compact());
+        assertEquals(first, second);
+        assertTrue(first.contains("\"https://test.example\""));
+        assertTrue(first.contains("minLength = 1"));
+        assertTrue(first.contains("maxLength = 100"));
+    }
 }

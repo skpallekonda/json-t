@@ -8,6 +8,8 @@ import io.github.datakore.jsont.model.JsonTRow;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Entry point for all JsonT parsing operations.
@@ -70,5 +72,43 @@ public final class JsonTParser {
      */
     public static RowIter rowIter(Reader reader) {
         return new RowIter(reader);
+    }
+
+    /**
+     * Parses a full document containing a {@code namespace} block followed by data rows.
+     * The namespace block is located by brace-depth scanning, then each part is parsed
+     * independently.
+     *
+     * @throws JsonTError.Parse if either part is malformed
+     */
+    public static ParsedDocument parseDocument(String input) {
+        int split = findNamespaceEnd(input);
+        JsonTNamespace ns = parseNamespace(input.substring(0, split));
+        List<JsonTRow> rows = new ArrayList<>();
+        int count = parseRows(input.substring(split), rows::add);
+        return new ParsedDocument(ns, rows, count);
+    }
+
+    /** Result of {@link #parseDocument(String)}. */
+    public record ParsedDocument(JsonTNamespace namespace, List<JsonTRow> rows, int rowCount) {}
+
+    // Scans for the closing `}` that ends the outermost namespace block.
+    private static int findNamespaceEnd(String input) {
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped  = false;
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (escaped)          { escaped = false; continue; }
+            if (c == '\\' && inString) { escaped = true;  continue; }
+            if (c == '"')         { inString = !inString; continue; }
+            if (!inString) {
+                if      (c == '{') depth++;
+                else if (c == '}') {
+                    if (--depth == 0) return i + 1;
+                }
+            }
+        }
+        return input.length();
     }
 }

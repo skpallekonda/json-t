@@ -1,8 +1,8 @@
 package io.github.datakore.jsont.parse;
 
-import io.github.datakore.jsont.error.JsonTError;
 import io.github.datakore.jsont.model.JsonTRow;
 import io.github.datakore.jsont.model.JsonTValue;
+import io.github.datakore.jsont.stringify.JsonTStringifier;
 import org.junit.jupiter.api.Test;
 
 import java.io.*;
@@ -206,5 +206,101 @@ class RowScannerTest {
         assertTrue(iter.hasNext()); // calling twice must be safe
         iter.next();
         assertFalse(iter.hasNext());
+    }
+
+    // ── Round-trip: build → stringify → parse ─────────────────────────────────
+
+    @Test void roundTrip_scalarValues() {
+        JsonTRow original = JsonTRow.of(i32(42), text("hello"), bool(true), nullValue());
+        String wire = JsonTStringifier.stringify(original);
+        List<JsonTRow> parsed = collectRows(wire);
+        assertEquals(1, parsed.size());
+        JsonTRow row = parsed.get(0);
+        assertEquals(4, row.size());
+        // numbers come back as d64
+        assertEquals(42.0, row.get(0).toDouble(), 1e-9);
+        assertEquals(text("hello"), row.get(1));
+        assertEquals(bool(true),   row.get(2));
+        assertEquals(nullValue(),  row.get(3));
+    }
+
+    @Test void roundTrip_enumAndUnspecified() {
+        JsonTRow original = JsonTRow.of(enumValue("ACTIVE"), unspecified(), nullValue());
+        String wire = JsonTStringifier.stringify(original);
+        List<JsonTRow> parsed = collectRows(wire);
+        JsonTRow row = parsed.get(0);
+        assertEquals(enumValue("ACTIVE"), row.get(0));
+        assertEquals(unspecified(),       row.get(1));
+        assertEquals(nullValue(),         row.get(2));
+    }
+
+    @Test void roundTrip_arrayValue() {
+        JsonTRow original = JsonTRow.of(i32(1), JsonTValue.array(List.of(i32(10), i32(20), i32(30))));
+        String wire = JsonTStringifier.stringify(original);
+        List<JsonTRow> parsed = collectRows(wire);
+        JsonTRow row = parsed.get(0);
+        assertEquals(2, row.size());
+        assertInstanceOf(JsonTValue.Array.class, row.get(1));
+        assertEquals(3, ((JsonTValue.Array) row.get(1)).elements().size());
+    }
+
+    @Test void roundTrip_multipleRows() {
+        List<JsonTRow> originals = List.of(
+                JsonTRow.of(i32(1), text("Alice")),
+                JsonTRow.of(i32(2), text("Bob")),
+                JsonTRow.of(i32(3), text("Carol"))
+        );
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < originals.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(JsonTStringifier.stringify(originals.get(i)));
+        }
+        List<JsonTRow> parsed = collectRows(sb.toString());
+        assertEquals(3, parsed.size());
+        for (int i = 0; i < 3; i++) {
+            assertEquals((double) (i + 1), parsed.get(i).get(0).toDouble(), 1e-9);
+        }
+    }
+
+    // ── RowIter laziness ──────────────────────────────────────────────────────
+
+    @Test void rowIter_isLazy_doesNotOverread() throws IOException {
+        // Build a 10-row document. Each row is exactly "{"N"}". Wrap in a
+        // CountingReader so we can see how many characters were consumed.
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 10; i++) {
+            if (i > 0) sb.append(',');
+            sb.append("{").append(i).append("}");
+        }
+        String full = sb.toString(); // e.g. "{0},{1},{2},...,{9}"
+        int[] charsRead = {0};
+        Reader counting = new FilterReader(new StringReader(full)) {
+            @Override public int read() throws IOException {
+                int c = super.read();
+                if (c != -1) charsRead[0]++;
+                return c;
+            }
+            @Override public int read(char[] buf, int off, int len) throws IOException {
+                int n = super.read(buf, off, len);
+                if (n > 0) charsRead[0] += n;
+                return n;
+            }
+        };
+
+        int taken = 0;
+        try (var iter = JsonTParser.rowIter(counting)) {
+            for (int i = 0; i < 3; i++) {
+                assertTrue(iter.hasNext());
+                iter.next();
+                taken++;
+            }
+        }
+
+        assertEquals(3, taken);
+        // After reading 3 rows we must have consumed fewer chars than the full document.
+        // The full document is full.length() chars; reading only the first 3 rows
+        // consumes at most the characters up through row 3 plus a peek-ahead char.
+        assertTrue(charsRead[0] < full.length(),
+                "Expected lazy read; consumed " + charsRead[0] + " of " + full.length());
     }
 }
