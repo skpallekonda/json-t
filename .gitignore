@@ -36,6 +36,14 @@ target/
 cargo-at-coder.json
 
 # --- Claude Code & Tooling ---
-CLAUDE.md
+GEMINI.md
+STATE.md
 settings.local.json
-.claude/
+.claude/settings.*
+.claude/CLAUDE.md
+.agents
+.agentignore
+.claudeignore
+.claudignore
+.claude.json
+.codegraph
