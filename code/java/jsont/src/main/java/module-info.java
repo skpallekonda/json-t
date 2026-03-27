@@ -31,7 +31,7 @@ module io.github.datakore.jsont {
 
     // ── Phases to come ───────────────────────────────────────────────────────
     // exports io.github.datakore.jsont.parse;
-    // exports io.github.datakore.jsont.stringify;
+    exports io.github.datakore.jsont.stringify;
     // exports io.github.datakore.jsont.validate;
     // exports io.github.datakore.jsont.transform;
     // exports io.github.datakore.jsont.diagnostic;
