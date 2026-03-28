@@ -399,8 +399,9 @@ fn eval_function(
             expect_arity(name, 1, args.len())?;
             let val = eval_expr(&args[0], ctx)?;
             match &val {
-                JsonTValue::Str(s)   => Ok(JsonTValue::Number(
-                    crate::model::data::JsonTNumber::I64(s.len() as i64)
+                // All string-typed variants expose their content via as_str().
+                v if v.as_str().is_some() => Ok(JsonTValue::Number(
+                    crate::model::data::JsonTNumber::I64(v.as_str().unwrap().len() as i64)
                 )),
                 JsonTValue::Array(a) => Ok(JsonTValue::Number(
                     crate::model::data::JsonTNumber::I64(a.len() as i64)
@@ -415,24 +416,28 @@ fn eval_function(
         "upper" => {
             expect_arity(name, 1, args.len())?;
             let val = eval_expr(&args[0], ctx)?;
-            match val {
-                JsonTValue::Str(s) => Ok(JsonTValue::Str(s.to_uppercase())),
-                other => Err(EvalError::TypeMismatch {
+            // upper() on a semantic string variant returns Str (expression result is untyped).
+            if let Some(s) = val.as_str() {
+                Ok(JsonTValue::Str(s.to_uppercase()))
+            } else {
+                Err(EvalError::TypeMismatch {
                     expected: "str".into(),
-                    actual:   other.type_name().into(),
-                }.into()),
+                    actual:   val.type_name().into(),
+                }.into())
             }
         }
 
         "lower" => {
             expect_arity(name, 1, args.len())?;
             let val = eval_expr(&args[0], ctx)?;
-            match val {
-                JsonTValue::Str(s) => Ok(JsonTValue::Str(s.to_lowercase())),
-                other => Err(EvalError::TypeMismatch {
+            // lower() on a semantic string variant returns Str (expression result is untyped).
+            if let Some(s) = val.as_str() {
+                Ok(JsonTValue::Str(s.to_lowercase()))
+            } else {
+                Err(EvalError::TypeMismatch {
                     expected: "str".into(),
-                    actual:   other.type_name().into(),
-                }.into()),
+                    actual:   val.type_name().into(),
+                }.into())
             }
         }
 
@@ -481,11 +486,17 @@ fn require_numeric_pair(
 }
 
 fn values_equal(a: &JsonTValue, b: &JsonTValue) -> bool {
+    // For expression equality (==, !=) compare strings by their content
+    // regardless of which semantic variant holds them, so that a rule like
+    // `email == "user@example.com"` evaluates correctly after promotion.
+    match (a.as_str(), b.as_str()) {
+        (Some(x), Some(y)) => return x == y,
+        _ => {}
+    }
     match (a, b) {
         (JsonTValue::Null, JsonTValue::Null)         => true,
         (JsonTValue::Unspecified, JsonTValue::Unspecified) => true,
         (JsonTValue::Bool(x), JsonTValue::Bool(y))   => x == y,
-        (JsonTValue::Str(x),  JsonTValue::Str(y))    => x == y,
         (JsonTValue::Enum(x), JsonTValue::Enum(y))   => x == y,
         (JsonTValue::Number(x), JsonTValue::Number(y)) => {
             // Compare via f64 coercion — good enough for equality checks.

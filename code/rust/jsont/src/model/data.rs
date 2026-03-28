@@ -9,9 +9,14 @@
 
 use rust_decimal::Decimal;
 
+use crate::model::field::ScalarType;
+
 /// The universal JsonT value — covers every value form in the grammar.
 ///
 /// Variants map to the grammar's `value` rule alternatives.
+/// The semantic string variants (Email, Uuid, etc.) are identical on the wire
+/// to `Str` — they are promoted from `Str` in the validation layer once the
+/// declared `ScalarType` is known.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonTValue {
     /// `null` or `nil` — an explicit absent value.
@@ -27,8 +32,53 @@ pub enum JsonTValue {
     /// A boolean literal (`true` / `false`).
     Bool(bool),
 
-    /// A string value (single or double-quoted in source).
+    /// A plain string value (single or double-quoted in source).
     Str(String),
+
+    // ── Semantic string variants ──────────────────────────────────────────────
+    // All of these serialise as double-quoted strings, identical to Str.
+    // They are promoted from Str during validation when the ScalarType is known.
+
+    /// Normalised (unicode NFC) string — maps to `ScalarType::NStr`.
+    Nstr(String),
+    /// UUID — maps to `ScalarType::Uuid`.
+    Uuid(String),
+    /// URI — maps to `ScalarType::Uri`.
+    Uri(String),
+    /// Email address — maps to `ScalarType::Email`.
+    Email(String),
+    /// Hostname — maps to `ScalarType::Hostname`.
+    Hostname(String),
+    /// IPv4 address — maps to `ScalarType::Ipv4`.
+    Ipv4(String),
+    /// IPv6 address — maps to `ScalarType::Ipv6`.
+    Ipv6(String),
+
+    // ── Temporal variants ─────────────────────────────────────────────────────
+
+    /// Calendar date — maps to `ScalarType::Date`.
+    Date(String),
+    /// Time-of-day — maps to `ScalarType::Time`.
+    Time(String),
+    /// Date and time without timezone — maps to `ScalarType::DateTime`.
+    DateTime(String),
+    /// Unix timestamp (integer or decimal string) — maps to `ScalarType::Timestamp`.
+    Timestamp(String),
+    /// Timestamp with timezone — maps to `ScalarType::Tsz`.
+    Tsz(String),
+    /// Monotonic instant — maps to `ScalarType::Inst`.
+    Inst(String),
+    /// ISO 8601 duration — maps to `ScalarType::Duration`.
+    Duration(String),
+
+    // ── Binary / identifier variants ──────────────────────────────────────────
+
+    /// Base64-encoded binary — maps to `ScalarType::Base64`.
+    Base64(String),
+    /// Hex-encoded binary — maps to `ScalarType::Hex`.
+    Hex(String),
+    /// Object identifier — maps to `ScalarType::Oid`.
+    Oid(String),
 
     /// An enum constant value (a CONSTID — all uppercase, 2+ chars).
     Enum(String),
@@ -58,6 +108,26 @@ impl JsonTValue {
     pub fn d32(n: f32)  -> Self { JsonTValue::Number(JsonTNumber::D32(n)) }
     pub fn d64(n: f64)  -> Self { JsonTValue::Number(JsonTNumber::D64(n)) }
     pub fn d128(n: Decimal) -> Self { JsonTValue::Number(JsonTNumber::D128(n)) }
+
+    // ── Semantic string constructors ──────────────────────────────────────
+
+    pub fn nstr(s: impl Into<String>) -> Self { JsonTValue::Nstr(s.into()) }
+    pub fn uuid(s: impl Into<String>) -> Self { JsonTValue::Uuid(s.into()) }
+    pub fn uri(s: impl Into<String>) -> Self { JsonTValue::Uri(s.into()) }
+    pub fn email(s: impl Into<String>) -> Self { JsonTValue::Email(s.into()) }
+    pub fn hostname(s: impl Into<String>) -> Self { JsonTValue::Hostname(s.into()) }
+    pub fn ipv4(s: impl Into<String>) -> Self { JsonTValue::Ipv4(s.into()) }
+    pub fn ipv6(s: impl Into<String>) -> Self { JsonTValue::Ipv6(s.into()) }
+    pub fn date(s: impl Into<String>) -> Self { JsonTValue::Date(s.into()) }
+    pub fn time(s: impl Into<String>) -> Self { JsonTValue::Time(s.into()) }
+    pub fn date_time(s: impl Into<String>) -> Self { JsonTValue::DateTime(s.into()) }
+    pub fn timestamp(s: impl Into<String>) -> Self { JsonTValue::Timestamp(s.into()) }
+    pub fn tsz(s: impl Into<String>) -> Self { JsonTValue::Tsz(s.into()) }
+    pub fn inst(s: impl Into<String>) -> Self { JsonTValue::Inst(s.into()) }
+    pub fn duration(s: impl Into<String>) -> Self { JsonTValue::Duration(s.into()) }
+    pub fn base64(s: impl Into<String>) -> Self { JsonTValue::Base64(s.into()) }
+    pub fn hex(s: impl Into<String>) -> Self { JsonTValue::Hex(s.into()) }
+    pub fn oid(s: impl Into<String>) -> Self { JsonTValue::Oid(s.into()) }
 
     // ── Type queries ──────────────────────────────────────────────────────
 
@@ -92,7 +162,14 @@ impl JsonTValue {
 
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            JsonTValue::Str(s) => Some(s.as_str()),
+            JsonTValue::Str(s)
+            | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
+            | JsonTValue::Email(s) | JsonTValue::Hostname(s)
+            | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
+            | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
+            | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
+            | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
+            | JsonTValue::Oid(s) => Some(s.as_str()),
             _ => None,
         }
     }
@@ -105,9 +182,55 @@ impl JsonTValue {
             JsonTValue::Number(n)   => n.type_name(),
             JsonTValue::Bool(_)     => "bool",
             JsonTValue::Str(_)      => "str",
+            JsonTValue::Nstr(_)     => "nstr",
+            JsonTValue::Uuid(_)     => "uuid",
+            JsonTValue::Uri(_)      => "uri",
+            JsonTValue::Email(_)    => "email",
+            JsonTValue::Hostname(_) => "hostname",
+            JsonTValue::Ipv4(_)     => "ipv4",
+            JsonTValue::Ipv6(_)     => "ipv6",
+            JsonTValue::Date(_)     => "date",
+            JsonTValue::Time(_)     => "time",
+            JsonTValue::DateTime(_) => "datetime",
+            JsonTValue::Timestamp(_) => "timestamp",
+            JsonTValue::Tsz(_)      => "tsz",
+            JsonTValue::Inst(_)     => "inst",
+            JsonTValue::Duration(_) => "duration",
+            JsonTValue::Base64(_)   => "base64",
+            JsonTValue::Hex(_)      => "hex",
+            JsonTValue::Oid(_)      => "oid",
             JsonTValue::Enum(_)     => "enum",
             JsonTValue::Object(_)   => "object",
             JsonTValue::Array(_)    => "array",
+        }
+    }
+
+    /// Promotes a `Str` value to the appropriate semantic variant for the given `ScalarType`.
+    ///
+    /// Returns the value unchanged if it is not `Str`, or if the type maps to plain `Str`.
+    /// This is called in the validation layer after type/constraint checking passes so
+    /// that callers of `on_clean` always receive the semantically precise variant.
+    pub fn promote(self, scalar_type: &ScalarType) -> Self {
+        let JsonTValue::Str(s) = self else { return self; };
+        match scalar_type {
+            ScalarType::NStr      => JsonTValue::Nstr(s),
+            ScalarType::Uuid      => JsonTValue::Uuid(s),
+            ScalarType::Uri       => JsonTValue::Uri(s),
+            ScalarType::Email     => JsonTValue::Email(s),
+            ScalarType::Hostname  => JsonTValue::Hostname(s),
+            ScalarType::Ipv4      => JsonTValue::Ipv4(s),
+            ScalarType::Ipv6      => JsonTValue::Ipv6(s),
+            ScalarType::Date      => JsonTValue::Date(s),
+            ScalarType::Time      => JsonTValue::Time(s),
+            ScalarType::DateTime  => JsonTValue::DateTime(s),
+            ScalarType::Timestamp => JsonTValue::Timestamp(s),
+            ScalarType::Tsz       => JsonTValue::Tsz(s),
+            ScalarType::Inst      => JsonTValue::Inst(s),
+            ScalarType::Duration  => JsonTValue::Duration(s),
+            ScalarType::Base64    => JsonTValue::Base64(s),
+            ScalarType::Hex       => JsonTValue::Hex(s),
+            ScalarType::Oid       => JsonTValue::Oid(s),
+            _                     => JsonTValue::Str(s),  // Str stays Str
         }
     }
 }

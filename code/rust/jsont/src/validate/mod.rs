@@ -59,12 +59,12 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use crate::ConsoleSink;
 use crate::diagnostic::{DiagnosticEvent, EventKind, Severity, SinkError};
 use crate::model::data::{JsonTRow, JsonTValue};
-use crate::model::field::JsonTField;
+use crate::model::field::{JsonTField, JsonTFieldKind};
 use crate::model::schema::{JsonTSchema, SchemaKind};
 use crate::model::validation::JsonTValidationBlock;
+use crate::ConsoleSink;
 use crate::DiagnosticSink;
 
 // =============================================================================
@@ -92,17 +92,17 @@ use crate::DiagnosticSink;
 /// 2. Call [`validate_each`] or [`validate_rows`] one or more times.
 /// 3. Call [`finish`] to flush all sinks and join the background thread.
 pub struct ValidationPipeline {
-    fields:           Vec<JsonTField>,
-    validation:       Option<JsonTValidationBlock>,
-    schema_name:      String,
+    fields: Vec<JsonTField>,
+    validation: Option<JsonTValidationBlock>,
+    schema_name: String,
     /// Union of all field names referenced by any rule expression or
     /// `ConditionalRequirement` in the validation block, pre-computed once
     /// at build time so `check_rules` never traverses the AST per row.
-    rule_field_refs:  Vec<String>,
+    rule_field_refs: Vec<String>,
     /// Sender half of the event channel.  Dropping this closes the channel
     /// and signals the sink thread to finish.
-    tx:               mpsc::Sender<DiagnosticEvent>,
-    sink_thread:      Option<JoinHandle<Option<SinkError>>>,
+    tx: mpsc::Sender<DiagnosticEvent>,
+    sink_thread: Option<JoinHandle<Option<SinkError>>>,
 }
 
 impl ValidationPipeline {
@@ -130,10 +130,10 @@ impl ValidationPipeline {
         I: IntoIterator<Item = JsonTRow>,
         F: FnMut(JsonTRow),
     {
-        let start             = Instant::now();
-        let mut total         = 0usize;
-        let mut valid_count   = 0usize;
-        let mut warn_count    = 0usize;
+        let start = Instant::now();
+        let mut total = 0usize;
+        let mut valid_count = 0usize;
+        let mut warn_count = 0usize;
         let mut invalid_count = 0usize;
 
         // One HashSet per uniqueness rule; lives for the duration of this call.
@@ -153,18 +153,27 @@ impl ValidationPipeline {
             total += 1;
             let mut row_events: Vec<DiagnosticEvent> = Vec::new();
 
+            // Shape-mismatch rows stay as None; promoted rows carry through to
+            // on_clean so the moved value is available after the else block.
+            let promoted: Option<JsonTRow>;
+
             // ── Shape check ───────────────────────────────────────────────
             if row.fields.len() != self.fields.len() {
                 row_events.push(
                     DiagnosticEvent::fatal(EventKind::ShapeMismatch {
-                        field:    "(row)".into(),
+                        field: "(row)".into(),
                         expected: format!("{} field(s)", self.fields.len()),
-                        actual:   format!("{} field(s)", row.fields.len()),
+                        actual: format!("{} field(s)", row.fields.len()),
                     })
                     .at_row(idx)
                     .with_source(&self.schema_name),
                 );
+                promoted = None;
             } else {
+                // Promote Str values to their semantic variants now that the
+                // field type is known and the row has passed all checks.
+                let row = promote_row(row, &self.fields);
+
                 // ── Field constraints ─────────────────────────────────────
                 for (field, value) in self.fields.iter().zip(row.fields.iter()) {
                     row_events.extend(constraint::check_field(field, value, idx));
@@ -193,7 +202,7 @@ impl ValidationPipeline {
                                     paths.iter().map(|fp| fp.join()).collect();
                                 row_events.push(
                                     DiagnosticEvent::fatal(EventKind::UniqueViolation {
-                                        fields:    field_names,
+                                        fields: field_names,
                                         row_index: idx,
                                     })
                                     .at_row(idx)
@@ -203,11 +212,13 @@ impl ValidationPipeline {
                         }
                     }
                 }
+
+                promoted = Some(row);
             }
 
             // ── Tally and emit ─────────────────────────────────────────────
             let fatal_n = row_events.iter().filter(|e| e.is_fatal()).count();
-            let warn_n  = row_events
+            let warn_n = row_events
                 .iter()
                 .filter(|e| e.severity == Severity::Warning)
                 .count();
@@ -220,19 +231,18 @@ impl ValidationPipeline {
                 invalid_count += 1;
                 self.emit(
                     DiagnosticEvent::fatal(EventKind::RowRejected {
-                        row_index:   idx,
+                        row_index: idx,
                         fatal_count: fatal_n,
                     })
                     .with_source(&self.schema_name),
                 );
-            } else {
-                // Emit the clean row immediately — no buffering.
+            } else if let Some(row) = promoted {
                 on_clean(row);
                 if warn_n > 0 {
                     warn_count += 1;
                     self.emit(
                         DiagnosticEvent::warning(EventKind::RowAcceptedWithWarnings {
-                            row_index:     idx,
+                            row_index: idx,
                             warning_count: warn_n,
                         })
                         .with_source(&self.schema_name),
@@ -249,8 +259,8 @@ impl ValidationPipeline {
 
         let duration_ms = start.elapsed().as_millis() as u64;
         self.emit(DiagnosticEvent::info(EventKind::ProcessCompleted {
-            total_rows:   total,
-            valid_rows:   valid_count,
+            total_rows: total,
+            valid_rows: valid_count,
             warning_rows: warn_count,
             invalid_rows: invalid_count,
             duration_ms,
@@ -288,15 +298,18 @@ impl ValidationPipeline {
         if row.fields.len() != self.fields.len() {
             self.emit(
                 DiagnosticEvent::fatal(EventKind::ShapeMismatch {
-                    field:    "(row)".into(),
+                    field: "(row)".into(),
                     expected: format!("{} field(s)", self.fields.len()),
-                    actual:   format!("{} field(s)", row.fields.len()),
+                    actual: format!("{} field(s)", row.fields.len()),
                 })
                 .at_row(idx)
                 .with_source(&self.schema_name),
             );
             return;
         }
+        // Promote Str values to their semantic variants now that the
+        // field type is known and the row has passed all checks.
+        let row = promote_row(row, &self.fields);
 
         // Field constraints
         for (field, value) in self.fields.iter().zip(row.fields.iter()) {
@@ -338,8 +351,8 @@ impl ValidationPipeline {
         if let Some(handle) = self.sink_thread.take() {
             match handle.join() {
                 Ok(Some(err)) => return Err(err),
-                Ok(None)      => {}
-                Err(_)        => {
+                Ok(None) => {}
+                Err(_) => {
                     return Err(SinkError::Other("sink thread panicked".into()));
                 }
             }
@@ -366,7 +379,7 @@ impl ValidationPipeline {
 /// A [`ConsoleSink`] is registered by default.  Call [`without_console`] to
 /// suppress it, then add only the sinks you want via [`with_sink`].
 pub struct ValidationPipelineBuilder {
-    schema:      JsonTSchema,
+    schema: JsonTSchema,
     /// Whether to prepend a `ConsoleSink` when building.
     has_console: bool,
     /// User-supplied additional sinks.
@@ -407,7 +420,7 @@ impl ValidationPipelineBuilder {
             // Derived-schema validation is not yet implemented.
             SchemaKind::Derived { .. } => Vec::new(),
         };
-        let validation  = self.schema.validation.clone();
+        let validation = self.schema.validation.clone();
         let schema_name = self.schema.name.clone();
 
         // Pre-compute the union of all field names referenced by any rule
@@ -422,7 +435,10 @@ impl ValidationPipelineBuilder {
                 for rule in &v.rules {
                     let candidates = match rule {
                         JsonTRule::Expression(expr) => collect_field_refs(expr),
-                        JsonTRule::ConditionalRequirement { condition, required_fields } => {
+                        JsonTRule::ConditionalRequirement {
+                            condition,
+                            required_fields,
+                        } => {
                             let mut r = collect_field_refs(condition);
                             r.extend(required_fields.iter().map(|fp| fp.join()));
                             r
@@ -484,6 +500,27 @@ fn has_fatal(events: &[DiagnosticEvent]) -> bool {
     events.iter().any(|e| e.is_fatal())
 }
 
+/// Promotes each `Str` value in a row to its semantic variant based on the
+/// declared `ScalarType` of the corresponding schema field.
+///
+/// Called once per clean row, after all constraint checks pass.  Non-Str
+/// values (including already-promoted variants) are passed through unchanged.
+fn promote_row(row: JsonTRow, fields: &[JsonTField]) -> JsonTRow {
+    let promoted: Vec<JsonTValue> = row
+        .fields
+        .into_iter()
+        .zip(fields.iter())
+        .map(|(val, field)| {
+            if let JsonTFieldKind::Scalar { field_type, .. } = &field.kind {
+                val.promote(&field_type.scalar)
+            } else {
+                val
+            }
+        })
+        .collect();
+    JsonTRow::new(promoted)
+}
+
 /// Build a composite uniqueness key as a single null-byte-separated `String`.
 ///
 /// Using a single `String` instead of `Vec<String>` reduces per-key allocation
@@ -498,7 +535,7 @@ fn has_fatal(events: &[DiagnosticEvent]) -> bool {
 fn build_unique_key(
     fields: &[JsonTField],
     values: &[JsonTValue],
-    paths:  &[crate::model::schema::FieldPath],
+    paths: &[crate::model::schema::FieldPath],
 ) -> String {
     paths
         .iter()

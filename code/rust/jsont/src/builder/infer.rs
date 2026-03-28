@@ -183,7 +183,45 @@ fn infer_type(values: &[&JsonTValue]) -> ScalarType {
         return ScalarType::Bool;
     }
 
-    // Fast path: all strings / temporal / binary (stored as Str at data layer).
+    // Semantic string variants: map each back to its declared ScalarType.
+    // When all values share the same semantic variant, infer that type.
+    let all_nstr     = values.iter().all(|v| matches!(v, JsonTValue::Nstr(_)));
+    let all_uuid     = values.iter().all(|v| matches!(v, JsonTValue::Uuid(_)));
+    let all_uri      = values.iter().all(|v| matches!(v, JsonTValue::Uri(_)));
+    let all_email    = values.iter().all(|v| matches!(v, JsonTValue::Email(_)));
+    let all_hostname = values.iter().all(|v| matches!(v, JsonTValue::Hostname(_)));
+    let all_ipv4     = values.iter().all(|v| matches!(v, JsonTValue::Ipv4(_)));
+    let all_ipv6     = values.iter().all(|v| matches!(v, JsonTValue::Ipv6(_)));
+    let all_date     = values.iter().all(|v| matches!(v, JsonTValue::Date(_)));
+    let all_time     = values.iter().all(|v| matches!(v, JsonTValue::Time(_)));
+    let all_datetime = values.iter().all(|v| matches!(v, JsonTValue::DateTime(_)));
+    let all_ts       = values.iter().all(|v| matches!(v, JsonTValue::Timestamp(_)));
+    let all_tsz      = values.iter().all(|v| matches!(v, JsonTValue::Tsz(_)));
+    let all_inst     = values.iter().all(|v| matches!(v, JsonTValue::Inst(_)));
+    let all_duration = values.iter().all(|v| matches!(v, JsonTValue::Duration(_)));
+    let all_base64   = values.iter().all(|v| matches!(v, JsonTValue::Base64(_)));
+    let all_hex      = values.iter().all(|v| matches!(v, JsonTValue::Hex(_)));
+    let all_oid      = values.iter().all(|v| matches!(v, JsonTValue::Oid(_)));
+
+    if all_nstr     { return ScalarType::NStr; }
+    if all_uuid     { return ScalarType::Uuid; }
+    if all_uri      { return ScalarType::Uri; }
+    if all_email    { return ScalarType::Email; }
+    if all_hostname { return ScalarType::Hostname; }
+    if all_ipv4     { return ScalarType::Ipv4; }
+    if all_ipv6     { return ScalarType::Ipv6; }
+    if all_date     { return ScalarType::Date; }
+    if all_time     { return ScalarType::Time; }
+    if all_datetime { return ScalarType::DateTime; }
+    if all_ts       { return ScalarType::Timestamp; }
+    if all_tsz      { return ScalarType::Tsz; }
+    if all_inst     { return ScalarType::Inst; }
+    if all_duration { return ScalarType::Duration; }
+    if all_base64   { return ScalarType::Base64; }
+    if all_hex      { return ScalarType::Hex; }
+    if all_oid      { return ScalarType::Oid; }
+
+    // Plain strings (stored as Str at data layer).
     if values.iter().all(|v| matches!(v, JsonTValue::Str(_))) {
         return ScalarType::Str;
     }

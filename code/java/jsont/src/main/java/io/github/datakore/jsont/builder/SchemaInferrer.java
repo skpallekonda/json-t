@@ -134,23 +134,41 @@ public final class SchemaInferrer {
         int intWidth = 0;   // max of 16, 32, 64
         int floatWidth = 0; // max of 32, 64, 128
 
+        // Track whether all non-null values share a single semantic string variant.
+        // This mirrors the Rust inferrer: when a column is uniformly one semantic type
+        // (e.g. all Email), infer that type rather than falling back to STR.
+        ScalarType uniformSemantic = null;
+        boolean semanticMixed = false;
+
         for (JsonTValue v : values) {
-            if      (v instanceof JsonTValue.Bool)  { hasBool  = true; }
-            else if (v instanceof JsonTValue.I16)   { hasInt   = true; intWidth   = Math.max(intWidth, 16); }
-            else if (v instanceof JsonTValue.I32)   { hasInt   = true; intWidth   = Math.max(intWidth, 32); }
-            else if (v instanceof JsonTValue.I64)   { hasInt   = true; intWidth   = Math.max(intWidth, 64); }
-            else if (v instanceof JsonTValue.U16)   { hasInt   = true; intWidth   = Math.max(intWidth, 32); } // promoted to I32
-            else if (v instanceof JsonTValue.U32)   { hasInt   = true; intWidth   = Math.max(intWidth, 64); } // promoted to I64
-            else if (v instanceof JsonTValue.U64)   { hasInt   = true; intWidth   = Math.max(intWidth, 64); }
-            else if (v instanceof JsonTValue.D32)   { hasFloat = true; floatWidth = Math.max(floatWidth, 32); }
-            else if (v instanceof JsonTValue.D64)   { hasFloat = true; floatWidth = Math.max(floatWidth, 64); }
-            else if (v instanceof JsonTValue.D128)  { hasFloat = true; floatWidth = Math.max(floatWidth, 128); }
-            else if (v instanceof JsonTValue.Text)  { hasString = true; }
-            else                                    { hasOther  = true; }
+            if      (v instanceof JsonTValue.Bool)      { hasBool   = true; }
+            else if (v instanceof JsonTValue.I16)       { hasInt    = true; intWidth   = Math.max(intWidth, 16); }
+            else if (v instanceof JsonTValue.I32)       { hasInt    = true; intWidth   = Math.max(intWidth, 32); }
+            else if (v instanceof JsonTValue.I64)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); }
+            else if (v instanceof JsonTValue.U16)       { hasInt    = true; intWidth   = Math.max(intWidth, 32); } // promoted to I32
+            else if (v instanceof JsonTValue.U32)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); } // promoted to I64
+            else if (v instanceof JsonTValue.U64)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); }
+            else if (v instanceof JsonTValue.D32)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 32); }
+            else if (v instanceof JsonTValue.D64)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 64); }
+            else if (v instanceof JsonTValue.D128)      { hasFloat  = true; floatWidth = Math.max(floatWidth, 128); }
+            else if (v instanceof JsonTValue.Text)      { hasString = true; }
+            else {
+                // Semantic string variants — check for uniform type across the column.
+                ScalarType sv = semanticTypeOf(v);
+                if (sv != null) {
+                    if (uniformSemantic == null)      uniformSemantic = sv;
+                    else if (uniformSemantic != sv)   semanticMixed = true;
+                } else {
+                    hasOther = true;
+                }
+            }
         }
 
-        if (hasBool && !hasInt && !hasFloat && !hasString && !hasOther) return ScalarType.BOOL;
+        if (hasBool && !hasInt && !hasFloat && !hasString && uniformSemantic == null && !hasOther) return ScalarType.BOOL;
+        // Plain Text wins over semantic variants — column contains heterogeneous strings.
         if (hasString) return ScalarType.STR;
+        // All values are the same semantic variant → infer that type precisely.
+        if (uniformSemantic != null && !semanticMixed && !hasInt && !hasFloat && !hasBool && !hasOther) return uniformSemantic;
         if (hasInt && hasFloat) return floatWidth >= 128 ? ScalarType.D128 : ScalarType.D64;
         if (hasFloat) return switch (floatWidth) {
             case 128 -> ScalarType.D128;
@@ -163,5 +181,32 @@ public final class SchemaInferrer {
             default -> ScalarType.I16;
         };
         return ScalarType.STR;
+    }
+
+    /**
+     * Maps a semantic {@link JsonTValue} variant to its corresponding {@link ScalarType},
+     * or returns {@code null} if the value is not a semantic string variant.
+     *
+     * Used by {@link #inferType} to detect uniformly-typed semantic columns.
+     */
+    private static ScalarType semanticTypeOf(JsonTValue v) {
+        if (v instanceof JsonTValue.Nstr)      return ScalarType.NSTR;
+        if (v instanceof JsonTValue.Uuid)      return ScalarType.UUID;
+        if (v instanceof JsonTValue.Uri)       return ScalarType.URI;
+        if (v instanceof JsonTValue.Email)     return ScalarType.EMAIL;
+        if (v instanceof JsonTValue.Hostname)  return ScalarType.HOSTNAME;
+        if (v instanceof JsonTValue.Ipv4)      return ScalarType.IPV4;
+        if (v instanceof JsonTValue.Ipv6)      return ScalarType.IPV6;
+        if (v instanceof JsonTValue.Date)      return ScalarType.DATE;
+        if (v instanceof JsonTValue.Time)      return ScalarType.TIME;
+        if (v instanceof JsonTValue.DateTime)  return ScalarType.DATETIME;
+        if (v instanceof JsonTValue.Timestamp) return ScalarType.TIMESTAMP;
+        if (v instanceof JsonTValue.Tsz)       return ScalarType.TSZ;
+        if (v instanceof JsonTValue.Inst)      return ScalarType.INST;
+        if (v instanceof JsonTValue.Duration)  return ScalarType.DURATION;
+        if (v instanceof JsonTValue.Base64)    return ScalarType.BASE64;
+        if (v instanceof JsonTValue.Hex)       return ScalarType.HEX;
+        if (v instanceof JsonTValue.Oid)       return ScalarType.OID;
+        return null;
     }
 }

@@ -133,7 +133,14 @@ pub fn check_field(
 
             JsonTConstraint::Length { key, value: bound } => {
                 let len = match value {
-                    JsonTValue::Str(s)   => Some(s.chars().count() as u64),
+                    JsonTValue::Str(s)
+                    | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
+                    | JsonTValue::Email(s) | JsonTValue::Hostname(s)
+                    | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
+                    | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
+                    | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
+                    | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
+                    | JsonTValue::Oid(s) => Some(s.chars().count() as u64),
                     JsonTValue::Array(a) => Some(a.len() as u64),
                     _                   => None,
                 };
@@ -161,9 +168,11 @@ pub fn check_field(
             }
 
             JsonTConstraint::Regex(pattern) => {
-                if let JsonTValue::Str(s) = value {
+                // Apply regex to any string-typed variant — all carry a bare string internally.
+                if let Some(s) = value.as_str() {
+                    let s = s.to_owned();
                     match regex::Regex::new(pattern) {
-                        Ok(re) if !re.is_match(s) => {
+                        Ok(re) if !re.is_match(&s) => {
                             events.push(
                                 DiagnosticEvent::warning(EventKind::ConstraintViolation {
                                     field:      field.name.clone(),
@@ -205,7 +214,14 @@ pub fn describe_value(v: &JsonTValue) -> String {
         JsonTValue::Null         => "null".into(),
         JsonTValue::Unspecified  => "_".into(),
         JsonTValue::Bool(b)      => b.to_string(),
-        JsonTValue::Str(s)       => format!("{:?}", s),
+        JsonTValue::Str(s)
+        | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
+        | JsonTValue::Email(s) | JsonTValue::Hostname(s)
+        | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
+        | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
+        | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
+        | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
+        | JsonTValue::Oid(s)     => format!("{:?}", s),
         JsonTValue::Enum(e)      => e.clone(),
         JsonTValue::Number(n)    => n.as_f64().to_string(),
         JsonTValue::Object(_)    => "{...}".into(),
@@ -280,15 +296,8 @@ fn check_array_items(
 }
 
 fn values_equal(a: &JsonTValue, b: &JsonTValue) -> bool {
-    match (a, b) {
-        (JsonTValue::Null,        JsonTValue::Null)        => true,
-        (JsonTValue::Unspecified, JsonTValue::Unspecified) => true,
-        (JsonTValue::Bool(x),     JsonTValue::Bool(y))     => x == y,
-        (JsonTValue::Str(x),      JsonTValue::Str(y))      => x == y,
-        (JsonTValue::Enum(x),     JsonTValue::Enum(y))     => x == y,
-        (JsonTValue::Number(x),   JsonTValue::Number(y))   => {
-            (x.as_f64() - y.as_f64()).abs() < f64::EPSILON
-        }
-        _ => false,
-    }
+    // Delegate to PartialEq for all variants — the derived impl is exact.
+    // Semantic string variants (Email, Uuid, …) only equal themselves, not Str,
+    // which is the correct invariant (a promoted constant stays promoted).
+    a == b
 }

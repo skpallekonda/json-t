@@ -79,12 +79,12 @@ public class ConstraintChecker {
             }
         }
 
-        // 7. minLength
+        // 7. minLength — applies to any string-typed variant and to arrays
         if (c.minLength() != null) {
             int minL = c.minLength();
             int len = -1;
-            if (value instanceof JsonTValue.Text t) {
-                len = t.value().length();
+            if (value.isStringLike()) {
+                len = value.asText().length();
             } else if (value instanceof JsonTValue.Array arr) {
                 len = arr.elements().size();
             }
@@ -98,12 +98,12 @@ public class ConstraintChecker {
             }
         }
 
-        // 8. maxLength
+        // 8. maxLength — applies to any string-typed variant and to arrays
         if (c.maxLength() != null) {
             int maxL = c.maxLength();
             int len = -1;
-            if (value instanceof JsonTValue.Text t) {
-                len = t.value().length();
+            if (value.isStringLike()) {
+                len = value.asText().length();
             } else if (value instanceof JsonTValue.Array arr) {
                 len = arr.elements().size();
             }
@@ -117,12 +117,13 @@ public class ConstraintChecker {
             }
         }
 
-        // 9. pattern
-        if (c.pattern() != null && value instanceof JsonTValue.Text t) {
+        // 9. pattern — applies to any string-typed variant
+        if (c.pattern() != null && value.isStringLike()) {
             String patternStr = c.pattern();
+            String strVal = value.asText();
             try {
                 Pattern p = Pattern.compile(patternStr);
-                if (!p.matcher(t.value()).find()) {
+                if (!p.matcher(strVal).find()) {
                     events.add(DiagnosticEvent.warning(
                             new DiagnosticEventKind.ConstraintViolation(
                                     field.name(),
@@ -193,7 +194,7 @@ public class ConstraintChecker {
     public static String describeValue(JsonTValue v) {
         if (v instanceof JsonTValue.Null) return "null";
         if (v instanceof JsonTValue.Bool b) return Boolean.toString(b.value());
-        if (v instanceof JsonTValue.Text t) return "\"" + t.value() + "\"";
+        if (v.isStringLike()) return "\"" + v.asText() + "\"";
         if (v instanceof JsonTValue.Array) return "[...]";
         if (v.isNumeric()) return v.toString();
         return v.toString();

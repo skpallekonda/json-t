@@ -462,7 +462,14 @@ pub fn stringify_value(v: &JsonTValue) -> String {
         JsonTValue::Null        => "null".to_string(),
         JsonTValue::Unspecified => "_".to_string(),
         JsonTValue::Bool(b)     => b.to_string(),
-        JsonTValue::Str(s)      => quote(s),
+        JsonTValue::Str(s)
+        | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
+        | JsonTValue::Email(s) | JsonTValue::Hostname(s)
+        | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
+        | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
+        | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
+        | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
+        | JsonTValue::Oid(s)    => quote(s),
         JsonTValue::Enum(c)     => c.clone(),
         JsonTValue::Number(n)   => stringify_number(n),
         JsonTValue::Object(row) => stringify_row(row),
