@@ -24,16 +24,26 @@ use crate::model::validation::{JsonTExpression, JsonTRule, JsonTValidationBlock}
 
 /// Evaluate all `rules` in a `JsonTValidationBlock` against one parsed row.
 ///
+/// `rule_field_refs` is the pre-computed union of all field names referenced by
+/// any rule expression in the validation block — computed once at pipeline build
+/// time by `ValidationPipelineBuilder::build` so this hot path never touches the
+/// expression AST.
+///
 /// Returns diagnostic events for any violations.
 /// `fields` and `row_values` must be the same length (caller responsibility).
 pub fn check_rules(
-    fields:     &[JsonTField],
-    validation: &JsonTValidationBlock,
-    row_values: &[JsonTValue],
-    row_index:  usize,
+    fields:          &[JsonTField],
+    validation:      &JsonTValidationBlock,
+    row_values:      &[JsonTValue],
+    row_index:       usize,
+    rule_field_refs: &[String],
 ) -> Vec<DiagnosticEvent> {
     let mut events = Vec::new();
-    let ctx = build_eval_context(fields, row_values);
+
+    // rule_field_refs was pre-computed at build time — no per-row AST traversal
+    // and no HashSet allocation. Linear scan over 2-4 entries is faster than
+    // hashing for this cardinality.
+    let ctx = build_minimal_eval_context(fields, row_values, rule_field_refs);
 
     for rule in &validation.rules {
         match rule {
@@ -127,10 +137,20 @@ pub fn check_rules(
 // Private helpers
 // =============================================================================
 
-fn build_eval_context(fields: &[JsonTField], values: &[JsonTValue]) -> EvalContext {
+/// Build an `EvalContext` containing only the fields whose names appear in `refs`.
+///
+/// Takes a slice rather than a `HashSet` — `refs` holds typically 2–4 entries
+/// (pre-computed from all rule expressions at pipeline build time), so a linear
+/// scan is faster than hashing and eliminates per-row `HashSet` allocation.
+fn build_minimal_eval_context(
+    fields: &[JsonTField],
+    values: &[JsonTValue],
+    refs:   &[String],
+) -> EvalContext {
     fields
         .iter()
         .zip(values.iter())
+        .filter(|(field, _)| refs.contains(&field.name))
         .fold(EvalContext::new(), |ctx, (field, value)| {
             ctx.bind(field.name.clone(), value.clone())
         })

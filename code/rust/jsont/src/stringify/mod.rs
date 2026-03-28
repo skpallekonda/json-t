@@ -309,10 +309,10 @@ fn stringify_operation(op: &SchemaOperation, ctx: &Ctx) -> String {
             let inner = paths.iter().map(FieldPath::join).collect::<Vec<_>>().join(", ");
             format!("project({inner})")
         }
-        SchemaOperation::Filter(expr) => {
+        SchemaOperation::Filter { expr, .. } => {
             format!("filter{sp}{}", stringify_expr(expr))
         }
-        SchemaOperation::Transform { target, expr } => {
+        SchemaOperation::Transform { target, expr, .. } => {
             format!("transform{sp}{}{sp}={sp}{}", target.join(), stringify_expr(expr), sp = sp)
         }
     }

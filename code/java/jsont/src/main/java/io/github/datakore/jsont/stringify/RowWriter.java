@@ -95,6 +95,8 @@ public final class RowWriter {
         if (v instanceof JsonTValue.D64   n)     { w.write(Double.toString(n.value())); return; }
         if (v instanceof JsonTValue.D128  n)     { w.write(n.value().toPlainString()); return; }
         if (v instanceof JsonTValue.Text  t)     { writeQuotedString(t.value(), w); return; }
+        if (v instanceof JsonTValue.Enum  e)     { w.write(e.value()); return; }
+        if (v instanceof JsonTValue.Unspecified) { w.write('_'); return; }
         if (v instanceof JsonTValue.Array a)     { writeArray(a.elements(), w); return; }
         throw new IllegalArgumentException("Unknown JsonTValue: " + v);
     }

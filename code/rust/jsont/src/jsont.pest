@@ -344,7 +344,7 @@ unique_entry = { "(" ~ field_path_list ~ ")" }
 rule = { conditional_requirement | expression }
 
 conditional_requirement = {
-    expression ~ "->" ~ kw_required ~ field_path_list
+    expression ~ "->" ~ kw_required ~ "(" ~ field_path_list ~ ")"
 }
 
 

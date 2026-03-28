@@ -5,6 +5,7 @@
 - **Java 17:** `code/java/jsont` (Mirror)
 
 ## 🏗️ Design Philosophy (HARD CONSTRAINTS)
+- **JsonT Grammar** must be same, irrespective of language implementation
 - **SOLID & Stateless:** Prioritize Single Responsibility. Avoid internal state.
 - **Thread-Safety:** Any essential state must use thread-safe primitives (Atomic/Concurrent in Java, Mutex/Arc in Rust).
 - **Fluid & Idempotent:** Use Fluid APIs and Builder patterns. Ensure operations are idempotent.

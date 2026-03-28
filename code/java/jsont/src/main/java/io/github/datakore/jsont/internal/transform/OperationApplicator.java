@@ -15,9 +15,11 @@ import io.github.datakore.jsont.model.SchemaOperation;
 import io.github.datakore.jsont.model.UnaryOp;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class OperationApplicator {
@@ -71,9 +73,11 @@ public class OperationApplicator {
         }
 
         if (op instanceof SchemaOperation.Filter filter) {
+            // Bind only the fields referenced by the predicate expression.
+            Set<String> needed = new HashSet<>(collectFieldRefs(filter.predicate()));
             EvalContext ctx = EvalContext.create();
             for (Map.Entry<String, JsonTValue> entry : working.entrySet()) {
-                ctx.bind(entry.getKey(), entry.getValue());
+                if (needed.contains(entry.getKey())) ctx.bind(entry.getKey(), entry.getValue());
             }
             try {
                 JsonTValue result = filter.predicate().evaluate(ctx);
@@ -97,9 +101,11 @@ public class OperationApplicator {
             if (!working.containsKey(key)) {
                 throw new JsonTError.Transform.FieldNotFound(key);
             }
+            // Bind only the fields referenced by the transform expression.
+            Set<String> needed = new HashSet<>(collectFieldRefs(transform.expr()));
             EvalContext ctx = EvalContext.create();
             for (Map.Entry<String, JsonTValue> entry : working.entrySet()) {
-                ctx.bind(entry.getKey(), entry.getValue());
+                if (needed.contains(entry.getKey())) ctx.bind(entry.getKey(), entry.getValue());
             }
             try {
                 JsonTValue newVal = transform.expr().evaluate(ctx);

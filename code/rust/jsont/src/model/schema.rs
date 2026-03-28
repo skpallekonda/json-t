@@ -61,12 +61,22 @@ pub enum SchemaOperation {
     Project(Vec<FieldPath>),
 
     /// Drop rows where the expression evaluates to false.
-    Filter(crate::model::validation::JsonTExpression),
+    ///
+    /// `refs` holds the field names referenced by `expr`, pre-computed at parse
+    /// time so the hot row-evaluation path never traverses the AST per row.
+    Filter {
+        expr: crate::model::validation::JsonTExpression,
+        refs: Vec<String>,
+    },
 
     /// Replace the value at `target` with the result of evaluating `expr`.
+    ///
+    /// `refs` holds the field names referenced by `expr`, pre-computed at parse
+    /// time so the hot row-evaluation path never traverses the AST per row.
     Transform {
         target: FieldPath,
         expr: crate::model::validation::JsonTExpression,
+        refs: Vec<String>,
     },
 }
 

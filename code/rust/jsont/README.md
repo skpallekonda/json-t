@@ -119,17 +119,26 @@ in one call.  Backed by a [pest](https://pest.rs/) PEG grammar.
 use jsont::{Parseable, JsonTNamespace};
 
 let source = r#"
-    namespace MyApp {
-        catalog Orders {
-            schema Order {
-                fields {
-                    id:      i64,
-                    product: str,
-                    qty:     i32,
-                    price:   d64
+    {
+      namespace: {
+        baseUrl: "https://api.example.com/v1",
+        version: "1.0",
+        catalogs: [
+          {
+            schemas: [
+              Order: {
+                fields: {
+                  i64: id,
+                  str: product  [(minLength=2)],
+                  i32: qty      [(minValue=1, maxValue=999)],
+                  d64: price    [(minValue=0.01)]
                 }
-            }
-        }
+              }
+            ]
+          }
+        ],
+        data-schema: Order
+      }
     }
 "#;
 
@@ -404,8 +413,8 @@ Order (Straight)  id, product, quantity, price
 | `Rename(pairs)` | Rename one or more fields (values unchanged). |
 | `Exclude(paths)` | Drop the listed fields from the row. |
 | `Project(paths)` | Keep only the listed fields; drop everything else. |
-| `Filter(expr)` | Drop rows where the boolean expression is false. Returns `TransformError::Filtered` — not a hard failure. |
-| `Transform { target, expr }` | Replace a field's value with the result of evaluating `expr`. |
+| `new_filter(expr)` | Drop rows where the boolean expression is false. Returns `TransformError::Filtered` — not a hard failure. |
+| `new_transform(target, expr)` | Replace a field's value with the result of evaluating `expr`. |
 
 ```rust
 use jsont::{
@@ -422,7 +431,7 @@ let view = JsonTSchemaBuilder::derived("OrderView", "Order")
         from: FieldPath::single("price"),
         to:   "amount".into(),
     }]))?
-    .operation(SchemaOperation::Filter(
+    .operation(SchemaOperation::new_filter(
         JsonTExpression::binary(
             BinaryOp::Gt,
             JsonTExpression::field_name("amount"),

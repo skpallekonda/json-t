@@ -147,8 +147,8 @@ public final class JsonTRowBuilder {
     private static boolean isStringType(ScalarType t) {
         return switch (t) {
             case STR, NSTR, URI, UUID, EMAIL, HOSTNAME,
-                 IPV4, IPV6, DATE, TIME, DTM, TS, TSZ,
-                 DUR, INST, B64, OID, HEX -> true;
+                 IPV4, IPV6, DATE, TIME, DATETIME, TIMESTAMP, TSZ,
+                 DURATION, INST, BASE64, OID, HEX -> true;
             default -> false;
         };
     }

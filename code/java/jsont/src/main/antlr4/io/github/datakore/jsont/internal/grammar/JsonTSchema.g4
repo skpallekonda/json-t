@@ -1,305 +1,404 @@
 grammar JsonTSchema;
 
-// ─── Top-level ────────────────────────────────────────────────────────────────
+// Top level
+json_t : namespace_decl? data_rows? EOF ;
 
-namespace_def
-    : NAMESPACE STRING_LITERAL? LBRACE catalog_def* RBRACE EOF
+namespace_decl : 
+    '{' KW_NAMESPACE ':' '{'
+        KW_BASE_URL ':' ns_base_url ','
+        KW_VERSION ':' ns_version ','
+        KW_CATALOGS ':' '[' catalog (',' catalog)* ']' ','
+        KW_DATA_SCHEMA ':' schema_id
+    '}' '}' ;
+    
+catalog :
+    '{' schemas_section (',' enums_section)? '}' ;
+
+schemas_section :
+    KW_SCHEMAS ':' '[' schema_entry (',' schema_entry)* ']' ;
+
+schema_entry :
+    ns_schema_name ':' schema_definition ;
+
+schema_definition :
+    straight_schema | derived_schema ;
+
+straight_schema :
+    '{' field_block (',' validation_block)? '}' ;
+
+derived_schema :
+    KW_FROM ns_schema_name '{' operations_block (',' validation_block)? '}' ;
+
+field_block :
+    KW_FIELDS ':' '{' field_decl (',' field_decl)* '}' ;
+
+field_decl :
+    scalar_field_decl | object_field_decl ;
+
+scalar_field_decl :
+    scalar_type_ref ':' ns_field_name optional_mark?
+    ('[' scalar_field_attributes ']')? ;
+
+scalar_field_attributes :
+      scalar_constraints_section (',' default_value)? (',' constant_value)?
+    | default_value (',' constant_value)?
+    | constant_value ;
+
+object_field_decl :
+    object_type_ref ':' ns_field_name optional_mark?
+    ('[' common_constraints_section ']')? ;
+
+optional_mark : '?' ;
+
+object_type_ref :
+    '<' object_type_name '>' array_suffix? ;
+
+scalar_type_ref :
+    scalar_types array_suffix? ;
+
+object_type_name :
+    schema_id ;
+
+array_suffix :
+    '[' ']' ;
+
+scalar_types :
+      KW_I16 | KW_I32 | KW_I64
+    | KW_U16 | KW_U32 | KW_U64
+    | KW_D128 | KW_D32 | KW_D64
+    | KW_BOOL | KW_HOSTNAME | KW_NSTR | KW_STR 
+    | KW_UUID | KW_URI | KW_EMAIL | KW_IPV4 | KW_IPV6
+    | KW_DATETIME | KW_TIMESTAMP | KW_DURATION 
+    | KW_DATE | KW_TIME | KW_INST | KW_TSZ
+    | KW_BASE64 | KW_OID | KW_HEX ;
+
+common_constraints_section :
+    common_constraint (',' common_constraint)* ;
+
+scalar_constraints_section :
+common_constraints_section |
+    scalar_constraint (',' scalar_constraint)* ;
+
+common_constraint :
+    required_constraint | array_items_constraint ;
+
+scalar_constraint :
+    value_constraint | length_constraint | regex_constraint | common_constraint ;
+
+required_constraint :
+    KW_REQUIRED '=' boolean_val ;
+
+value_constraint :
+    '(' value_constraint_option (',' value_constraint_option)* ')' ;
+
+value_constraint_option :
+    value_constraint_kw '=' number ;
+
+length_constraint :
+    '(' length_constraint_option (',' length_constraint_option)* ')' ;
+
+length_constraint_option :
+    length_constraint_kw '=' number ;
+
+array_items_constraint :
+    '(' array_items_constraint_option (',' array_items_constraint_option)* ')' ;
+
+array_items_constraint_option :
+      array_constraint_nbr '=' number
+    | array_constraint_bool '=' boolean_val ;
+
+regex_constraint :
+    regex_kw '=' string_val ;
+
+operations_block :
+    KW_OPERATIONS ':' '(' schema_operation (',' schema_operation)* ')' ;
+
+schema_operation :
+      rename_operation
+    | exclude_operation
+    | project_operation
+    | transform_operation
+    | filter_operation ;
+
+rename_operation :
+    KW_RENAME '(' rename_pair (',' rename_pair)* ')' ;
+
+rename_pair :
+    field_path KW_AS ns_field_name ;
+
+exclude_operation :
+    KW_EXCLUDE '(' field_path_list ')' ;
+
+project_operation :
+    KW_PROJECT '(' field_path_list ')' ;
+
+filter_operation :
+    KW_FILTER expression ;
+
+transform_operation :
+    KW_TRANSFORM field_path '=' expression ;
+
+field_path :
+    ns_field_name ('.' ns_field_name)* ;
+
+field_path_list :
+    field_path (',' field_path)* ;
+
+// Expression rules (incorporating ANTLR precedence handling)
+expression :
+      expression (OP_STAR | OP_DIV) expression   # MulDivExpr
+    | expression (OP_PLUS | OP_MINUS) expression # AddSubExpr
+    | expression (OP_LE | OP_GE | OP_LT | OP_GT) expression # RelationalExpr
+    | expression (OP_EEQ | OP_NEQ) expression    # EqualityExpr
+    | expression OP_AND expression               # AndExpr
+    | expression OP_OR expression                # OrExpr
+    | OP_NOT expression                          # NotExpr
+    | OP_MINUS expression                        # NegExpr
+    | primary_expression                         # PrimaryExpr
     ;
 
-catalog_def
-    : CATALOG LBRACE catalog_item* RBRACE
-    ;
+primary_expression :
+      literal
+    | function_call
+    | field_path
+    | '(' expression ')' ;
 
-catalog_item
-    : schema_def
-    | enum_def
-    ;
+function_call :
+    field_id '(' argument_list? ')' ;
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
+argument_list :
+    expression (',' expression)* ;
 
-schema_def
-    : straight_schema_def
-    | derived_schema_def
-    ;
+validation_block :
+    KW_VALIDATIONS ':' '{'
+        rules_block?
+        unique_block?
+        dataset_block?
+    '}' ;
 
-straight_schema_def
-    : SCHEMA IDENT LBRACE straight_schema_body* RBRACE
-    ;
+rules_block :
+    KW_RULES '{' rule_item (',' rule_item)* '}' ;
 
-derived_schema_def
-    : SCHEMA IDENT DERIVED IDENT LBRACE derived_schema_body* RBRACE
-    ;
+unique_block :
+    KW_UNIQUE '{' unique_entry (',' unique_entry)* '}' ;
 
-straight_schema_body
-    : fields_block
-    | validations_block
-    ;
+dataset_block :
+    KW_DATASET '{' expression (',' expression)* '}' ;
 
-derived_schema_body
-    : rename_op
-    | exclude_op
-    | project_op
-    | filter_op
-    | transform_op
-    ;
+unique_entry :
+    '(' field_path_list ')' ;
 
-// ─── Fields block ─────────────────────────────────────────────────────────────
+rule_item :
+      conditional_requirement
+    | expression ;
 
-fields_block
-    : FIELDS LBRACE field_def* RBRACE
-    ;
+conditional_requirement :
+    expression ARROW KW_REQUIRED '(' field_path_list ')' ;
 
-field_def
-    : field_name COLON field_type_spec COMMA?
-    ;
+enums_section :
+    KW_ENUMS ':' '[' enum_def (',' enum_def)* ']' ;
 
-// Allow scalar type keywords as field names (e.g. "email", "date", "ts")
-field_name
-    : IDENT
-    | I16 | I32 | I64 | U16 | U32 | U64
-    | D32 | D64 | D128
-    | BOOL | STR | NSTR
-    | URI | UUID | EMAIL | HOSTNAME | IPV4 | IPV6
-    | DATE | TIME | DTM | TS | TSZ | DUR | INST
-    | B64 | OID | HEX
-    | MIN_VALUE | MAX_VALUE | MIN_LENGTH | MAX_LENGTH
-    | PATTERN | REQUIRED | MAX_PRECISION | MIN_ITEMS | MAX_ITEMS
-    | ALLOW_NULLS | MAX_NULL_ITEMS | CONSTANT
-    | IF | REQUIRE
-    ;
+enum_def :
+    ns_enum_name ':' enum_body ;
 
-field_type_spec
-    : base_type ARRAY_SUFFIX? OPTIONAL_SUFFIX? constraints?
-    ;
+enum_body :
+    '[' enum_value_constant (',' enum_value_constant)* ']' ;
 
-base_type
-    : scalar_type
-    | object_type
-    ;
+enum_value_constant :
+    const_id ;
 
-scalar_type
-    : I16 | I32 | I64 | U16 | U32 | U64
-    | D32 | D64 | D128
-    | BOOL | STR | NSTR
-    | URI | UUID | EMAIL | HOSTNAME | IPV4 | IPV6
-    | DATE | TIME | DTM | TS | TSZ | DUR | INST
-    | B64 | OID | HEX
-    ;
+data_rows :
+    data_row (',' data_row)* ','? ;
 
-object_type
-    : LT IDENT GT
-    ;
+data_row :
+    object_value ;
 
-constraints
-    : LPAREN constraint_item (COMMA constraint_item)* RPAREN
-    ;
+literal :
+    scalar_value | null_value ;
 
-constraint_item
-    : MIN_VALUE EQ signed_number      # MinValueItem
-    | MAX_VALUE EQ signed_number      # MaxValueItem
-    | MIN_LENGTH EQ INT_LITERAL       # MinLengthItem
-    | MAX_LENGTH EQ INT_LITERAL       # MaxLengthItem
-    | PATTERN EQ STRING_LITERAL       # PatternItem
-    | REQUIRED                        # RequiredItem
-    | MAX_PRECISION EQ INT_LITERAL    # MaxPrecisionItem
-    | MIN_ITEMS EQ INT_LITERAL        # MinItemsItem
-    | MAX_ITEMS EQ INT_LITERAL        # MaxItemsItem
-    | ALLOW_NULLS                     # AllowNullsItem
-    | MAX_NULL_ITEMS EQ INT_LITERAL   # MaxNullItemsItem
-    | CONSTANT EQ constraint_literal  # ConstantValueItem
-    ;
+value :
+      literal
+    | unspecified_value
+    | enum_value
+    | object_value
+    | array_value ;
 
-constraint_literal
-    : MINUS? (INT_LITERAL | FLOAT_LITERAL)
-    | BOOL_LITERAL
-    | STRING_LITERAL
-    | NULL_LITERAL
-    ;
+null_value :
+    KW_NULL ;
 
-signed_number
-    : MINUS? (INT_LITERAL | FLOAT_LITERAL)
-    ;
+unspecified_value :
+    '_' ;
 
-// ─── Validations block ────────────────────────────────────────────────────────
+scalar_value :
+    string_val | number | boolean_val ;
 
-validations_block
-    : VALIDATIONS LBRACE validation_item* RBRACE
-    ;
+enum_value :
+    const_id ;
 
-validation_item
-    : unique_validation
-    | rule_validation
-    | conditional_validation
-    ;
+object_value :
+    '{' value (',' value)* '}' ;
 
-unique_validation
-    : UNIQUE COLON LBRACKET field_path_list RBRACKET COMMA?
-    ;
+array_value :
+    '[' value (',' value)* ']' ;
 
-rule_validation
-    : RULE COLON expr COMMA?
-    ;
+ns_base_url : string_val ;
+ns_version : string_val ;
+ns_schema_name : schema_id ;
+ns_field_name : field_id ;
+ns_enum_name : schema_id ;
 
-conditional_validation
-    : IF LPAREN expr RPAREN REQUIRE LPAREN field_path_list RPAREN COMMA?
-    ;
+default_value :
+    KW_DEFAULT (scalar_value | null_value) ;
 
-// ─── Derived schema operations ────────────────────────────────────────────────
+constant_value :
+    KW_CONST (scalar_value | null_value) ;
 
-rename_op
-    : RENAME COLON LBRACKET rename_pair (COMMA rename_pair)* RBRACKET COMMA?
-    ;
+boolean_val :
+    TRUE_VAL | FALSE_VAL ;
 
-rename_pair
-    : IDENT ARROW IDENT
-    ;
+number :
+    NUMBER_LITERAL ;
 
-exclude_op
-    : EXCLUDE COLON LBRACKET field_path_list RBRACKET COMMA?
-    ;
+string_val :
+    STRING_LITERAL ;
 
-project_op
-    : PROJECT COLON LBRACKET field_path_list RBRACKET COMMA?
-    ;
+value_constraint_kw :
+    KW_MINVALUE | KW_MAXVALUE | KW_MINPRECISION | KW_MAXPRECISION ;
 
-filter_op
-    : FILTER COLON expr COMMA?
-    ;
+length_constraint_kw :
+    KW_MINLENGTH | KW_MAXLENGTH ;
 
-transform_op
-    : TRANSFORM COLON IDENT EQ expr COMMA?
-    ;
+array_constraint_nbr :
+    KW_MINITEMS | KW_MAXITEMS | KW_MAXNULLITEMS ;
 
-// ─── Field paths ──────────────────────────────────────────────────────────────
+array_constraint_bool :
+    KW_ALLOWNULLITEMS ;
 
-field_path_list
-    : field_path (COMMA field_path)*
-    ;
+regex_kw :
+    KW_REGEX | KW_PATTERN ;
 
-field_path
-    : field_name (DOT field_name)*
-    ;
+// Helper to allow keywords to act as identifiers
+const_id :
+      CONSTID
+    | KW_FROM ;
 
-// ─── Enum ─────────────────────────────────────────────────────────────────────
+schema_id :
+      SCHEMAID
+    | KW_FROM ;
 
-enum_def
-    : ENUM IDENT LBRACE enum_values RBRACE
-    ;
+field_id :
+      FIELDID
+    | KW_NAMESPACE | KW_BASE_URL | KW_VERSION | KW_CATALOGS | KW_SCHEMAS
+    | KW_DATA_SCHEMA | KW_ENUMS | KW_FIELDS | KW_FROM | KW_VALIDATIONS
+    | KW_OPERATIONS | KW_DEFAULT | KW_CONST | KW_RULES | KW_UNIQUE
+    | KW_DATASET | KW_REQUIRED | KW_RENAME | KW_EXCLUDE | KW_PROJECT
+    | KW_FILTER | KW_TRANSFORM | KW_AS
+    | KW_I16 | KW_I32 | KW_I64 | KW_U16 | KW_U32 | KW_U64
+    | KW_D32 | KW_D64 | KW_D128 | KW_DATE | KW_TIME | KW_DATETIME
+    | KW_TIMESTAMP | KW_TSZ | KW_DURATION | KW_INST | KW_BASE64
+    | KW_OID | KW_HEX | KW_STR | KW_NSTR | KW_URI | KW_UUID
+    | KW_EMAIL | KW_HOSTNAME | KW_IPV4 | KW_IPV6 | KW_BOOL
+    | KW_MINVALUE | KW_MAXVALUE | KW_MINPRECISION | KW_MAXPRECISION
+    | KW_MINLENGTH | KW_MAXLENGTH | KW_MINITEMS | KW_MAXITEMS
+    | KW_MAXNULLITEMS | KW_ALLOWNULLITEMS | KW_REGEX | KW_PATTERN
+    | TRUE_VAL | FALSE_VAL | KW_NULL ;
 
-enum_values
-    : IDENT (COMMA IDENT)* COMMA?
-    ;
 
-// ─── Expressions ──────────────────────────────────────────────────────────────
-// ANTLR4 left-recursive: alternatives listed FIRST have HIGHER precedence (bind tighter).
-// So list highest-precedence operators first.
+// -------------- LEXER --------------
 
-expr
-    : expr (STAR | SLASH) expr                      # MulDivExpr
-    | expr (PLUS | MINUS) expr                      # AddSubExpr
-    | expr (LT | LE_OP | GT | GE_OP) expr          # ComparisonExpr
-    | expr (EQ_OP | NE_OP) expr                    # EqualityExpr
-    | expr AND_OP expr                              # BinaryAndExpr
-    | expr OR_OP expr                               # BinaryOrExpr
-    | NOT_OP expr                                   # NotExpr
-    | MINUS expr                                    # NegExpr
-    | LPAREN expr RPAREN                            # ParenExpr
-    | NULL_LITERAL                                  # NullLiteralExpr
-    | BOOL_LITERAL                                  # BoolLiteralExpr
-    | INT_LITERAL                                   # IntLiteralExpr
-    | FLOAT_LITERAL                                 # FloatLiteralExpr
-    | STRING_LITERAL                                # StringLiteralExpr
-    | IDENT (DOT IDENT)*                            # FieldRefExpr
-    ;
+KW_NAMESPACE : 'namespace' ;
+KW_BASE_URL : 'baseUrl' ;
+KW_VERSION : 'version' ;
+KW_CATALOGS : 'catalogs' ;
+KW_SCHEMAS : 'schemas' ;
+KW_DATA_SCHEMA : 'data-schema' ;
+KW_ENUMS : 'enums' ;
+KW_FIELDS : 'fields' ;
+KW_FROM : 'FROM' ;
+KW_VALIDATIONS : 'validations' ;
+KW_OPERATIONS : 'operations' ;
+KW_DEFAULT : 'default' ;
+KW_CONST : 'const' ;
+KW_RULES : 'rules' ;
+KW_UNIQUE : 'unique' ;
+KW_DATASET : 'dataset' ;
+KW_REQUIRED : 'required' ;
+KW_RENAME : 'rename' ;
+KW_EXCLUDE : 'exclude' ;
+KW_PROJECT : 'project' ;
+KW_FILTER : 'filter' ;
+KW_TRANSFORM : 'transform' ;
+KW_AS : 'as' ;
 
-// ─── Keywords (must appear before IDENT in lexer) ─────────────────────────────
+KW_I16 : 'i16' ;
+KW_I32 : 'i32' ;
+KW_I64 : 'i64' ;
+KW_U16 : 'u16' ;
+KW_U32 : 'u32' ;
+KW_U64 : 'u64' ;
+KW_D32 : 'd32' ;
+KW_D64 : 'd64' ;
+KW_D128 : 'd128' ;
+KW_DATE : 'date' ;
+KW_TIME : 'time' ;
+KW_DATETIME : 'datetime' ;
+KW_TIMESTAMP : 'timestamp' ;
+KW_TSZ : 'tsz' ;
+KW_DURATION : 'duration' ;
+KW_INST : 'inst' ;
+KW_BASE64 : 'base64' ;
+KW_OID : 'oid' ;
+KW_HEX : 'hex' ;
+KW_STR : 'str' ;
+KW_NSTR : 'nstr' ;
+KW_URI : 'uri' ;
+KW_UUID : 'uuid' ;
+KW_EMAIL : 'email' ;
+KW_HOSTNAME : 'hostname' ;
+KW_IPV4 : 'ipv4' ;
+KW_IPV6 : 'ipv6' ;
+KW_BOOL : 'bool' ;
 
-NAMESPACE   : 'namespace' ;
-CATALOG     : 'catalog' ;
-SCHEMA      : 'schema' ;
-DERIVED     : 'derived' ;
-FIELDS      : 'fields' ;
-VALIDATIONS : 'validations' ;
-UNIQUE      : 'unique' ;
-RULE        : 'rule' ;
-RENAME      : 'rename' ;
-EXCLUDE     : 'exclude' ;
-PROJECT     : 'project' ;
-FILTER      : 'filter' ;
-TRANSFORM   : 'transform' ;
-ENUM        : 'enum' ;
+KW_MINVALUE : 'minValue' ;
+KW_MAXVALUE : 'maxValue' ;
+KW_MINPRECISION : 'minPrecision' ;
+KW_MAXPRECISION : 'maxPrecision' ;
+KW_MINLENGTH : 'minLength' ;
+KW_MAXLENGTH : 'maxLength' ;
+KW_MINITEMS : 'minItems' ;
+KW_MAXITEMS : 'maxItems' ;
+KW_MAXNULLITEMS : 'maxNullItems' ;
+KW_ALLOWNULLITEMS : 'allowNullItems' ;
+KW_REGEX : 'regex' ;
+KW_PATTERN : 'pattern' ;
 
-// Scalar type keywords
-I16      : 'i16' ;   I32   : 'i32' ;   I64  : 'i64' ;
-U16      : 'u16' ;   U32   : 'u32' ;   U64  : 'u64' ;
-D32      : 'd32' ;   D64   : 'd64' ;   D128 : 'd128' ;
-BOOL     : 'bool' ;  STR   : 'str' ;   NSTR : 'nstr' ;
-URI      : 'uri' ;   UUID  : 'uuid' ;  EMAIL : 'email' ;
-HOSTNAME : 'hostname' ; IPV4 : 'ipv4' ; IPV6 : 'ipv6' ;
-DATE     : 'date' ;  TIME  : 'time' ;  DTM  : 'dtm' ;
-TS       : 'ts' ;    TSZ   : 'tsz' ;   DUR  : 'dur' ;
-INST     : 'inst' ;  B64   : 'b64' ;   OID  : 'oid' ;
-HEX      : 'hex' ;
+TRUE_VAL  : 'true' ;
+FALSE_VAL : 'false' ;
+KW_NULL   : 'null' | 'nil' ;
 
-// Constraint keywords
-MIN_VALUE      : 'minValue' ;
-MAX_VALUE      : 'maxValue' ;
-MIN_LENGTH     : 'minLength' ;
-MAX_LENGTH     : 'maxLength' ;
-PATTERN        : 'pattern' ;
-REQUIRED       : 'required' ;
-MAX_PRECISION  : 'maxPrecision' ;
-MIN_ITEMS      : 'minItems' ;
-MAX_ITEMS      : 'maxItems' ;
-ALLOW_NULLS    : 'allowNulls' ;
-MAX_NULL_ITEMS : 'maxNullItems' ;
-CONSTANT       : 'constant' ;
+ARROW     : '->' ;
+OP_OR     : '||' ;
+OP_AND    : '&&' ;
+OP_EEQ    : '==' ;
+OP_NEQ    : '!=' ;
+OP_LE     : '<=' ;
+OP_GE     : '>=' ;
+OP_LT     : '<' ;
+OP_GT     : '>' ;
+OP_PLUS   : '+' ;
+OP_MINUS  : '-' ;
+OP_STAR   : '*' ;
+OP_DIV    : '/' ;
+OP_NOT    : '!' ;
 
-// Conditional validation keywords
-IF      : 'if' ;
-REQUIRE : 'require' ;
+// Identifiers matching Pest
+CONSTID  : [A-Z] [A-Z0-9_]+ ;
+SCHEMAID : [A-Z] [a-zA-Z0-9_]* ;
+FIELDID  : [a-z] [a-zA-Z0-9_]* ;
 
-// Literals
-NULL_LITERAL  : 'null' ;
-BOOL_LITERAL  : 'true' | 'false' ;
-INT_LITERAL   : [0-9]+ ;
-FLOAT_LITERAL : [0-9]+ '.' [0-9]+ ([eE] [+-]? [0-9]+)? ;
-STRING_LITERAL: '"' (~["\\\r\n] | '\\' .)* '"' ;
+NUMBER_LITERAL : [0-9]+ ('.' [0-9]+)? ;
+STRING_LITERAL : '"' ('\\' . | ~["\\])* '"' | '\'' ('\\' . | ~['\\])* '\'' ;
 
-// Multi-char operators (defined BEFORE single-char to get longer match)
-EQ_OP   : '==' ;
-NE_OP   : '!=' ;
-LE_OP   : '<=' ;
-GE_OP   : '>=' ;
-AND_OP  : '&&' ;
-OR_OP   : '||' ;
-NOT_OP  : '!' ;
-ARROW   : '->' ;
-ARRAY_SUFFIX   : '[]' ;
-OPTIONAL_SUFFIX: '?' ;
-
-// Single-char operators and punctuation
-PLUS    : '+' ;
-MINUS   : '-' ;
-STAR    : '*' ;
-SLASH   : '/' ;
-LBRACE  : '{' ;
-RBRACE  : '}' ;
-LPAREN  : '(' ;
-RPAREN  : ')' ;
-LBRACKET: '[' ;
-RBRACKET: ']' ;
-LT      : '<' ;
-GT      : '>' ;
-COLON   : ':' ;
-COMMA   : ',' ;
-DOT     : '.' ;
-EQ      : '=' ;
-
-// Identifiers (MUST be after all keywords)
-IDENT : [a-zA-Z_][a-zA-Z0-9_]* ;
-
-// Skip whitespace and comments
-WS           : [ \t\r\n]+ -> skip ;
-LINE_COMMENT : '//' ~[\r\n]* -> skip ;
-BLOCK_COMMENT: '/*' .*? '*/' -> skip ;
+WS : [ \t\r\n]+ -> skip ;
+COMMENT_LINE : '//' ~[\r\n]* -> skip ;
+COMMENT_BLOCK : '/*' .*? '*/' -> skip ;

@@ -13,17 +13,30 @@ class ExpressionParserTest {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /** Parses an expression from a straight-schema rule. */
     static JsonTExpression parseExpr(String exprText) {
         String dsl = """
-                namespace "" {
-                  catalog {
-                    schema X {
-                      fields { a: i32, b: i32, c: d64, flag: bool }
-                      validations {
-                        rule: %s
+                {
+                  namespace: {
+                    baseUrl: "",
+                    version: "",
+                    catalogs: [
+                      {
+                        schemas: [
+                          X: {
+                            fields: {
+                              i32: a,
+                              i32: b,
+                              d64: c,
+                              bool: flag
+                            },
+                            validations: {
+                              rules { %s }
+                            }
+                          }
+                        ]
                       }
-                    }
+                    ],
+                    data-schema: X
                   }
                 }
                 """.formatted(exprText);
@@ -34,15 +47,23 @@ class ExpressionParserTest {
         return ((JsonTRule.Expression) rule).expr();
     }
 
-    /** Parses an expression from a derived-schema filter. */
     static JsonTExpression parseFilter(String exprText) {
         String dsl = """
-                namespace "" {
-                  catalog {
-                    schema Base { fields { a: i32, b: i32, c: d64 } }
-                    schema D derived Base {
-                      filter: %s
-                    }
+                {
+                  namespace: {
+                    baseUrl: "",
+                    version: "",
+                    catalogs: [
+                      {
+                        schemas: [
+                          Base: { fields: { i32: a, i32: b, d64: c } },
+                          D: FROM Base {
+                            operations: ( filter %s )
+                          }
+                        ]
+                      }
+                    ],
+                    data-schema: D
                   }
                 }
                 """.formatted(exprText);
@@ -97,7 +118,6 @@ class ExpressionParserTest {
     // ── Arithmetic operators ──────────────────────────────────────────────────
 
     @Test void op_add() {
-        // a + b > 0 — GT is outer, ADD is inner
         var gt = (JsonTExpression.Binary) parseExpr("a + b > 0");
         assertEquals(BinaryOp.GT, gt.op());
         assertEquals(BinaryOp.ADD, ((JsonTExpression.Binary) gt.lhs()).op());
@@ -127,7 +147,6 @@ class ExpressionParserTest {
     }
 
     @Test void op_neg() {
-        // (-a) > 0 — parens force NEG to bind tightly, GT is outer
         var gt = (JsonTExpression.Binary) parseExpr("(-a) > 0");
         assertEquals(BinaryOp.GT, gt.op());
         var neg = (JsonTExpression.Unary) gt.lhs();
@@ -138,7 +157,6 @@ class ExpressionParserTest {
     // ── Precedence ────────────────────────────────────────────────────────────
 
     @Test void precedence_mulBeforeAdd() {
-        // a + b * c > 0  →  (a + (b * c)) > 0
         var gt  = (JsonTExpression.Binary) parseExpr("a + b * c > 0");
         var add = (JsonTExpression.Binary) gt.lhs();
         assertEquals(BinaryOp.ADD, add.op());
@@ -146,14 +164,12 @@ class ExpressionParserTest {
     }
 
     @Test void precedence_addBeforeComparison() {
-        // a + b > c  →  (a + b) > c
         var gt = (JsonTExpression.Binary) parseExpr("a + b > c");
         assertEquals(BinaryOp.GT, gt.op());
         assertEquals(BinaryOp.ADD, ((JsonTExpression.Binary) gt.lhs()).op());
     }
 
     @Test void precedence_comparisonBeforeAnd() {
-        // a > 0 && b < 10 — both sides of AND are comparisons
         var and = (JsonTExpression.Binary) parseExpr("a > 0 && b < 10");
         assertEquals(BinaryOp.AND, and.op());
         assertEquals(BinaryOp.GT, ((JsonTExpression.Binary) and.lhs()).op());
@@ -161,14 +177,12 @@ class ExpressionParserTest {
     }
 
     @Test void precedence_andBeforeOr() {
-        // a > 0 || b < 10 && c > 0  →  (a > 0) || ((b < 10) && (c > 0))
         var or = (JsonTExpression.Binary) parseExpr("a > 0 || b < 10 && c > 0");
         assertEquals(BinaryOp.OR, or.op());
         assertEquals(BinaryOp.AND, ((JsonTExpression.Binary) or.rhs()).op());
     }
 
     @Test void precedence_equalityBelowComparison() {
-        // a > b == flag — should be (a > b) == flag  (comparison has higher precedence than equality)
         var eq = (JsonTExpression.Binary) parseExpr("a > b == flag");
         assertEquals(BinaryOp.EQ, eq.op());
         assertEquals(BinaryOp.GT, ((JsonTExpression.Binary) eq.lhs()).op());
@@ -177,15 +191,13 @@ class ExpressionParserTest {
     // ── Associativity ─────────────────────────────────────────────────────────
 
     @Test void associativity_sub_leftToRight() {
-        // a - b - c > 0  →  ((a - b) - c) > 0
         var gt  = (JsonTExpression.Binary) parseExpr("a - b - c > 0");
-        var sub = (JsonTExpression.Binary) gt.lhs();      // (a-b)-c
+        var sub = (JsonTExpression.Binary) gt.lhs();      
         assertEquals(BinaryOp.SUB, sub.op());
-        assertEquals(BinaryOp.SUB, ((JsonTExpression.Binary) sub.lhs()).op()); // a-b
+        assertEquals(BinaryOp.SUB, ((JsonTExpression.Binary) sub.lhs()).op()); 
     }
 
     @Test void associativity_div_leftToRight() {
-        // a / b / c > 0  →  ((a / b) / c) > 0
         var gt  = (JsonTExpression.Binary) parseExpr("a / b / c > 0");
         var div = (JsonTExpression.Binary) gt.lhs();
         assertEquals(BinaryOp.DIV, div.op());
@@ -195,7 +207,6 @@ class ExpressionParserTest {
     // ── Parentheses ───────────────────────────────────────────────────────────
 
     @Test void parens_overrideMulAdd() {
-        // (a + b) * c > 0 — MUL wraps the paren group
         var gt  = (JsonTExpression.Binary) parseExpr("(a + b) * c > 0");
         var mul = (JsonTExpression.Binary) gt.lhs();
         assertEquals(BinaryOp.MUL, mul.op());
@@ -203,7 +214,6 @@ class ExpressionParserTest {
     }
 
     @Test void parens_orInsideAnd() {
-        // a > 0 && (b < 0 || c > 0) — OR inside AND due to parens
         var and = (JsonTExpression.Binary) parseExpr("a > 0 && (b < 0 || c > 0)");
         assertEquals(BinaryOp.AND, and.op());
         assertEquals(BinaryOp.OR, ((JsonTExpression.Binary) and.rhs()).op());
@@ -285,7 +295,6 @@ class ExpressionParserTest {
 
     @Test void eval_or_shortCircuits() {
         var expr = parseExpr("a > 0 || b < 10");
-        // a=0, b=5 → false || true = true
         var ctx = EvalContext.create()
                 .bind("a", JsonTValue.i32(0))
                 .bind("b", JsonTValue.i32(5));
@@ -293,7 +302,6 @@ class ExpressionParserTest {
     }
 
     @Test void eval_arithmetic() {
-        // a * 2 > 10 → true when a = 6
         var expr = parseFilter("a * 2 > 10");
         var ctx = EvalContext.create().bind("a", JsonTValue.i32(6));
         assertEquals(JsonTValue.bool(true), expr.evaluate(ctx));

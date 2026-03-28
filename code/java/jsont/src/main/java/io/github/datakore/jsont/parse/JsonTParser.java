@@ -8,8 +8,13 @@ import io.github.datakore.jsont.model.JsonTRow;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /**
  * Entry point for all JsonT parsing operations.
@@ -64,6 +69,20 @@ public final class JsonTParser {
      */
     public static int parseRowsStreaming(Reader reader, RowConsumer consumer) throws IOException {
         return RowScanner.parseRowsStreaming(reader, consumer);
+    }
+
+    /**
+     * Returns a sequential {@link Stream} of rows parsed lazily from {@code reader}.
+     * Callers should close the stream (try-with-resources) to release the underlying reader.
+     */
+    public static Stream<JsonTRow> parseRowsStreaming(Reader reader) {
+        RowIter iter = new RowIter(reader);
+        return StreamSupport.stream(
+                Spliterators.spliteratorUnknownSize(iter, Spliterator.ORDERED | Spliterator.NONNULL),
+                false
+        ).onClose(() -> {
+            try { iter.close(); } catch (IOException e) { throw new UncheckedIOException(e); }
+        });
     }
 
     /**

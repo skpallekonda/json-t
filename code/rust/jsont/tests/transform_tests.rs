@@ -214,7 +214,7 @@ fn test_filter_passes_matching_row() {
         JsonTExpression::literal(JsonTValue::i32(18)),
     );
     let derived = JsonTSchemaBuilder::derived("Adults", "Person")
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -234,7 +234,7 @@ fn test_filter_rejects_non_matching_row() {
         JsonTExpression::literal(JsonTValue::i32(50)),
     );
     let derived = JsonTSchemaBuilder::derived("Seniors", "Person")
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -252,7 +252,7 @@ fn test_filter_non_boolean_result_returns_filter_failed() {
     // Returning a non-boolean (age itself) is an error.
     let filter_expr = JsonTExpression::field_name("age");
     let derived = JsonTSchemaBuilder::derived("Bad", "Person")
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -283,10 +283,7 @@ fn test_transform_doubles_age() {
         JsonTExpression::literal(JsonTValue::i32(2)),
     );
     let derived = JsonTSchemaBuilder::derived("PersonDoubleAge", "Person")
-        .operation(SchemaOperation::Transform {
-            target: FieldPath::single("age"),
-            expr,
-        }).unwrap()
+        .operation(SchemaOperation::new_transform(FieldPath::single("age"), expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -309,10 +306,10 @@ fn test_transform_doubles_age() {
 fn test_transform_unknown_field_returns_error() {
     let parent = person_schema();
     let derived = JsonTSchemaBuilder::derived("Bad", "Person")
-        .operation(SchemaOperation::Transform {
-            target: FieldPath::single("ghost"),
-            expr: JsonTExpression::literal(JsonTValue::i32(0)),
-        }).unwrap()
+        .operation(SchemaOperation::new_transform(
+            FieldPath::single("ghost"),
+            JsonTExpression::literal(JsonTValue::i32(0)),
+        )).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -447,11 +444,8 @@ fn test_filter_then_transform() {
         JsonTExpression::literal(JsonTValue::i32(1)),
     );
     let derived = JsonTSchemaBuilder::derived("OlderAdults", "Person")
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
-        .operation(SchemaOperation::Transform {
-            target: FieldPath::single("age"),
-            expr:   transform_expr,
-        }).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_transform(FieldPath::single("age"), transform_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -491,7 +485,7 @@ fn test_validate_ops_exclude_then_filter_remaining_field_is_valid() {
     );
     let derived = JsonTSchemaBuilder::derived("Valid", "Person")
         .operation(SchemaOperation::Exclude(vec![FieldPath::single("age")])).unwrap()
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -507,10 +501,7 @@ fn test_validate_ops_transform_using_available_field_is_valid() {
         JsonTExpression::literal(JsonTValue::i32(1)),
     );
     let derived = JsonTSchemaBuilder::derived("BumpAge", "Person")
-        .operation(SchemaOperation::Transform {
-            target: FieldPath::single("age"),
-            expr,
-        }).unwrap()
+        .operation(SchemaOperation::new_transform(FieldPath::single("age"), expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -533,7 +524,7 @@ fn test_validate_ops_filter_references_excluded_field() {
             FieldPath::single("name"),
             FieldPath::single("age"),  // age excluded here
         ])).unwrap()
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap() // age referenced here
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap() // age referenced here
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -560,7 +551,7 @@ fn test_validate_ops_filter_references_projected_away_field() {
             FieldPath::single("id"),
             FieldPath::single("name"),
         ])).unwrap()
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -586,10 +577,7 @@ fn test_validate_ops_transform_expr_references_excluded_field() {
     );
     let derived = JsonTSchemaBuilder::derived("Bad", "Person")
         .operation(SchemaOperation::Exclude(vec![FieldPath::single("age")])).unwrap()
-        .operation(SchemaOperation::Transform {
-            target: FieldPath::single("id"),
-            expr,
-        }).unwrap()
+        .operation(SchemaOperation::new_transform(FieldPath::single("id"), expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -607,10 +595,10 @@ fn test_validate_ops_transform_target_was_excluded() {
     let parent = person_schema();
     let derived = JsonTSchemaBuilder::derived("Bad", "Person")
         .operation(SchemaOperation::Exclude(vec![FieldPath::single("age")])).unwrap()
-        .operation(SchemaOperation::Transform {
-            target: FieldPath::single("age"), // target no longer exists
-            expr: JsonTExpression::literal(JsonTValue::i32(99)),
-        }).unwrap()
+        .operation(SchemaOperation::new_transform(
+            FieldPath::single("age"), // target no longer exists
+            JsonTExpression::literal(JsonTValue::i32(99)),
+        )).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -639,7 +627,7 @@ fn test_validate_ops_filter_uses_renamed_field_valid() {
             from: FieldPath::single("age"),
             to:   "years".into(),
         }])).unwrap()
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);
@@ -660,7 +648,7 @@ fn test_validate_ops_filter_uses_old_name_after_rename_fails() {
             from: FieldPath::single("age"),
             to:   "years".into(),
         }])).unwrap()
-        .operation(SchemaOperation::Filter(filter_expr)).unwrap()
+        .operation(SchemaOperation::new_filter(filter_expr)).unwrap()
         .build().unwrap();
 
     let reg = registry(vec![parent, derived.clone()]);

@@ -1,93 +1,176 @@
-name: Auto Release & Publish
+name: Release
 
 on:
   push:
     branches:
       - main
     paths-ignore:
-      - '**.md' # Ignores README changes to prevent unnecessary builds
+      - '**.md'
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Required to push the new tag and commit
-      packages: write  # Required to publish artifacts to GitHub Packages
-      pages: write      # Required to deploy to GitHub Pages
-      id-token: write   # Required for OIDC authentication
+      contents: write
+      packages: write
+      pages: write
 
     steps:
-      # 1. Checkout Code
-      - uses: actions/checkout@v4
+      # ── 1. Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for tag push
 
-      # 2. Setup Java 21 & Maven Settings
-      - name: Set up JDK 21
+      # ── 2. Set up Java 17 ──────────────────────────────────────────────────────
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '17'
           distribution: 'temurin'
-          server-id: github # Must match <id>github</id> in your pom.xml distributionManagement
+          server-id: github
           settings-path: ${{ github.workspace }}
 
-      # 3. Set Release Version (Remove Snapshot)
-      - name: Set Release Version
+      # ── 3. Set up Rust stable ──────────────────────────────────────────────────
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            code/rust/jsont/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('code/rust/jsont/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # ── 4. Determine release version ───────────────────────────────────────────
+      # Java SNAPSHOT (e.g. 0.2.0-SNAPSHOT) is the single source of truth.
+      # Both Rust and Java are released at the same version number.
+      - name: Determine release version
         id: version
         run: |
-          # Remove -SNAPSHOT from the current version
-          mvn versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules=true
-          
-          # Extract the new version
-          MVN_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          NEW_TAG="v$MVN_VERSION"
-          
-          echo "New Tag: $NEW_TAG"
-          echo "Maven Version: $MVN_VERSION"
-          
-          # Save to Env variables for next steps
-          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
-          echo "MVN_VERSION=$MVN_VERSION" >> $GITHUB_ENV
+          SNAPSHOT=$(mvn help:evaluate -f code/java/pom.xml \
+            -Dexpression=project.version -q -DforceStdout)
+          RELEASE_VERSION="${SNAPSHOT%-SNAPSHOT}"
+          NEW_TAG="v$RELEASE_VERSION"
 
-      # 4. Build (Skipping Tests)
-      - name: Build and Verify
-        run: mvn clean verify -DskipTests
+          IFS='.' read -r -a PARTS <<< "$RELEASE_VERSION"
+          NEXT_PATCH=$((PARTS[2] + 1))
+          NEXT_VERSION="${PARTS[0]}.${PARTS[1]}.$NEXT_PATCH"
 
-      # 5. Commit Version Bump & Push Tag
-      - name: Commit and Push Release
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
+          echo "NEW_TAG=$NEW_TAG"                 >> $GITHUB_ENV
+          echo "NEXT_VERSION=$NEXT_VERSION"       >> $GITHUB_ENV
+
+          echo "Release : $RELEASE_VERSION"
+          echo "Tag     : $NEW_TAG"
+          echo "Next dev: $NEXT_VERSION"
+
+      # ── 5. Set release versions ────────────────────────────────────────────────
+      - name: Set Java release version
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Stage only modified tracked files (pom.xml updates)
-          git add -u
-          
-          # Commit with [skip ci] to prevent infinite loop
-          git commit -m "Bump version to ${{ env.NEW_TAG }} [skip ci]"
-          git push origin main
-          
-          # Create and push the tag
-          git tag ${{ env.NEW_TAG }}
-          git push origin ${{ env.NEW_TAG }}
+          mvn versions:set -f code/java/pom.xml \
+            -DnewVersion=${{ env.RELEASE_VERSION }} \
+            -DgenerateBackupPoms=false \
+            -DprocessAllModules=true
 
-      # 6. Publish to GitHub Packages
-      - name: Publish to GitHub Packages
-        run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml -DskipTests
+      - name: Set Rust release version
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ env.RELEASE_VERSION }}\"/" \
+            code/rust/jsont/Cargo.toml
+
+      # ── 6. Build both projects ────────────────────────────────────────────────
+      - name: Build Java
+        run: mvn clean verify -f code/java/pom.xml -DskipTests
+
+      - name: Build Rust
+        run: cargo build --release --manifest-path code/rust/jsont/Cargo.toml
+
+      # ── 7. Commit release versions + tag ─────────────────────────────────────
+      - name: Commit and tag release
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add code/java/pom.xml \
+                  code/java/jsont/pom.xml \
+                  code/rust/jsont/Cargo.toml
+          git commit -m "Release ${{ env.NEW_TAG }} [skip ci]"
+          git tag ${{ env.NEW_TAG }}
+
+      # ── 8. Publish Java → GitHub Packages ────────────────────────────────────
+      - name: Publish Java to GitHub Packages
+        run: mvn deploy -f code/java/pom.xml -s $GITHUB_WORKSPACE/settings.xml -DskipTests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 7. Prepare Next Snapshot
-      - name: Prepare Next Snapshot
+      # ── 9. Publish Rust → crates.io ──────────────────────────────────────────
+      - name: Publish Rust to crates.io
+        run: cargo publish --manifest-path code/rust/jsont/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+      # ── 10. Push release commit + tag ────────────────────────────────────────
+      - name: Push release
         run: |
-          # Calculate next snapshot version
-          IFS='.' read -r -a PARTS <<< "${{ env.MVN_VERSION }}"
-          NEXT_PATCH=$((PARTS[2] + 1))
-          NEXT_SNAPSHOT="${PARTS[0]}.${PARTS[1]}.$NEXT_PATCH-SNAPSHOT"
-          
-          echo "Setting next snapshot version: $NEXT_SNAPSHOT"
-          
-          # Update pom.xml
-          mvn versions:set -DnewVersion=$NEXT_SNAPSHOT -DgenerateBackupPoms=false -DprocessAllModules=true
-          
-          # Commit and Push
-          git add -u
-          git commit -m "Prepare for next development iteration $NEXT_SNAPSHOT [skip ci]"
           git push origin main
+          git push origin ${{ env.NEW_TAG }}
+
+      # ── 11. Bump to next development versions ────────────────────────────────
+      - name: Set Java next SNAPSHOT version
+        run: |
+          mvn versions:set -f code/java/pom.xml \
+            -DnewVersion=${{ env.NEXT_VERSION }}-SNAPSHOT \
+            -DgenerateBackupPoms=false \
+            -DprocessAllModules=true
+
+      - name: Set Rust next development version
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ env.NEXT_VERSION }}\"/" \
+            code/rust/jsont/Cargo.toml
+
+      # ── 12. Commit and push next dev versions ────────────────────────────────
+      - name: Commit next development version
+        run: |
+          git add code/java/pom.xml \
+                  code/java/jsont/pom.xml \
+                  code/rust/jsont/Cargo.toml
+          git commit -m "Prepare ${{ env.NEXT_VERSION }}-SNAPSHOT [skip ci]"
+          git push origin main
+
+      # ── 13. Create GitHub Release ────────────────────────────────────────────
+      - name: Create GitHub Release
+        run: |
+          gh release create ${{ env.NEW_TAG }} \
+            --title "Release ${{ env.NEW_TAG }}" \
+            --notes "$(cat <<'EOF'
+          Released Rust (crates.io) and Java (GitHub Packages) at version ${{ env.RELEASE_VERSION }}.
+
+          Rust docs: https://docs.rs/jsont/${{ env.RELEASE_VERSION }}
+          Java docs: https://datakore.github.io/json-t/javadoc/${{ env.RELEASE_VERSION }}/
+          EOF
+          )"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 14. Publish Javadoc → GitHub Pages ───────────────────────────────────
+      # Javadoc HTML is already produced by maven-javadoc-plugin during step 6.
+      # Rust docs are published automatically by docs.rs on cargo publish — no step needed.
+      # Each release gets its own versioned path; /javadoc/latest/ always points to current.
+      - name: Deploy Javadoc to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: code/java/jsont/target/site/apidocs
+          destination_dir: javadoc/${{ env.RELEASE_VERSION }}
+          keep_files: true   # preserve previous versioned docs
+
+      - name: Update javadoc/latest symlink
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: code/java/jsont/target/site/apidocs
+          destination_dir: javadoc/latest
+          keep_files: true

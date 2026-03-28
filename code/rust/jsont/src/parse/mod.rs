@@ -17,7 +17,7 @@ use crate::error::{JsonTError, ParseError};
 use crate::model::namespace::{JsonTNamespace, JsonTCatalog};
 use crate::model::data::{JsonTValue, JsonTRow, JsonTArray};
 use crate::model::validation::JsonTExpression;
-use crate::model::schema::JsonTSchema;
+use crate::model::schema::{JsonTSchema, SchemaOperation, RenamePair, FieldPath};
 use crate::model::field::{JsonTField, ScalarType};
 use crate::model::enumdef::JsonTEnum;
 use crate::model::constraint::{
@@ -233,9 +233,101 @@ fn walk_straight_schema(name: String, pair: Pair<Rule>) -> Result<JsonTSchema, J
     builder.build()
 }
 
-fn walk_derived_schema(name: String, _pair: Pair<Rule>) -> Result<JsonTSchema, JsonTError> {
-    // TODO: Phase ...
-    Err(ParseError::Unexpected(format!("Derived schema '{}' not yet implemented", name)).into())
+fn walk_derived_schema(name: String, pair: Pair<Rule>) -> Result<JsonTSchema, JsonTError> {
+    // derived_schema = { kw_from ~ ns_schema_name ~ "{" ~ operations_block ~ ("," ~ validation_block)? ~ "}" }
+    // kw_from is atomic (not silent) — skip it, then take ns_schema_name, then operations_block.
+    let mut inner = pair.into_inner();
+    let first = inner.next().unwrap();
+    let (from, ops_block) = if first.as_rule() == Rule::kw_from {
+        let schema_name = inner.next().unwrap().as_str().to_string();
+        (schema_name, inner.next().unwrap())
+    } else {
+        // If kw_from is somehow silent, first pair is ns_schema_name
+        (first.as_str().to_string(), inner.next().unwrap())
+    };
+
+    let mut builder = JsonTSchemaBuilder::derived(&name, &from);
+    for op_pair in ops_block.into_inner() {
+        if op_pair.as_rule() == Rule::schema_operation {
+            builder = builder.operation(walk_schema_operation(op_pair)?)?;
+        }
+    }
+    builder.build()
+}
+
+fn walk_schema_operation(pair: Pair<Rule>) -> Result<SchemaOperation, JsonTError> {
+    // schema_operation = { rename_operation | exclude_operation | project_operation | transform_operation | filter_operation }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::rename_operation => {
+            let pairs: Result<Vec<RenamePair>, _> = inner.into_inner()
+                .filter(|p| p.as_rule() == Rule::rename_pair)
+                .map(walk_rename_pair)
+                .collect();
+            Ok(SchemaOperation::Rename(pairs?))
+        }
+        Rule::exclude_operation => {
+            let paths = walk_field_path_list(inner.into_inner().next().unwrap())?;
+            Ok(SchemaOperation::Exclude(paths))
+        }
+        Rule::project_operation => {
+            let paths = walk_field_path_list(inner.into_inner().next().unwrap())?;
+            Ok(SchemaOperation::Project(paths))
+        }
+        Rule::filter_operation => {
+            // filter_operation = { kw_filter ~ expression } — skip kw_filter
+            let expr_pair = inner.into_inner()
+                .find(|p| p.as_rule() == Rule::expression)
+                .ok_or_else(|| ParseError::Unexpected("filter missing expression".into()))?;
+            let expr = crate::parse::expr::build_expr_from_pair(expr_pair)?;
+            let refs = crate::transform::collect_field_refs(&expr);
+            Ok(SchemaOperation::Filter { expr, refs })
+        }
+        Rule::transform_operation => {
+            // transform_operation = { kw_transform ~ field_path ~ "=" ~ expression } — skip kw_transform
+            let mut op_inner = inner.into_inner()
+                .filter(|p| p.as_rule() != Rule::kw_transform);
+            let target = walk_field_path(op_inner.next().unwrap())?;
+            let expr_pair = op_inner
+                .find(|p| p.as_rule() == Rule::expression)
+                .ok_or_else(|| ParseError::Unexpected("transform missing expression".into()))?;
+            let expr = crate::parse::expr::build_expr_from_pair(expr_pair)?;
+            let refs = crate::transform::collect_field_refs(&expr);
+            Ok(SchemaOperation::Transform { target, expr, refs })
+        }
+        other => Err(ParseError::Unexpected(format!("unknown schema operation: {:?}", other)).into()),
+    }
+}
+
+fn walk_rename_pair(pair: Pair<Rule>) -> Result<RenamePair, JsonTError> {
+    // rename_pair = { field_path ~ kw_as ~ ns_field_name }
+    // kw_as is atomic (not silent) so it appears as a pair — skip it.
+    let mut inner = pair.into_inner();
+    let from = walk_field_path(inner.next().unwrap())?;
+    // skip kw_as
+    let next = inner.next().unwrap();
+    let to_pair = if next.as_rule() == Rule::kw_as {
+        inner.next().unwrap()
+    } else {
+        next
+    };
+    Ok(RenamePair { from, to: to_pair.as_str().to_string() })
+}
+
+fn walk_field_path(pair: Pair<Rule>) -> Result<FieldPath, JsonTError> {
+    // field_path = { ns_field_name ~ ("." ~ ns_field_name)* }
+    let segments: Vec<String> = pair.into_inner()
+        .map(|p| p.as_str().to_string())
+        .collect();
+    Ok(FieldPath::new(segments))
+}
+
+fn walk_field_path_list(pair: Pair<Rule>) -> Result<Vec<FieldPath>, JsonTError> {
+    // field_path_list = { field_path ~ ("," ~ field_path)* }
+    pair.into_inner()
+        .filter(|p| p.as_rule() == Rule::field_path)
+        .map(walk_field_path)
+        .collect()
 }
 
 fn walk_field_decl(pair: Pair<Rule>) -> Result<JsonTField, JsonTError> {

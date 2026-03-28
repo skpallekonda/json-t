@@ -27,6 +27,12 @@ pub fn build_expression(mut pairs: Pairs<Rule>) -> Result<JsonTExpression, JsonT
     build_expr_pair(pair)
 }
 
+/// Entry point when you already hold the `expression` Pair (e.g. from a
+/// filter_operation or transform_operation inner iterator).
+pub fn build_expr_from_pair(pair: Pair<Rule>) -> Result<JsonTExpression, JsonTError> {
+    build_expr_pair(pair)
+}
+
 fn build_expr_pair(pair: Pair<Rule>) -> Result<JsonTExpression, JsonTError> {
     match pair.as_rule() {
         Rule::expression => {

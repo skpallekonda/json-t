@@ -24,12 +24,12 @@ public enum ScalarType {
     IPV6("ipv6"),
     DATE("date"),
     TIME("time"),
-    DTM("dtm"),
-    TS("ts"),
+    DATETIME("datetime"),
+    TIMESTAMP("timestamp"),
     TSZ("tsz"),
-    DUR("dur"),
+    DURATION("duration"),
     INST("inst"),
-    B64("b64"),
+    BASE64("base64"),
     OID("oid"),
     HEX("hex");
 
@@ -66,7 +66,7 @@ public enum ScalarType {
     public boolean isStringLike() {
         return switch (this) {
             case STR, NSTR, URI, UUID, EMAIL, HOSTNAME, IPV4, IPV6,
-                    DATE, TIME, DTM, TS, TSZ, DUR, INST, B64, OID, HEX -> true;
+                    DATE, TIME, DATETIME, TIMESTAMP, TSZ, DURATION, INST, BASE64, OID, HEX -> true;
             default -> false;
         };
     }

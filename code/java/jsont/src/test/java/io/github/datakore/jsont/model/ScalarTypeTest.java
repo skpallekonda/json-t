@@ -17,8 +17,8 @@ class ScalarTypeTest {
         assertEquals("bool", ScalarType.BOOL.keyword());
         assertEquals("d64",  ScalarType.D64.keyword());
         assertEquals("uuid", ScalarType.UUID.keyword());
-        assertEquals("date", ScalarType.DATE.keyword());
-        assertEquals("b64",  ScalarType.B64.keyword());
+        assertEquals("date",      ScalarType.DATE.keyword());
+        assertEquals("base64",    ScalarType.BASE64.keyword());
     }
 
     @ParameterizedTest
@@ -28,9 +28,9 @@ class ScalarTypeTest {
         "d32, D32", "d64, D64", "d128, D128",
         "bool, BOOL", "str, STR", "nstr, NSTR",
         "uri, URI", "uuid, UUID",
-        "date, DATE", "time, TIME", "dtm, DTM",
-        "ts, TS", "tsz, TSZ", "dur, DUR", "inst, INST",
-        "b64, B64", "oid, OID", "hex, HEX"
+        "date, DATE", "time, TIME", "datetime, DATETIME",
+        "timestamp, TIMESTAMP", "tsz, TSZ", "duration, DURATION", "inst, INST",
+        "base64, BASE64", "oid, OID", "hex, HEX"
     })
     void fromKeyword_roundTrips(String keyword, String expectedName) {
         ScalarType type = ScalarType.fromKeyword(keyword);
@@ -62,8 +62,8 @@ class ScalarTypeTest {
     @ParameterizedTest
     @EnumSource(value = ScalarType.class,
             names = {"STR", "NSTR", "URI", "UUID", "EMAIL", "HOSTNAME",
-                     "IPV4", "IPV6", "DATE", "TIME", "DTM", "TS", "TSZ",
-                     "DUR", "INST", "B64", "OID", "HEX"})
+                     "IPV4", "IPV6", "DATE", "TIME", "DATETIME", "TIMESTAMP", "TSZ",
+                     "DURATION", "INST", "BASE64", "OID", "HEX"})
     void isStringLike_trueForTextualTypes(ScalarType type) {
         assertTrue(type.isStringLike());
     }

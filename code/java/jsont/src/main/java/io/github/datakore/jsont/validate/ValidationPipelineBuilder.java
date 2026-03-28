@@ -15,20 +15,21 @@ public final class ValidationPipelineBuilder {
     private final JsonTSchema schema;
     private boolean hasConsole = true;
     private final List<DiagnosticSink> extraSinks = new ArrayList<>();
+    private int workers = Runtime.getRuntime().availableProcessors();
+    private int bufferCapacity = 256;
 
     public ValidationPipelineBuilder(JsonTSchema schema) {
         this.schema = schema;
     }
 
-    public ValidationPipelineBuilder withoutConsole() {
-        this.hasConsole = false;
-        return this;
-    }
+    public ValidationPipelineBuilder withoutConsole() { this.hasConsole = false; return this; }
+    public ValidationPipelineBuilder withSink(DiagnosticSink sink) { this.extraSinks.add(sink); return this; }
 
-    public ValidationPipelineBuilder withSink(DiagnosticSink sink) {
-        this.extraSinks.add(sink);
-        return this;
-    }
+    /** Number of worker threads used by {@link ValidationPipeline#validateStream}. Default: available processors. */
+    public ValidationPipelineBuilder workers(int n) { this.workers = n; return this; }
+
+    /** Bounded queue depth between producer and workers in {@link ValidationPipeline#validateStream}. Default: 256. */
+    public ValidationPipelineBuilder bufferCapacity(int n) { this.bufferCapacity = n; return this; }
 
     public ValidationPipeline build() {
         List<JsonTField> fields;
@@ -46,6 +47,6 @@ public final class ValidationPipelineBuilder {
         }
         sinks.addAll(extraSinks);
 
-        return new ValidationPipeline(fields, validation, schema.name(), sinks);
+        return new ValidationPipeline(fields, validation, schema.name(), sinks, workers, bufferCapacity);
     }
 }

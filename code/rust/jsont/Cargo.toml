@@ -1,8 +1,18 @@
 [package]
 name = "jsont"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "JsonT schema, data model, builders, parser and stringifier"
+license = "MIT"
+repository = "https://github.com/datakore/json-t"
+homepage = "https://github.com/datakore/json-t"
+documentation = "https://docs.rs/jsont"
+readme = "README.md"
+authors = ["Sasi K Pallekonda <sasikumar.pallekonda@hotmail.com>"]
+keywords = ["json", "schema", "validation", "parser", "data-format"]
+categories = ["parser-implementations", "data-structures", "encoding"]
+# Exclude heavy test fixtures from the published crate archive
+exclude = ["tests/benchmark_tests.rs", "tests/cross_compat_tests.rs"]
 
 [dependencies]
 pest = "2"
@@ -11,5 +21,11 @@ regex = "1"
 rust_decimal = { version = "1", features = ["serde"] }
 thiserror = "1"
 
+[features]
+# Enable the performance benchmark suite (excluded from `cargo test` by default).
+# Run: cargo test --features bench bench_wct -- --nocapture
+bench = []
+
 [dev-dependencies]
-# nothing yet — integration tests live in tests/
+# rust_decimal needed to construct D128 values in benchmark row generation
+rust_decimal = "1"

@@ -1,78 +1,135 @@
-JsonT handles type(s) of data as per the below levels
+# JsonT Scalar Types
 
-- **Lexer level** → only raw tokens (NUMBER, STRING, BOOLEAN, NULL, UNSPECIFIED).
-- **Parser level** → interprets those tokens into structured base types (i32, date, bin, etc.).
-- **Semantic level** → adds real‑world meaning (uuid, zip, mail, geo, etc.) by constraining base types.
+JsonT supports a rich set of built-in scalar types, each identified by a keyword in the schema DSL. The type keyword determines both the wire representation expected in data rows and the validation rules applied.
 
 ---
 
-# 📌 Level 1: Lexer Types
+## Numeric Types
 
-| Lexer Type    | Notes                                    |
-|---------------|------------------------------------------|
-| `NUMBER`      | Raw numeric literal (integer or decimal) |
-| `STRING`      | Quoted text literal                      |
-| `BOOLEAN`     | `true` / `false`                         |
-| `NULL`        | `null` / `nil`                           |
-| `UNSPECIFIED` | Placeholder `_`                          |
+| Keyword | Description | Range / Precision |
+|---|---|---|
+| `i16` | 16-bit signed integer | −32 768 to 32 767 |
+| `i32` | 32-bit signed integer | −2 147 483 648 to 2 147 483 647 |
+| `i64` | 64-bit signed integer | −9.2 × 10¹⁸ to 9.2 × 10¹⁸ |
+| `u16` | 16-bit unsigned integer | 0 to 65 535 |
+| `u32` | 32-bit unsigned integer | 0 to 4 294 967 295 |
+| `u64` | 64-bit unsigned integer | 0 to 1.8 × 10¹⁹ |
+| `d32` | Single-precision decimal | ~7 significant digits |
+| `d64` | Double-precision decimal | ~15 significant digits |
+| `d128` | Arbitrary-precision decimal | Exact, no rounding |
 
----
+`d128` uses arbitrary-precision decimal arithmetic (backed by `rust_decimal` in Rust and `BigDecimal` in Java). Use it for financial, scientific, or any domain where floating-point rounding is unacceptable.
 
-# 📌 Level 2: Parser Base Types
-
-| Parser Type       | short code | Possible Lexer Type(s)      | Format / Pattern                                       | Notes                   |
-|-------------------|------------|-----------------------------|--------------------------------------------------------|-------------------------|
-| string            | `str`      | STRING                      | free text                                              | generic text            |
-| normalizedString  | `nstr`     | STRING                      | free text                                              | normalized string       |
-| anyURI            | `uri`      | STRING                      | URI syntax                                             | URI reference           |
-| boolean           | `bool`     | BOOLEAN or STRING or NUMBER | `true` / `false` / `1` / `0`/ `yes` / `no` / `t` / `f` | logical values          |
-| int16             | `i16`      | NUMBER                      | `-?\d{1,5}`                                            | 16‑bit signed           |
-| int32             | `i32`      | NUMBER                      | `-?\d{1,10}`                                           | 32‑bit signed           |
-| int64             | `i64`      | NUMBER                      | `-?\d{1,19}`                                           | 64‑bit signed           |
-| unsigned int16    | `u16`      | NUMBER                      | `\d{1,5}`                                              | 16‑bit unsigned         |
-| unsigned int32    | `u32`      | NUMBER                      | `\d{1,10}`                                             | 32‑bit unsigned         |
-| unsigned int64    | `u64`      | NUMBER                      | `\d{1,19}`                                             | 64‑bit unsigned         |
-| decimal32         | `d32`      | NUMBER                      | `-?\d+(\.\d+)?`                                        | float precision         |
-| decimal64         | `d64`      | NUMBER                      | `-?\d+(\.\d+)?`                                        | double precision        |
-| decimal128        | `d128`     | NUMBER                      | arbitrary precision                                    | high precision          |
-| date              | `date`     | NUMBER                      | `YYYYMMDD`                                             | calendar date           |
-| time              | `time`     | NUMBER                      | `HHmmss`                                               | clock time              |
-| datetime          | `dtm`      | NUMBER                      | `YYYYMMDDHHmmss`                                       | combined date+time      |
-| timestamp (epoch) | `ts`       | NUMBER                      | epoch seconds/millis                                   | numeric timestamp       |
-| timestamp (TZ)    | `tsz`      | STRING                      | `YYYY-MM-DDTHH:mm:ssZ`                                 | UTC timestamp           |
-| moment            | `inst`     | STRING                      | `YYYY-MM-DDTHH:mm:ss`                                  | local instant           |
-| moment (TZ)       | `insz`     | STRING                      | `YYYY-MM-DDTHH:mm:ss±HH:mm`                            | instant with offset     |
-| Year              | `yr`       | STRING                      | `YYYY`                                                 | year only               |
-| Month             | `mon`      | STRING                      | `MM`                                                   | month only              |
-| Day               | `day`      | STRING                      | `DD`                                                   | day only                |
-| YearMonth         | `ym`       | STRING                      | `YYYY-MM`                                              | year + month            |
-| MonthDay          | `md`       | STRING                      | `MM-DD`                                                | month + day             |
-| binary/base64     | `b64`      | STRING                      | hex/base64                                             | raw binary              |
-| binary/base64     | `hex`      | STRING                      | hex/base64                                             | raw binary              |
-| objectId (BSON)   | `oid`      | STRING                      | 24 hex chars                                           | BSON object identifier  |
-| duration          | `dur`      | STRING                      | ISO 8601 duration                                      | e.g. `P3Y6M4DT12H30M5S` |
+**Applicable constraints:** `minValue`, `maxValue`, `minPrecision`, `maxPrecision`
 
 ---
 
-# 📌 Level 3: Semantic Types
+## Boolean Type
 
-| Semantic Type   | short code         | Possible Base Type(s) | Regex (example)                                                                                   | Notes                            |
-|-----------------|--------------------|-----------------------|---------------------------------------------------------------------------------------------------|----------------------------------|
-| zip code        | `zip`              | int, str              | `^\d{5}(-\d{4})?$`                                                                                | US ZIP format                    |
-| uuid            | `uuid`             | str, bin              | `^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`                       | RFC 4122 UUID                    |
-| email           | `mail`             | str                   | `^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$`                                                | simplified email                 |
-| phone number    | `tel`              | str, int              | `^\+?[0-9]{7,15}$`                                                                                | E.164 format                     |
-| ip address      | `ip` /`ip4`/ `ip6` | str                   | IPv4: `^(?:\d{1,3}\.){3}\d{1,3}$` <br> IPv6: `^(?:[A-Fa-f0-9]{0,4}:){2,7}[A-Fa-f0-9]{0,4}$`       | IPv4 or IPv6                     |
-| mac address     | `mac`              | str, bin              | `^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$`                                                            | colon‑separated MAC              |
-| url             | `url`              | str, uri              | `^https?:\/\/[^\s/$.?#].[^\s]*$`                                                                  | HTTP/HTTPS URL                   |
-| geo coordinates | `geo`              | str, dec              | `^-?\d{1,2}\.\d+,\s*-?\d{1,3}\.\d+$`                                                              | lat,long pair                    |
-| country code    | `ctry`             | str                   | `^[A-Z]{2}$`                                                                                      | ISO 3166‑1 alpha‑2               |
-| currency code   | `cur`              | str                   | `^[A-Z]{3}$`                                                                                      | ISO 4217                         |
-| iban            | `iban`             | str                   | `^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$`                                                               | bank account number              |
-| credit card     | `cc`               | str, int              | visa `^4[0-9]{12}(?:[0-9]{3})?$` <br/> mastercard `^5[1-5][0-9]{14}$` <br/> ae `^3[47][0-9]{13}$` | Visa, MasterCard, AmEx, Discover |
-| hash            | `hash`             | str, bin              | `^[A-Fa-f0-9]{32,64}$`                                                                            | MD5/SHA256 hex                   |
-| jwt             | `jwt`              | str                   | `^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`                                                | JSON Web Token                   |
-| mime type       | `mime`             | str                   | `^[a-z]+\/[a-z0-9\-\.+]+$`                                                                        | media type identifier            |
+| Keyword | Description | Wire values |
+|---|---|---|
+| `bool` | Logical flag | `true` / `false` |
+
+**No constraints apply to `bool` fields.**
 
 ---
-If there are other type(s) to be included, they will be added at future releases.
+
+## String Types
+
+| Keyword | Description | Validation |
+|---|---|---|
+| `str` | General UTF-8 string | Length bounds; optional regex |
+| `nstr` | Normalised string (collapses internal whitespace) | Same as `str` |
+| `uuid` | RFC 4122 UUID | `xxxxxxxx-xxxx-Mxxx-Nxxx-xxxxxxxxxxxx` (hyphenated hex) |
+| `uri` | Uniform Resource Identifier | URI syntax |
+| `email` | Email address | `local@domain.tld` (simplified RFC 5321) |
+| `hostname` | DNS hostname | RFC 1123 label rules |
+| `ipv4` | IPv4 address | Dotted-decimal, e.g. `192.168.1.1` |
+| `ipv6` | IPv6 address | Colon-hex, e.g. `2001:db8::1` |
+
+**Applicable constraints:** `minLength`, `maxLength`, `pattern` / `regex`
+
+---
+
+## Temporal Types
+
+| Keyword | Description | Format |
+|---|---|---|
+| `date` | Calendar date | `YYYYMMDD` (integer) |
+| `time` | Clock time | `HHmmss` (integer) |
+| `datetime` | Combined date and time | `YYYYMMDDHHmmss` (integer) |
+| `timestamp` | Unix epoch timestamp | Integer seconds or milliseconds |
+| `tsz` | Timestamp with UTC offset | ISO 8601: `YYYY-MM-DDTHH:mm:ssZ` |
+| `inst` | Local instant (no timezone) | ISO 8601: `YYYY-MM-DDTHH:mm:ss` |
+| `duration` | ISO 8601 duration | `P3Y6M4DT12H30M5S` |
+
+Integer temporal types (`date`, `time`, `datetime`, `timestamp`) appear as numeric values in data rows. String temporal types (`tsz`, `inst`, `duration`) appear as quoted strings.
+
+---
+
+## Binary / Encoded Types
+
+| Keyword | Description | Format |
+|---|---|---|
+| `base64` | Base64-encoded binary | Standard Base64 alphabet |
+| `hex` | Hex-encoded binary | Lowercase or uppercase hex digits |
+| `oid` | BSON ObjectId | Exactly 24 hexadecimal characters |
+
+---
+
+## Constraint Applicability
+
+| Constraint | Applicable types |
+|---|---|
+| `minValue` / `maxValue` | `i16` `i32` `i64` `u16` `u32` `u64` `d32` `d64` `d128` |
+| `minPrecision` / `maxPrecision` | `d32` `d64` `d128` |
+| `minLength` / `maxLength` | `str` `nstr` `uuid` `uri` `email` `hostname` `ipv4` `ipv6` `hex` `base64` `oid` |
+| `pattern` / `regex` | All string-based types |
+| `minItems` / `maxItems` | Any array field (`type[]` or `<Schema>[]`) |
+| `allowNullItems` / `maxNullItems` | Any array field |
+| `default` | All scalar types |
+| `const` | All scalar types |
+
+---
+
+## Schema Usage Examples
+
+```jsont
+// Integer fields
+i32:  quantity [(minValue=1, maxValue=999)],
+u64:  sequenceId,
+d128: financialAmount [(minPrecision=2, maxPrecision=6)],
+
+// String fields
+str:  productCode [(minLength=3, maxLength=20, pattern="^[A-Z]{2}-\\d+$")],
+uuid: traceId,
+email: contactEmail?,
+ipv4: serverAddress?,
+
+// Temporal fields
+datetime:  scheduledAt,
+tsz:       completedAt?,
+duration:  estimatedTime,
+
+// Binary fields
+hex: checksum [(minLength=64, maxLength=64)],   // SHA-256
+oid: documentRef?,
+
+// Array fields
+str[]:  tags?      [(minItems=1, maxItems=10)],
+uuid[]: relatedIds [(maxNullItems=0)]
+```
+
+---
+
+## Object and Array Field Types
+
+In addition to the scalar types above, fields can reference other schemas or be declared as arrays.
+
+| Declaration | Description |
+|---|---|
+| `<SchemaName>: field` | Object field — value is a nested row conforming to `SchemaName` |
+| `type[]: field` | Array of scalar values |
+| `<SchemaName>[]: field` | Array of objects conforming to `SchemaName` |
+
+Object and array fields share the `minItems`, `maxItems`, `allowNullItems`, and `maxNullItems` constraints.

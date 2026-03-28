@@ -28,17 +28,27 @@ import java.util.Optional;
 public final class JsonTNamespace {
 
     private final String baseUrl;
+    private final String version;
+    private final String dataSchema;
     private final List<JsonTCatalog> catalogs;
 
     /** Use {@code JsonTNamespaceBuilder} for validated construction. */
-    public JsonTNamespace(String baseUrl, List<JsonTCatalog> catalogs) {
+    public JsonTNamespace(String baseUrl, String version, String dataSchema, List<JsonTCatalog> catalogs) {
         Objects.requireNonNull(catalogs, "catalogs");
         this.baseUrl = baseUrl == null ? "" : baseUrl;
+        this.version = version == null ? "" : version;
+        this.dataSchema = dataSchema == null ? "" : dataSchema;
         this.catalogs = List.copyOf(catalogs);
     }
 
     /** The base URL declared in the namespace header (may be empty). */
     public String baseUrl() { return baseUrl; }
+
+    /** The version declared in the namespace header (may be empty). */
+    public String version() { return version; }
+
+    /** The main data entry schema (may be empty). */
+    public String dataSchema() { return dataSchema; }
 
     /** All catalogs in declaration order (immutable). */
     public List<JsonTCatalog> catalogs() { return catalogs; }

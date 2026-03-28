@@ -92,13 +92,17 @@ use crate::DiagnosticSink;
 /// 2. Call [`validate_each`] or [`validate_rows`] one or more times.
 /// 3. Call [`finish`] to flush all sinks and join the background thread.
 pub struct ValidationPipeline {
-    fields:      Vec<JsonTField>,
-    validation:  Option<JsonTValidationBlock>,
-    schema_name: String,
+    fields:           Vec<JsonTField>,
+    validation:       Option<JsonTValidationBlock>,
+    schema_name:      String,
+    /// Union of all field names referenced by any rule expression or
+    /// `ConditionalRequirement` in the validation block, pre-computed once
+    /// at build time so `check_rules` never traverses the AST per row.
+    rule_field_refs:  Vec<String>,
     /// Sender half of the event channel.  Dropping this closes the channel
     /// and signals the sink thread to finish.
-    tx:          mpsc::Sender<DiagnosticEvent>,
-    sink_thread: Option<JoinHandle<Option<SinkError>>>,
+    tx:               mpsc::Sender<DiagnosticEvent>,
+    sink_thread:      Option<JoinHandle<Option<SinkError>>>,
 }
 
 impl ValidationPipeline {
@@ -134,7 +138,8 @@ impl ValidationPipeline {
 
         // One HashSet per uniqueness rule; lives for the duration of this call.
         // Accumulates composite key strings — not row data.
-        let mut unique_sets: Vec<HashSet<Vec<String>>> = self
+        // String keys (null-byte separated) are ~60 bytes vs Vec<String> ~84+ bytes.
+        let mut unique_sets: Vec<HashSet<String>> = self
             .validation
             .as_ref()
             .map(|v| vec![HashSet::new(); v.unique.len()])
@@ -173,6 +178,7 @@ impl ValidationPipeline {
                             validation,
                             &row.fields,
                             idx,
+                            &self.rule_field_refs,
                         ));
                     }
                 }
@@ -305,6 +311,7 @@ impl ValidationPipeline {
                     validation,
                     &row.fields,
                     idx,
+                    &self.rule_field_refs,
                 ));
             }
         }
@@ -403,6 +410,34 @@ impl ValidationPipelineBuilder {
         let validation  = self.schema.validation.clone();
         let schema_name = self.schema.name.clone();
 
+        // Pre-compute the union of all field names referenced by any rule
+        // expression or ConditionalRequirement.  Storing this once avoids
+        // traversing the expression AST on every row in check_rules.
+        use crate::model::validation::JsonTRule;
+        use crate::transform::collect_field_refs;
+        let rule_field_refs: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            let mut refs = Vec::new();
+            if let Some(v) = &validation {
+                for rule in &v.rules {
+                    let candidates = match rule {
+                        JsonTRule::Expression(expr) => collect_field_refs(expr),
+                        JsonTRule::ConditionalRequirement { condition, required_fields } => {
+                            let mut r = collect_field_refs(condition);
+                            r.extend(required_fields.iter().map(|fp| fp.join()));
+                            r
+                        }
+                    };
+                    for name in candidates {
+                        if seen.insert(name.clone()) {
+                            refs.push(name);
+                        }
+                    }
+                }
+            }
+            refs
+        };
+
         // Assemble the final sink list in declared order.
         let mut sinks: Vec<Box<dyn DiagnosticSink + Send>> = Vec::new();
         if self.has_console {
@@ -433,6 +468,7 @@ impl ValidationPipelineBuilder {
             fields,
             validation,
             schema_name,
+            rule_field_refs,
             tx,
             sink_thread: Some(sink_thread),
         }
@@ -448,22 +484,27 @@ fn has_fatal(events: &[DiagnosticEvent]) -> bool {
     events.iter().any(|e| e.is_fatal())
 }
 
-/// Build a composite string key for a uniqueness constraint.
+/// Build a composite uniqueness key as a single null-byte-separated `String`.
+///
+/// Using a single `String` instead of `Vec<String>` reduces per-key allocation
+/// from ~84+ bytes (Vec header + String headers + heap data) to ~60 bytes
+/// (single String header + heap data), improving cache density in the HashSet.
+///
+/// The `\x00` separator cannot appear in any serialised JsonTValue, so two
+/// distinct value combinations can never produce the same composite key.
 ///
 /// Only top-level (single-segment) field paths are currently supported.
-/// Nested paths produce a `"<nested>"` placeholder, which means duplicates
-/// across nested paths will never be detected — this is conservative and safe.
+/// Nested paths produce a `"<nested>"` placeholder — conservative and safe.
 fn build_unique_key(
     fields: &[JsonTField],
     values: &[JsonTValue],
     paths:  &[crate::model::schema::FieldPath],
-) -> Vec<String> {
+) -> String {
     paths
         .iter()
         .map(|fp| {
             let name = fp.join();
             if name.contains('.') {
-                // Nested paths require object traversal — not yet supported.
                 return "<nested>".into();
             }
             if let Some(idx) = fields.iter().position(|f| f.name == name) {
@@ -473,5 +514,6 @@ fn build_unique_key(
             }
             "<missing>".into()
         })
-        .collect()
+        .collect::<Vec<String>>()
+        .join("\x00")
 }

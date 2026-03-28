@@ -47,7 +47,7 @@ use crate::{EvalContext, Evaluatable, RowTransformer, SchemaRegistry};
 use crate::error::{EvalError, JsonTError, TransformError};
 use crate::model::data::{JsonTRow, JsonTValue};
 use crate::model::field::JsonTFieldKind;
-use crate::model::schema::{JsonTSchema, SchemaKind, SchemaOperation};
+use crate::model::schema::{FieldPath, JsonTSchema, SchemaKind, SchemaOperation};
 use crate::model::validation::{JsonTExpression, JsonTRule, JsonTValidationBlock};
 
 // =============================================================================
@@ -259,9 +259,9 @@ fn validate_pipeline(
                 available.retain(|n| keep.contains(n));
             }
 
-            SchemaOperation::Filter(expr) => {
-                for field_ref in collect_field_refs(expr) {
-                    if !available.contains(&field_ref) {
+            SchemaOperation::Filter { refs, .. } => {
+                for field_ref in refs {
+                    if !available.contains(field_ref) {
                         return Err(TransformError::FieldNotFound(format!(
                             "Filter (op #{op_num}): expression references field '{field_ref}' \
                              which is not available at this point in the pipeline \
@@ -272,7 +272,7 @@ fn validate_pipeline(
                 }
             }
 
-            SchemaOperation::Transform { target, expr } => {
+            SchemaOperation::Transform { target, refs, .. } => {
                 let key = target.join();
                 if !available.contains(&key) {
                     return Err(TransformError::FieldNotFound(format!(
@@ -280,8 +280,8 @@ fn validate_pipeline(
                     ))
                     .into());
                 }
-                for field_ref in collect_field_refs(expr) {
-                    if !available.contains(&field_ref) {
+                for field_ref in refs {
+                    if !available.contains(field_ref) {
                         return Err(TransformError::FieldNotFound(format!(
                             "Transform (op #{op_num}): expression for '{key}' references field \
                              '{field_ref}' which is not available at this point in the pipeline"
@@ -390,7 +390,7 @@ fn validate_validation_block(
 // =============================================================================
 
 /// Recursively collect every `FieldRef` path string from an expression tree.
-fn collect_field_refs(expr: &JsonTExpression) -> Vec<String> {
+pub(crate) fn collect_field_refs(expr: &JsonTExpression) -> Vec<String> {
     let mut refs = Vec::new();
     collect_field_refs_inner(expr, &mut refs);
     refs
@@ -480,12 +480,40 @@ fn resolve_effective_fields(
                         field_names.retain(|n| keep.contains(n));
                     }
 
-                    SchemaOperation::Filter(_) | SchemaOperation::Transform { .. } => {}
+                    SchemaOperation::Filter { .. } | SchemaOperation::Transform { .. } => {}
                 }
             }
 
             Ok(field_names)
         }
+    }
+}
+
+// =============================================================================
+// SchemaOperation constructors
+// =============================================================================
+//
+// Defined here (rather than in model/schema.rs) because they depend on
+// collect_field_refs, which in turn depends on JsonTExpression — keeping the
+// dependency flow one-way: transform → model.
+
+impl SchemaOperation {
+    /// Construct a `Filter` operation, pre-computing the referenced field names.
+    ///
+    /// Use this instead of the struct literal when building schemas in code
+    /// (tests, builders) so the `refs` field is always correct.
+    pub fn new_filter(expr: JsonTExpression) -> Self {
+        let refs = collect_field_refs(&expr);
+        Self::Filter { expr, refs }
+    }
+
+    /// Construct a `Transform` operation, pre-computing the referenced field names.
+    ///
+    /// Use this instead of the struct literal when building schemas in code
+    /// (tests, builders) so the `refs` field is always correct.
+    pub fn new_transform(target: FieldPath, expr: JsonTExpression) -> Self {
+        let refs = collect_field_refs(&expr);
+        Self::Transform { target, expr, refs }
     }
 }
 
@@ -538,8 +566,9 @@ fn apply_operation(
             Ok(working.into_iter().filter(|(n, _)| keep.contains(n)).collect())
         }
 
-        SchemaOperation::Filter(expr) => {
-            let ctx = build_eval_ctx(&working);
+        SchemaOperation::Filter { expr, refs } => {
+            // refs was pre-computed at schema parse time — no per-row AST traversal.
+            let ctx = build_minimal_eval_ctx(&working, refs);
             let result = expr.evaluate(&ctx).map_err(|e| match e {
                 JsonTError::Eval(eval_err) => {
                     JsonTError::from(TransformError::FilterFailed(eval_err))
@@ -556,9 +585,10 @@ fn apply_operation(
             }
         }
 
-        SchemaOperation::Transform { target, expr } => {
+        SchemaOperation::Transform { target, expr, refs } => {
             let key = target.join();
-            let ctx = build_eval_ctx(&working);
+            // refs was pre-computed at schema parse time — no per-row AST traversal.
+            let ctx = build_minimal_eval_ctx(&working, refs);
             let new_val = expr.evaluate(&ctx).map_err(|e| match e {
                 JsonTError::Eval(eval_err) => JsonTError::from(TransformError::TransformFailed {
                     field: key.clone(),
@@ -581,8 +611,16 @@ fn apply_operation(
 // Helpers
 // =============================================================================
 
-fn build_eval_ctx(working: &[(String, JsonTValue)]) -> EvalContext {
-    working.iter().fold(EvalContext::new(), |ctx, (name, value)| {
-        ctx.bind(name.clone(), value.clone())
-    })
+/// Build an `EvalContext` containing only the fields whose names appear in `refs`.
+///
+/// Takes a slice rather than a `HashSet` — `refs` holds typically 2–4 entries
+/// (pre-computed from the expression AST at schema parse time), so a linear scan
+/// is faster than hashing and eliminates the per-row `HashSet` allocation entirely.
+fn build_minimal_eval_ctx(working: &[(String, JsonTValue)], refs: &[String]) -> EvalContext {
+    working
+        .iter()
+        .filter(|(name, _)| refs.contains(name))
+        .fold(EvalContext::new(), |ctx, (name, value)| {
+            ctx.bind(name.clone(), value.clone())
+        })
 }

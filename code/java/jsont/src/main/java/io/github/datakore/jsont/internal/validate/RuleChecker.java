@@ -14,7 +14,9 @@ import io.github.datakore.jsont.model.JsonTValue;
 import io.github.datakore.jsont.model.UnaryOp;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class RuleChecker {
 
@@ -26,10 +28,23 @@ public class RuleChecker {
 
         List<DiagnosticEvent> events = new ArrayList<>();
 
-        // Build eval context
+        // Pre-compute the union of field names referenced by all rules.
+        // Building a minimal context (typically 2-4 fields) avoids binding all
+        // schema fields (e.g. 92) into the map on every row.
+        Set<String> needed = new HashSet<>();
+        for (JsonTRule rule : validation.rules()) {
+            if (rule instanceof JsonTRule.Expression e) {
+                needed.addAll(collectFieldRefs(e.expr()));
+            } else if (rule instanceof JsonTRule.ConditionalRequirement cr) {
+                needed.addAll(collectFieldRefs(cr.condition()));
+                // required_fields are looked up via ctx so they must be bound too.
+                for (FieldPath fp : cr.requiredFields()) needed.add(fp.leaf());
+            }
+        }
         EvalContext ctx = EvalContext.create();
         for (int i = 0; i < fields.size() && i < rowValues.size(); i++) {
-            ctx.bind(fields.get(i).name(), rowValues.get(i));
+            String name = fields.get(i).name();
+            if (needed.contains(name)) ctx.bind(name, rowValues.get(i));
         }
 
         // Evaluate each rule — dispatch on JsonTRule variant
