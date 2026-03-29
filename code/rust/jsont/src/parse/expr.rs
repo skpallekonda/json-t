@@ -209,7 +209,7 @@ fn parse_scalar_value(pair: Pair<Rule>) -> Result<JsonTValue, JsonTError> {
             let raw = inner.as_str();
             // Strip surrounding quotes.
             let unquoted = &raw[1..raw.len()-1];
-            Ok(JsonTValue::Str(unescape(unquoted)))
+            Ok(JsonTValue::str(unescape(unquoted)))
         }
         other => Err(ParseError::Unexpected(
             format!("expected scalar value, got {:?}", other)
@@ -418,7 +418,7 @@ fn eval_function(
             let val = eval_expr(&args[0], ctx)?;
             // upper() on a semantic string variant returns Str (expression result is untyped).
             if let Some(s) = val.as_str() {
-                Ok(JsonTValue::Str(s.to_uppercase()))
+                Ok(JsonTValue::str(s.to_uppercase()))
             } else {
                 Err(EvalError::TypeMismatch {
                     expected: "str".into(),
@@ -432,7 +432,7 @@ fn eval_function(
             let val = eval_expr(&args[0], ctx)?;
             // lower() on a semantic string variant returns Str (expression result is untyped).
             if let Some(s) = val.as_str() {
-                Ok(JsonTValue::Str(s.to_lowercase()))
+                Ok(JsonTValue::str(s.to_lowercase()))
             } else {
                 Err(EvalError::TypeMismatch {
                     expected: "str".into(),

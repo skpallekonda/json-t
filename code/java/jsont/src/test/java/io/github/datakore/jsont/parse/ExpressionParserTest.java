@@ -250,8 +250,8 @@ class ExpressionParserTest {
 
     @Test void literal_string() {
         var lit = (JsonTExpression.Literal) ((JsonTExpression.Binary) parseExpr("a == \"hello\"")).rhs();
-        assertInstanceOf(JsonTValue.Text.class, lit.value());
-        assertEquals("hello", ((JsonTValue.Text) lit.value()).value());
+        assertInstanceOf(JsonTValue.Str.class, lit.value());
+        assertEquals("hello", lit.value().asText());
     }
 
     // ── Field references ──────────────────────────────────────────────────────

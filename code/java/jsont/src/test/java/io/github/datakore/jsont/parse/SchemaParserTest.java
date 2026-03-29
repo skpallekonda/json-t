@@ -706,8 +706,8 @@ class SchemaParserTest {
     JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
     var c = ns.findSchema("Doc").orElseThrow().findField("version").orElseThrow().constraints();
     assertNotNull(c.constantValue());
-    assertInstanceOf(JsonTValue.Text.class, c.constantValue());
-    assertEquals("v1", ((JsonTValue.Text) c.constantValue()).value());
+    assertInstanceOf(JsonTValue.Str.class, c.constantValue());
+    assertEquals("v1", c.constantValue().asText());
   }
 
   @Test

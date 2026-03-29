@@ -1,0 +1,14 @@
+
+running 1 test
+
+=== WCT Benchmark  1K records ===
+  Schema : CricketMatch (92 fields, ~1 KB/row) | MatchBroadcastSummary (derived)
+  Workers: single-threaded (Rust sequential validation)
+  [1] Stringify       1K rows | build     6.30ms | stringify    13.42ms | file    729.69 KB
+  [2] Parse           1K rows | time     29.83ms |     34.5 rows/ms | loaded    729.69 KB | peak   15.29 KB
+  [3] Parse+Val       1K rows | time     53.74ms |     18.9 rows/ms | clean     1K | peak   10.56 KB
+  [4] Parse+Val+T     1K rows | time     98.22ms |     10.2 rows/ms | xfrmd     1K | peak   17.13 KB
+test bench_wct_1k ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.21s
+

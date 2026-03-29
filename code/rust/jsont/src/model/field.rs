@@ -84,7 +84,7 @@ impl JsonTFieldType {
 /// Variants map 1:1 to the grammar's type keyword tokens.
 /// The Rust storage type in JsonTNumber (and JsonTValue) is chosen to match
 /// the intended memory footprint for each variant.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScalarType {
     // ── Numeric ────────────────────────────────────────────────────────────
     /// 16-bit signed integer  → Rust i16

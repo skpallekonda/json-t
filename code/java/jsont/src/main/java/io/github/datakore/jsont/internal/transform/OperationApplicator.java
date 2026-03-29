@@ -2,17 +2,7 @@ package io.github.datakore.jsont.internal.transform;
 
 import io.github.datakore.jsont.builder.SchemaRegistry;
 import io.github.datakore.jsont.error.JsonTError;
-import io.github.datakore.jsont.model.BinaryOp;
-import io.github.datakore.jsont.model.EvalContext;
-import io.github.datakore.jsont.model.FieldPath;
-import io.github.datakore.jsont.model.JsonTExpression;
-import io.github.datakore.jsont.model.JsonTField;
-import io.github.datakore.jsont.model.JsonTSchema;
-import io.github.datakore.jsont.model.JsonTValue;
-import io.github.datakore.jsont.model.RenamePair;
-import io.github.datakore.jsont.model.SchemaKind;
-import io.github.datakore.jsont.model.SchemaOperation;
-import io.github.datakore.jsont.model.UnaryOp;
+import io.github.datakore.jsont.model.*;
 
 import java.util.ArrayList;
 import java.util.HashSet;

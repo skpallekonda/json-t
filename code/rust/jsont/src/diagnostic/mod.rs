@@ -227,6 +227,13 @@ pub enum EventKind {
         row_index: usize,
     },
 
+    /// A field's value failed semantic format validation (e.g. invalid UUID).
+    FormatViolation {
+        field: String,
+        expected: String, // "uuid", "email", etc.
+        actual: String,
+    },
+
     /// A dataset-level expression evaluated to false.
     DatasetRuleViolation { rule: String, reason: String },
 
@@ -325,6 +332,10 @@ impl fmt::Display for EventKind {
 
             EventKind::DatasetRuleViolation { rule, reason } => {
                 write!(f, "DatasetRuleViolation [{}]: {}", rule, reason)
+            }
+
+            EventKind::FormatViolation { field, expected, actual } => {
+                write!(f, "FormatViolation on '{}': expected {}, got {}", field, expected, actual)
             }
 
             EventKind::ParseFailure { reason } => write!(f, "ParseFailure: {}", reason),

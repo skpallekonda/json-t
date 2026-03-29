@@ -23,27 +23,14 @@ public final class ValueStringifier {
         if (v instanceof JsonTValue.D32   n)      return Float.toString(n.value());
         if (v instanceof JsonTValue.D64   n)      return Double.toString(n.value());
         if (v instanceof JsonTValue.D128  n)      return n.value().toPlainString();
-        if (v instanceof JsonTValue.Text      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Nstr      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Uuid      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Uri       t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Email     t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Hostname  t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Ipv4      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Ipv6      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Date      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Time      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.DateTime  t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Timestamp t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Tsz       t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Inst      t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Duration  t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Base64    t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Hex       t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Oid       t) return quoteString(t.value());
-        if (v instanceof JsonTValue.Array     a) return stringifyArray(a.elements());
-        if (v instanceof JsonTValue.Unspecified) return "_";
-        if (v instanceof JsonTValue.Enum      e) return e.value();
+        if (v instanceof JsonTValue.Str   s)      return quoteString(s.value().value());
+        if (v instanceof JsonTValue.Date  d)      return Integer.toString(d.value());
+        if (v instanceof JsonTValue.Time  t)      return Integer.toString(t.value());
+        if (v instanceof JsonTValue.DateTime dt)  return Long.toString(dt.value());
+        if (v instanceof JsonTValue.Timestamp ts) return Long.toString(ts.value());
+        if (v instanceof JsonTValue.Array     a)  return stringifyArray(a.elements());
+        if (v instanceof JsonTValue.Unspecified)  return "_";
+        if (v instanceof JsonTValue.Enum      e)  return e.value();
         throw new IllegalArgumentException("Unknown JsonTValue: " + v);
     }
 

@@ -564,7 +564,7 @@ impl<'a> Scanner<'a> {
         let s = std::str::from_utf8(raw)
             .map_err(|_| ParseError::Unexpected("invalid UTF-8 in string literal".into()))?
             .to_owned();
-        Ok(JsonTValue::Str(s))
+        Ok(JsonTValue::str(s))
     }
 
     /// Parse a non-negative decimal number literal.

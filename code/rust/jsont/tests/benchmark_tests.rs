@@ -161,7 +161,7 @@ fn make_cricket_row(i: u64) -> JsonTRow {
         .push(JsonTValue::enum_val(SURFACES[i as usize % SURFACES.len()])) // enum: wicketSurface
         .push(JsonTValue::null())                                       // hostname? statsApiHost
         // ── Schedule (4 fields) ───────────────────────────────────────────────
-        .push(JsonTValue::str("2024-06-15T14:30:00Z"))                  // datetime: scheduledAt
+        .push(JsonTValue::str("2024-06-15T14:30:00"))                  // datetime: scheduledAt
         .push(JsonTValue::str("14:30:00"))                              // time:     matchStartLocalTime
         .push(JsonTValue::str("PT3H"))                                  // duration: expectedDuration
         .push(JsonTValue::bool(true))                                   // bool:     isDayNight

@@ -296,9 +296,12 @@ class CrossCompatTest {
     private static JsonTValue v(JsonTRow row, int idx) { return row.get(idx); }
 
     private static void assertText(JsonTRow row, int idx, String expected) {
-        var val = v(row, idx);
-        assertInstanceOf(JsonTValue.Text.class, val, "field[" + idx + "] expected Text");
-        assertEquals(expected, ((JsonTValue.Text) val).value(), "field[" + idx + "] text mismatch");
+        assertTextValue(expected, idx, v(row, idx));
+    }
+
+    private static void assertTextValue(String expected, int idx, JsonTValue val) {
+        assertInstanceOf(JsonTValue.Str.class, val, "field[" + idx + "] expected Text");
+        assertEquals(expected, val.asText(), "field[" + idx + "] text mismatch");
     }
 
     // Row scanner is schema-less — numeric type is inferred by heuristic.

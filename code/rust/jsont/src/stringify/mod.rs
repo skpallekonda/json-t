@@ -462,14 +462,7 @@ pub fn stringify_value(v: &JsonTValue) -> String {
         JsonTValue::Null        => "null".to_string(),
         JsonTValue::Unspecified => "_".to_string(),
         JsonTValue::Bool(b)     => b.to_string(),
-        JsonTValue::Str(s)
-        | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
-        | JsonTValue::Email(s) | JsonTValue::Hostname(s)
-        | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
-        | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
-        | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
-        | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
-        | JsonTValue::Oid(s)    => quote(s),
+        JsonTValue::Str(js)     => quote(js.as_raw_str()),
         JsonTValue::Enum(c)     => c.clone(),
         JsonTValue::Number(n)   => stringify_number(n),
         JsonTValue::Object(row) => stringify_row(row),
@@ -488,6 +481,10 @@ fn stringify_number(n: &JsonTNumber) -> String {
         JsonTNumber::D32(v)  => v.to_string(),
         JsonTNumber::D64(v)  => v.to_string(),
         JsonTNumber::D128(v) => v.to_string(),
+        JsonTNumber::Date(v) => v.to_string(),
+        JsonTNumber::Time(v) => v.to_string(),
+        JsonTNumber::DateTime(v) => v.to_string(),
+        JsonTNumber::Timestamp(v) => v.to_string(),
     }
 }
 

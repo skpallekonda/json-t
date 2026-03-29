@@ -171,8 +171,10 @@ impl ValidationPipeline {
                 promoted = None;
             } else {
                 // Promote Str values to their semantic variants now that the
-                // field type is known and the row has passed all checks.
-                let row = promote_row(row, &self.fields);
+                // field type is known. Interpret failures as fatal FormatViolations.
+                let (p_row, p_events) = try_promote_row(row, &self.fields, idx);
+                row_events.extend(p_events);
+                let row = p_row;
 
                 // ── Field constraints ─────────────────────────────────────
                 for (field, value) in self.fields.iter().zip(row.fields.iter()) {
@@ -308,8 +310,9 @@ impl ValidationPipeline {
             return;
         }
         // Promote Str values to their semantic variants now that the
-        // field type is known and the row has passed all checks.
-        let row = promote_row(row, &self.fields);
+        // field type is known. Interpret failures as fatal FormatViolations.
+        let (row, p_events) = try_promote_row(row, &self.fields, idx);
+        events.extend(p_events);
 
         // Field constraints
         for (field, value) in self.fields.iter().zip(row.fields.iter()) {
@@ -505,20 +508,43 @@ fn has_fatal(events: &[DiagnosticEvent]) -> bool {
 ///
 /// Called once per clean row, after all constraint checks pass.  Non-Str
 /// values (including already-promoted variants) are passed through unchanged.
-fn promote_row(row: JsonTRow, fields: &[JsonTField]) -> JsonTRow {
+/// Promotes each `Str` value in a row to its semantic variant based on the
+/// declared `ScalarType` of the corresponding schema field.
+///
+/// Failures (e.g. invalid UUID format) are returned as fatal `FormatViolation` events.
+fn try_promote_row(
+    row: JsonTRow,
+    fields: &[JsonTField],
+    row_idx: usize,
+) -> (JsonTRow, Vec<DiagnosticEvent>) {
+    let mut events = Vec::new();
     let promoted: Vec<JsonTValue> = row
         .fields
         .into_iter()
         .zip(fields.iter())
         .map(|(val, field)| {
             if let JsonTFieldKind::Scalar { field_type, .. } = &field.kind {
-                val.promote(&field_type.scalar)
+                let original = val.clone();
+                match val.promote(&field_type.scalar) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        events.push(
+                            DiagnosticEvent::fatal(EventKind::FormatViolation {
+                                field:    field.name.clone(),
+                                expected: field_type.scalar.keyword().to_string(),
+                                actual:   constraint::describe_value(&original),
+                            })
+                            .at_row(row_idx),
+                        );
+                        original // Keep original value but flagged as fatal
+                    }
+                }
             } else {
                 val
             }
         })
         .collect();
-    JsonTRow::new(promoted)
+    (JsonTRow::new(promoted), events)
 }
 
 /// Build a composite uniqueness key as a single null-byte-separated `String`.

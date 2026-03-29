@@ -96,8 +96,8 @@ public sealed interface JsonTExpression
             boolean same;
             if (l.isNumeric() && r.isNumeric()) {
                 same = l.toDouble() == r.toDouble();
-            } else if (l instanceof JsonTValue.Text lt && r instanceof JsonTValue.Text rt) {
-                same = lt.value().equals(rt.value());
+            } else if (l.isStringLike() && r.isStringLike()) {
+                same = l.asText().equals(r.asText());
             } else {
                 same = l.equals(r);
             }

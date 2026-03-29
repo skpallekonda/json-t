@@ -94,24 +94,11 @@ public final class RowWriter {
         if (v instanceof JsonTValue.D32   n)     { w.write(Float.toString(n.value())); return; }
         if (v instanceof JsonTValue.D64   n)     { w.write(Double.toString(n.value())); return; }
         if (v instanceof JsonTValue.D128  n)     { w.write(n.value().toPlainString()); return; }
-        if (v instanceof JsonTValue.Text      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Nstr      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Uuid      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Uri       t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Email     t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Hostname  t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Ipv4      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Ipv6      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Date      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Time      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.DateTime  t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Timestamp t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Tsz       t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Inst      t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Duration  t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Base64    t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Hex       t) { writeQuotedString(t.value(), w); return; }
-        if (v instanceof JsonTValue.Oid       t) { writeQuotedString(t.value(), w); return; }
+        if (v instanceof JsonTValue.Str   s)     { writeQuotedString(s.value().value(), w); return; }
+        if (v instanceof JsonTValue.Date  d)     { w.write(Integer.toString(d.value())); return; }
+        if (v instanceof JsonTValue.Time  t)     { w.write(Integer.toString(t.value())); return; }
+        if (v instanceof JsonTValue.DateTime dt) { w.write(Long.toString(dt.value())); return; }
+        if (v instanceof JsonTValue.Timestamp ts){ w.write(Long.toString(ts.value())); return; }
         if (v instanceof JsonTValue.Enum      e) { w.write(e.value()); return; }
         if (v instanceof JsonTValue.Unspecified) { w.write('_'); return; }
         if (v instanceof JsonTValue.Array     a) { writeArray(a.elements(), w); return; }

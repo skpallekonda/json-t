@@ -151,9 +151,9 @@ public final class SchemaInferrer {
             else if (v instanceof JsonTValue.D32)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 32); }
             else if (v instanceof JsonTValue.D64)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 64); }
             else if (v instanceof JsonTValue.D128)      { hasFloat  = true; floatWidth = Math.max(floatWidth, 128); }
-            else if (v instanceof JsonTValue.Text)      { hasString = true; }
+            else if (v instanceof JsonTValue.Str s && s.value() instanceof JsonTString.Plain) { hasString = true; }
             else {
-                // Semantic string variants — check for uniform type across the column.
+                // Semantic string variants or other types.
                 ScalarType sv = semanticTypeOf(v);
                 if (sv != null) {
                     if (uniformSemantic == null)      uniformSemantic = sv;
@@ -164,9 +164,20 @@ public final class SchemaInferrer {
             }
         }
 
-        if (hasBool && !hasInt && !hasFloat && !hasString && uniformSemantic == null && !hasOther) return ScalarType.BOOL;
-        // Plain Text wins over semantic variants — column contains heterogeneous strings.
-        if (hasString) return ScalarType.STR;
+        if (hasString) {
+            // If all non-null values are plain strings, attempt to infer a more specific semantic variant.
+            List<String> rawStrings = values.stream()
+                .filter(v -> v instanceof JsonTValue.Str s && s.value() instanceof JsonTString.Plain)
+                .map(v -> ((JsonTValue.Str) v).value().value())
+                .toList();
+            
+            if (rawStrings.size() == values.size()) {
+                ScalarType subtype = inferStringSubtype(rawStrings);
+                if (subtype != null) return subtype;
+            }
+            return ScalarType.STR;
+        }
+
         // All values are the same semantic variant → infer that type precisely.
         if (uniformSemantic != null && !semanticMixed && !hasInt && !hasFloat && !hasBool && !hasOther) return uniformSemantic;
         if (hasInt && hasFloat) return floatWidth >= 128 ? ScalarType.D128 : ScalarType.D64;
@@ -180,7 +191,35 @@ public final class SchemaInferrer {
             case 32 -> ScalarType.I32;
             default -> ScalarType.I16;
         };
+        if (hasBool) return ScalarType.BOOL;
         return ScalarType.STR;
+    }
+
+    private static ScalarType inferStringSubtype(List<String> rawStrings) {
+        if (rawStrings.isEmpty()) return null;
+
+        // Candidate types in order of specificity (most specific first).
+        // We skip basic STR and NSTR as they are fallbacks.
+        ScalarType[] candidates = {
+            ScalarType.UUID, ScalarType.EMAIL, ScalarType.TSZ, ScalarType.INST,
+            ScalarType.DATETIME, ScalarType.DATE, ScalarType.TIME, ScalarType.TIMESTAMP,
+            ScalarType.DURATION, ScalarType.IPV4, ScalarType.IPV6, ScalarType.URI,
+            ScalarType.OID
+        };
+
+        for (ScalarType candidate : candidates) {
+            // Check if ALL strings in the column match the candidate format.
+            boolean allMatch = true;
+            for (String s : rawStrings) {
+                if (JsonTStrings.promote(s, candidate).isEmpty()) {
+                    allMatch = false;
+                    break;
+                }
+            }
+            if (allMatch) return candidate;
+        }
+
+        return null;
     }
 
     /**
@@ -190,23 +229,25 @@ public final class SchemaInferrer {
      * Used by {@link #inferType} to detect uniformly-typed semantic columns.
      */
     private static ScalarType semanticTypeOf(JsonTValue v) {
-        if (v instanceof JsonTValue.Nstr)      return ScalarType.NSTR;
-        if (v instanceof JsonTValue.Uuid)      return ScalarType.UUID;
-        if (v instanceof JsonTValue.Uri)       return ScalarType.URI;
-        if (v instanceof JsonTValue.Email)     return ScalarType.EMAIL;
-        if (v instanceof JsonTValue.Hostname)  return ScalarType.HOSTNAME;
-        if (v instanceof JsonTValue.Ipv4)      return ScalarType.IPV4;
-        if (v instanceof JsonTValue.Ipv6)      return ScalarType.IPV6;
-        if (v instanceof JsonTValue.Date)      return ScalarType.DATE;
-        if (v instanceof JsonTValue.Time)      return ScalarType.TIME;
-        if (v instanceof JsonTValue.DateTime)  return ScalarType.DATETIME;
-        if (v instanceof JsonTValue.Timestamp) return ScalarType.TIMESTAMP;
-        if (v instanceof JsonTValue.Tsz)       return ScalarType.TSZ;
-        if (v instanceof JsonTValue.Inst)      return ScalarType.INST;
-        if (v instanceof JsonTValue.Duration)  return ScalarType.DURATION;
-        if (v instanceof JsonTValue.Base64)    return ScalarType.BASE64;
-        if (v instanceof JsonTValue.Hex)       return ScalarType.HEX;
-        if (v instanceof JsonTValue.Oid)       return ScalarType.OID;
+        if (!(v instanceof JsonTValue.Str s)) return null;
+        JsonTString js = s.value();
+        if (js instanceof JsonTString.Nstr)      return ScalarType.NSTR;
+        if (js instanceof JsonTString.Uuid)      return ScalarType.UUID;
+        if (js instanceof JsonTString.Uri)       return ScalarType.URI;
+        if (js instanceof JsonTString.Email)     return ScalarType.EMAIL;
+        if (js instanceof JsonTString.Hostname)  return ScalarType.HOSTNAME;
+        if (js instanceof JsonTString.Ipv4)      return ScalarType.IPV4;
+        if (js instanceof JsonTString.Ipv6)      return ScalarType.IPV6;
+        if (js instanceof JsonTString.Date)      return ScalarType.DATE;
+        if (js instanceof JsonTString.Time)      return ScalarType.TIME;
+        if (js instanceof JsonTString.DateTime)  return ScalarType.DATETIME;
+        if (js instanceof JsonTString.Timestamp) return ScalarType.TIMESTAMP;
+        if (js instanceof JsonTString.Tsz)       return ScalarType.TSZ;
+        if (js instanceof JsonTString.Inst)      return ScalarType.INST;
+        if (js instanceof JsonTString.Duration)  return ScalarType.DURATION;
+        if (js instanceof JsonTString.Base64)    return ScalarType.BASE64;
+        if (js instanceof JsonTString.Hex)       return ScalarType.HEX;
+        if (js instanceof JsonTString.Oid)       return ScalarType.OID;
         return null;
     }
 }

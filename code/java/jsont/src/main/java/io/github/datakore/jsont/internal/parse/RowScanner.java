@@ -258,7 +258,6 @@ public final class RowScanner {
             return pos < len ? src[pos] : 0;
         }
 
-        char advance() { return src[pos++]; }
 
         void skipWs() {
             while (pos < len) {

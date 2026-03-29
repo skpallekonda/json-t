@@ -128,7 +128,8 @@ public final class JsonTRowBuilder {
     /** Returns true when {@code value} is type-compatible with {@code expected}. */
     private static boolean isCompatible(JsonTValue value, ScalarType expected) {
         if (expected == ScalarType.BOOL) return value instanceof JsonTValue.Bool;
-        if (isStringType(expected))     return value instanceof JsonTValue.Text;
+        if (isStringType(expected) && value.isStringLike()) return true;
+        if (isTemporal(expected) && value.isNumeric()) return true;
         return switch (expected) {
             case I16  -> value instanceof JsonTValue.I16;
             case I32  -> value instanceof JsonTValue.I32;
@@ -140,6 +141,13 @@ public final class JsonTRowBuilder {
             case D64  -> value instanceof JsonTValue.D64;
             case D128 -> value instanceof JsonTValue.D128;
             default   -> false;
+        };
+    }
+
+    private static boolean isTemporal(ScalarType t) {
+        return switch (t) {
+            case DATE, TIME, DATETIME, TIMESTAMP -> true;
+            default -> false;
         };
     }
 

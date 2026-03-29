@@ -133,14 +133,7 @@ pub fn check_field(
 
             JsonTConstraint::Length { key, value: bound } => {
                 let len = match value {
-                    JsonTValue::Str(s)
-                    | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
-                    | JsonTValue::Email(s) | JsonTValue::Hostname(s)
-                    | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
-                    | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
-                    | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
-                    | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
-                    | JsonTValue::Oid(s) => Some(s.chars().count() as u64),
+                    JsonTValue::Str(js) => Some(js.as_raw_str().chars().count() as u64),
                     JsonTValue::Array(a) => Some(a.len() as u64),
                     _                   => None,
                 };
@@ -214,14 +207,7 @@ pub fn describe_value(v: &JsonTValue) -> String {
         JsonTValue::Null         => "null".into(),
         JsonTValue::Unspecified  => "_".into(),
         JsonTValue::Bool(b)      => b.to_string(),
-        JsonTValue::Str(s)
-        | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
-        | JsonTValue::Email(s) | JsonTValue::Hostname(s)
-        | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
-        | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
-        | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
-        | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
-        | JsonTValue::Oid(s)     => format!("{:?}", s),
+        JsonTValue::Str(js)      => format!("{:?}", js.as_raw_str()),
         JsonTValue::Enum(e)      => e.clone(),
         JsonTValue::Number(n)    => n.as_f64().to_string(),
         JsonTValue::Object(_)    => "{...}".into(),

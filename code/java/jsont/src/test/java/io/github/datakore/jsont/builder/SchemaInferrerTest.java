@@ -1,7 +1,10 @@
 package io.github.datakore.jsont.builder;
 
 import io.github.datakore.jsont.error.BuildError;
-import io.github.datakore.jsont.model.*;
+import io.github.datakore.jsont.model.JsonTRow;
+import io.github.datakore.jsont.model.JsonTSchema;
+import io.github.datakore.jsont.model.ScalarType;
+import io.github.datakore.jsont.model.JsonTValue;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -143,5 +146,14 @@ class SchemaInferrerTest {
         );
         JsonTSchema schema = SchemaInferrer.create().infer(rows);
         assertEquals(ScalarType.I64, schema.fields().get(0).scalarType());
+    }
+
+    @Test void infer_types_explicitSemanticType() throws BuildError {
+        List<JsonTRow> rows = List.of(
+                JsonTRow.of(JsonTValue.hostname("google.com")),
+                JsonTRow.of(JsonTValue.hostname("amazon.com"))
+        );
+        JsonTSchema schema = SchemaInferrer.create().infer(rows);
+        assertEquals(ScalarType.HOSTNAME, schema.fields().get(0).scalarType());
     }
 }

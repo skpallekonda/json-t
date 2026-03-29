@@ -56,14 +56,7 @@ fn write_value<W: Write>(v: &JsonTValue, w: &mut W) -> io::Result<()> {
         JsonTValue::Unspecified => w.write_all(b"_"),
         JsonTValue::Bool(true) => w.write_all(b"true"),
         JsonTValue::Bool(false) => w.write_all(b"false"),
-        JsonTValue::Str(s)
-        | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
-        | JsonTValue::Email(s) | JsonTValue::Hostname(s)
-        | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
-        | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
-        | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
-        | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
-        | JsonTValue::Oid(s) => write_quoted_str(s, w),
+        JsonTValue::Str(js) => write_quoted_str(js.as_raw_str(), w),
         JsonTValue::Enum(c) => w.write_all(c.as_bytes()),
         JsonTValue::Number(n) => write_number(n, w),
         JsonTValue::Object(row) => write_row(row, w),
@@ -101,6 +94,10 @@ fn write_number<W: Write>(n: &JsonTNumber, w: &mut W) -> io::Result<()> {
         JsonTNumber::D32(v) => write!(w, "{}", v),
         JsonTNumber::D64(v) => write!(w, "{}", v),
         JsonTNumber::D128(v) => write!(w, "{}", v),
+        JsonTNumber::Date(v) => write!(w, "{}", v),
+        JsonTNumber::Time(v) => write!(w, "{}", v),
+        JsonTNumber::DateTime(v) => write!(w, "{}", v),
+        JsonTNumber::Timestamp(v) => write!(w, "{}", v),
     }
 }
 

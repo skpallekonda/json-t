@@ -2,6 +2,7 @@
 // model/data.rs
 // =============================================================================
 // JsonTValue   — the universal value type (scalar, object, array, null, etc.)
+// JsonTString  — the universal string type, covering all semantic variants
 // JsonTNumber  — typed numeric value, one variant per numeric ScalarType
 // JsonTRow     — an ordered sequence of values forming one data row
 // JsonTArray   — an ordered sequence of values forming an array field value
@@ -10,13 +11,9 @@
 use rust_decimal::Decimal;
 
 use crate::model::field::ScalarType;
+use crate::model::format;
 
 /// The universal JsonT value — covers every value form in the grammar.
-///
-/// Variants map to the grammar's `value` rule alternatives.
-/// The semantic string variants (Email, Uuid, etc.) are identical on the wire
-/// to `Str` — they are promoted from `Str` in the validation layer once the
-/// declared `ScalarType` is known.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonTValue {
     /// `null` or `nil` — an explicit absent value.
@@ -25,60 +22,14 @@ pub enum JsonTValue {
     /// `_` — the "unspecified" sentinel; value is intentionally omitted.
     Unspecified,
 
-    /// A typed numeric value. The variant inside JsonTNumber determines the
-    /// in-memory representation, matching the declared field type.
+    /// A typed numeric value, including integer temporal types.
     Number(JsonTNumber),
 
     /// A boolean literal (`true` / `false`).
     Bool(bool),
 
-    /// A plain string value (single or double-quoted in source).
-    Str(String),
-
-    // ── Semantic string variants ──────────────────────────────────────────────
-    // All of these serialise as double-quoted strings, identical to Str.
-    // They are promoted from Str during validation when the ScalarType is known.
-
-    /// Normalised (unicode NFC) string — maps to `ScalarType::NStr`.
-    Nstr(String),
-    /// UUID — maps to `ScalarType::Uuid`.
-    Uuid(String),
-    /// URI — maps to `ScalarType::Uri`.
-    Uri(String),
-    /// Email address — maps to `ScalarType::Email`.
-    Email(String),
-    /// Hostname — maps to `ScalarType::Hostname`.
-    Hostname(String),
-    /// IPv4 address — maps to `ScalarType::Ipv4`.
-    Ipv4(String),
-    /// IPv6 address — maps to `ScalarType::Ipv6`.
-    Ipv6(String),
-
-    // ── Temporal variants ─────────────────────────────────────────────────────
-
-    /// Calendar date — maps to `ScalarType::Date`.
-    Date(String),
-    /// Time-of-day — maps to `ScalarType::Time`.
-    Time(String),
-    /// Date and time without timezone — maps to `ScalarType::DateTime`.
-    DateTime(String),
-    /// Unix timestamp (integer or decimal string) — maps to `ScalarType::Timestamp`.
-    Timestamp(String),
-    /// Timestamp with timezone — maps to `ScalarType::Tsz`.
-    Tsz(String),
-    /// Monotonic instant — maps to `ScalarType::Inst`.
-    Inst(String),
-    /// ISO 8601 duration — maps to `ScalarType::Duration`.
-    Duration(String),
-
-    // ── Binary / identifier variants ──────────────────────────────────────────
-
-    /// Base64-encoded binary — maps to `ScalarType::Base64`.
-    Base64(String),
-    /// Hex-encoded binary — maps to `ScalarType::Hex`.
-    Hex(String),
-    /// Object identifier — maps to `ScalarType::Oid`.
-    Oid(String),
+    /// A string value, possibly holding a semantic variant (email, uuid, etc.).
+    Str(JsonTString),
 
     /// An enum constant value (a CONSTID — all uppercase, 2+ chars).
     Enum(String),
@@ -96,7 +47,7 @@ impl JsonTValue {
     pub fn null() -> Self { JsonTValue::Null }
     pub fn unspecified() -> Self { JsonTValue::Unspecified }
     pub fn bool(b: bool) -> Self { JsonTValue::Bool(b) }
-    pub fn str(s: impl Into<String>) -> Self { JsonTValue::Str(s.into()) }
+    pub fn str(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Plain(s.into())) }
     pub fn enum_val(c: impl Into<String>) -> Self { JsonTValue::Enum(c.into()) }
 
     pub fn i16(n: i16)  -> Self { JsonTValue::Number(JsonTNumber::I16(n)) }
@@ -111,41 +62,37 @@ impl JsonTValue {
 
     // ── Semantic string constructors ──────────────────────────────────────
 
-    pub fn nstr(s: impl Into<String>) -> Self { JsonTValue::Nstr(s.into()) }
-    pub fn uuid(s: impl Into<String>) -> Self { JsonTValue::Uuid(s.into()) }
-    pub fn uri(s: impl Into<String>) -> Self { JsonTValue::Uri(s.into()) }
-    pub fn email(s: impl Into<String>) -> Self { JsonTValue::Email(s.into()) }
-    pub fn hostname(s: impl Into<String>) -> Self { JsonTValue::Hostname(s.into()) }
-    pub fn ipv4(s: impl Into<String>) -> Self { JsonTValue::Ipv4(s.into()) }
-    pub fn ipv6(s: impl Into<String>) -> Self { JsonTValue::Ipv6(s.into()) }
-    pub fn date(s: impl Into<String>) -> Self { JsonTValue::Date(s.into()) }
-    pub fn time(s: impl Into<String>) -> Self { JsonTValue::Time(s.into()) }
-    pub fn date_time(s: impl Into<String>) -> Self { JsonTValue::DateTime(s.into()) }
-    pub fn timestamp(s: impl Into<String>) -> Self { JsonTValue::Timestamp(s.into()) }
-    pub fn tsz(s: impl Into<String>) -> Self { JsonTValue::Tsz(s.into()) }
-    pub fn inst(s: impl Into<String>) -> Self { JsonTValue::Inst(s.into()) }
-    pub fn duration(s: impl Into<String>) -> Self { JsonTValue::Duration(s.into()) }
-    pub fn base64(s: impl Into<String>) -> Self { JsonTValue::Base64(s.into()) }
-    pub fn hex(s: impl Into<String>) -> Self { JsonTValue::Hex(s.into()) }
-    pub fn oid(s: impl Into<String>) -> Self { JsonTValue::Oid(s.into()) }
+    pub fn nstr(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Nstr(s.into())) }
+    pub fn uuid(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Uuid(s.into())) }
+    pub fn uri(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Uri(s.into())) }
+    pub fn email(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Email(s.into())) }
+    pub fn hostname(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Hostname(s.into())) }
+    pub fn ipv4(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Ipv4(s.into())) }
+    pub fn ipv6(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Ipv6(s.into())) }
+    pub fn date(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Date(s.into())) }
+    pub fn time(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Time(s.into())) }
+    pub fn date_time(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::DateTime(s.into())) }
+    pub fn timestamp(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Timestamp(s.into())) }
+    pub fn tsz(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Tsz(s.into())) }
+    pub fn inst(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Inst(s.into())) }
+    pub fn duration(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Duration(s.into())) }
+    pub fn base64(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Base64(s.into())) }
+    pub fn hex(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Hex(s.into())) }
+    pub fn oid(s: impl Into<String>) -> Self { JsonTValue::Str(JsonTString::Oid(s.into())) }
+
+    // ── Numeric temporal constructors ─────────────────────────────────────
+
+    pub fn date_int(n: u32) -> Self { JsonTValue::Number(JsonTNumber::Date(n)) }
+    pub fn time_int(n: u32) -> Self { JsonTValue::Number(JsonTNumber::Time(n)) }
+    pub fn datetime_int(n: u64) -> Self { JsonTValue::Number(JsonTNumber::DateTime(n)) }
+    pub fn timestamp_int(n: i64) -> Self { JsonTValue::Number(JsonTNumber::Timestamp(n)) }
 
     // ── Type queries ──────────────────────────────────────────────────────
 
-    pub fn is_null(&self) -> bool {
-        matches!(self, JsonTValue::Null)
-    }
+    pub fn is_null(&self) -> bool { matches!(self, JsonTValue::Null) }
+    pub fn is_numeric(&self) -> bool { matches!(self, JsonTValue::Number(_)) }
+    pub fn is_string(&self) -> bool { matches!(self, JsonTValue::Str(_)) }
 
-    pub fn is_numeric(&self) -> bool {
-        matches!(self, JsonTValue::Number(_))
-    }
-
-    pub fn is_string(&self) -> bool {
-        matches!(self, JsonTValue::Str(_))
-    }
-
-    /// Coerce any numeric variant to f64 for expression arithmetic.
-    /// Precision loss is acceptable here — arithmetic in expressions operates
-    /// on runtime values, not stored data.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             JsonTValue::Number(n) => Some(n.as_f64()),
@@ -160,18 +107,23 @@ impl JsonTValue {
         }
     }
 
-    pub fn as_str(&self) -> Option<&str> {
+    /// Returns the inner JsonTString wrapper if this is a Str variant.
+    pub fn as_json_string(&self) -> Option<&JsonTString> {
         match self {
-            JsonTValue::Str(s)
-            | JsonTValue::Nstr(s) | JsonTValue::Uuid(s) | JsonTValue::Uri(s)
-            | JsonTValue::Email(s) | JsonTValue::Hostname(s)
-            | JsonTValue::Ipv4(s) | JsonTValue::Ipv6(s)
-            | JsonTValue::Date(s) | JsonTValue::Time(s) | JsonTValue::DateTime(s)
-            | JsonTValue::Timestamp(s) | JsonTValue::Tsz(s) | JsonTValue::Inst(s)
-            | JsonTValue::Duration(s) | JsonTValue::Base64(s) | JsonTValue::Hex(s)
-            | JsonTValue::Oid(s) => Some(s.as_str()),
+            JsonTValue::Str(js) => Some(js),
             _ => None,
         }
+    }
+
+    /// Accesses the underlying characters for any string-based variant.
+    /// Returns None for numbers, bools, etc.
+    pub fn as_str(&self) -> Option<&str> {
+        self.as_json_string().map(|js| js.as_raw_str())
+    }
+
+    /// Accesses the underlying bytes for any string-based variant.
+    pub fn as_raw_bytes(&self) -> Option<&[u8]> {
+        self.as_json_string().map(|js| js.as_raw_bytes())
     }
 
     /// Human-readable type name, used in error messages.
@@ -181,80 +133,168 @@ impl JsonTValue {
             JsonTValue::Unspecified => "unspecified",
             JsonTValue::Number(n)   => n.type_name(),
             JsonTValue::Bool(_)     => "bool",
-            JsonTValue::Str(_)      => "str",
-            JsonTValue::Nstr(_)     => "nstr",
-            JsonTValue::Uuid(_)     => "uuid",
-            JsonTValue::Uri(_)      => "uri",
-            JsonTValue::Email(_)    => "email",
-            JsonTValue::Hostname(_) => "hostname",
-            JsonTValue::Ipv4(_)     => "ipv4",
-            JsonTValue::Ipv6(_)     => "ipv6",
-            JsonTValue::Date(_)     => "date",
-            JsonTValue::Time(_)     => "time",
-            JsonTValue::DateTime(_) => "datetime",
-            JsonTValue::Timestamp(_) => "timestamp",
-            JsonTValue::Tsz(_)      => "tsz",
-            JsonTValue::Inst(_)     => "inst",
-            JsonTValue::Duration(_) => "duration",
-            JsonTValue::Base64(_)   => "base64",
-            JsonTValue::Hex(_)      => "hex",
-            JsonTValue::Oid(_)      => "oid",
+            JsonTValue::Str(js)     => js.type_name(),
             JsonTValue::Enum(_)     => "enum",
             JsonTValue::Object(_)   => "object",
             JsonTValue::Array(_)    => "array",
         }
     }
 
-    /// Promotes a `Str` value to the appropriate semantic variant for the given `ScalarType`.
-    ///
-    /// Returns the value unchanged if it is not `Str`, or if the type maps to plain `Str`.
-    /// This is called in the validation layer after type/constraint checking passes so
-    /// that callers of `on_clean` always receive the semantically precise variant.
-    pub fn promote(self, scalar_type: &ScalarType) -> Self {
-        let JsonTValue::Str(s) = self else { return self; };
-        match scalar_type {
-            ScalarType::NStr      => JsonTValue::Nstr(s),
-            ScalarType::Uuid      => JsonTValue::Uuid(s),
-            ScalarType::Uri       => JsonTValue::Uri(s),
-            ScalarType::Email     => JsonTValue::Email(s),
-            ScalarType::Hostname  => JsonTValue::Hostname(s),
-            ScalarType::Ipv4      => JsonTValue::Ipv4(s),
-            ScalarType::Ipv6      => JsonTValue::Ipv6(s),
-            ScalarType::Date      => JsonTValue::Date(s),
-            ScalarType::Time      => JsonTValue::Time(s),
-            ScalarType::DateTime  => JsonTValue::DateTime(s),
-            ScalarType::Timestamp => JsonTValue::Timestamp(s),
-            ScalarType::Tsz       => JsonTValue::Tsz(s),
-            ScalarType::Inst      => JsonTValue::Inst(s),
-            ScalarType::Duration  => JsonTValue::Duration(s),
-            ScalarType::Base64    => JsonTValue::Base64(s),
-            ScalarType::Hex       => JsonTValue::Hex(s),
-            ScalarType::Oid       => JsonTValue::Oid(s),
-            _                     => JsonTValue::Str(s),  // Str stays Str
+    /// Promotes a value to a more precise variant based on the declared `ScalarType`.
+    /// Performs format validation. Returns Err if the value does not conform to the type.
+    pub fn promote(self, scalar_type: &ScalarType) -> Result<Self, &'static str> {
+        match self {
+            JsonTValue::Str(js) => {
+                // Only promote if it's currently a Plain string.
+                if let JsonTString::Plain(s) = js {
+                    JsonTString::promote(s, scalar_type).map(JsonTValue::Str)
+                } else {
+                    Ok(JsonTValue::Str(js))
+                }
+            }
+            JsonTValue::Number(n) => {
+                n.promote_temporal(scalar_type).map(JsonTValue::Number)
+            }
+            _ => Ok(self),
+        }
+    }
+}
+
+/// The universal string type, covering all semantic variants.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JsonTString {
+    Plain(String),
+    Nstr(String),
+
+    // ── Network subtypes ───────────
+    Uuid(String),
+    Uri(String),
+    Email(String),
+    Hostname(String),
+    Ipv4(String),
+    Ipv6(String),
+
+    // ── Temporal subtypes (String form) ───────────
+    Date(String),
+    Time(String),
+    DateTime(String),
+    Timestamp(String),
+    Tsz(String),
+    Inst(String),
+    Duration(String),
+
+    // ── Binary / Encoded subtypes ───────────
+    Base64(String),
+    Hex(String),
+    Oid(String),
+}
+
+impl From<String> for JsonTString {
+    fn from(s: String) -> Self {
+        JsonTString::Plain(s)
+    }
+}
+
+impl From<&str> for JsonTString {
+    fn from(s: &str) -> Self {
+        JsonTString::Plain(s.to_string())
+    }
+}
+
+impl JsonTString {
+    /// Infallible access to the underlying string slice.
+    pub fn as_raw_str(&self) -> &str {
+        match self {
+            JsonTString::Plain(s) | JsonTString::Nstr(s) | JsonTString::Uuid(s)
+            | JsonTString::Uri(s) | JsonTString::Email(s) | JsonTString::Hostname(s)
+            | JsonTString::Ipv4(s) | JsonTString::Ipv6(s) | JsonTString::Date(s)
+            | JsonTString::Time(s) | JsonTString::DateTime(s) | JsonTString::Timestamp(s)
+            | JsonTString::Tsz(s) | JsonTString::Inst(s) | JsonTString::Duration(s)
+            | JsonTString::Base64(s) | JsonTString::Hex(s) | JsonTString::Oid(s) => s,
+        }
+    }
+
+    /// Alias for as_raw_str to match test expectations.
+    pub fn as_str(&self) -> &str {
+        self.as_raw_str()
+    }
+
+    pub fn as_raw_bytes(&self) -> &[u8] {
+        self.as_raw_str().as_bytes()
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            JsonTString::Plain(_)     => "str",
+            JsonTString::Nstr(_)      => "nstr",
+            JsonTString::Uuid(_)      => "uuid",
+            JsonTString::Uri(_)       => "uri",
+            JsonTString::Email(_)     => "email",
+            JsonTString::Hostname(_)  => "hostname",
+            JsonTString::Ipv4(_)      => "ipv4",
+            JsonTString::Ipv6(_)      => "ipv6",
+            JsonTString::Date(_)      => "date",
+            JsonTString::Time(_)      => "time",
+            JsonTString::DateTime(_) => "datetime",
+            JsonTString::Timestamp(_) => "timestamp",
+            JsonTString::Tsz(_)       => "tsz",
+            JsonTString::Inst(_)      => "inst",
+            JsonTString::Duration(_) => "duration",
+            JsonTString::Base64(_)    => "base64",
+            JsonTString::Hex(_)       => "hex",
+            JsonTString::Oid(_)       => "oid",
+        }
+    }
+
+    // ── Typed accessors ───────────────────────────────────────────────────
+
+    pub fn as_plain(&self) -> Option<&str> { match self { JsonTString::Plain(s) => Some(s), _ => None } }
+    pub fn as_nstr(&self) -> Option<&str> { match self { JsonTString::Nstr(s) => Some(s), _ => None } }
+    pub fn as_uuid(&self) -> Option<&str> { match self { JsonTString::Uuid(s) => Some(s), _ => None } }
+    pub fn as_uri(&self) -> Option<&str> { match self { JsonTString::Uri(s) => Some(s), _ => None } }
+    pub fn as_email(&self) -> Option<&str> { match self { JsonTString::Email(s) => Some(s), _ => None } }
+    pub fn as_hostname(&self) -> Option<&str> { match self { JsonTString::Hostname(s) => Some(s), _ => None } }
+    pub fn as_ipv4(&self) -> Option<&str> { match self { JsonTString::Ipv4(s) => Some(s), _ => None } }
+    pub fn as_ipv6(&self) -> Option<&str> { match self { JsonTString::Ipv6(s) => Some(s), _ => None } }
+    pub fn as_date(&self) -> Option<&str> { match self { JsonTString::Date(s) => Some(s), _ => None } }
+    pub fn as_time(&self) -> Option<&str> { match self { JsonTString::Time(s) => Some(s), _ => None } }
+    pub fn as_datetime(&self) -> Option<&str> { match self { JsonTString::DateTime(s) => Some(s), _ => None } }
+    pub fn as_timestamp(&self) -> Option<&str> { match self { JsonTString::Timestamp(s) => Some(s), _ => None } }
+    pub fn as_tsz(&self) -> Option<&str> { match self { JsonTString::Tsz(s) => Some(s), _ => None } }
+    pub fn as_inst(&self) -> Option<&str> { match self { JsonTString::Inst(s) => Some(s), _ => None } }
+    pub fn as_duration(&self) -> Option<&str> { match self { JsonTString::Duration(s) => Some(s), _ => None } }
+    pub fn as_base64(&self) -> Option<&str> { match self { JsonTString::Base64(s) => Some(s), _ => None } }
+    pub fn as_hex(&self) -> Option<&str> { match self { JsonTString::Hex(s) => Some(s), _ => None } }
+    pub fn as_oid(&self) -> Option<&str> { match self { JsonTString::Oid(s) => Some(s), _ => None } }
+
+    /// Internal factory to promote a string to a semantic variant.
+    pub(crate) fn promote(s: String, ty: &ScalarType) -> Result<Self, &'static str> {
+        match ty {
+            ScalarType::Str       => Ok(JsonTString::Plain(s)),
+            ScalarType::NStr      if format::is_nstr(&s)     => Ok(JsonTString::Nstr(s)),
+            ScalarType::Uuid      if format::is_uuid(&s)     => Ok(JsonTString::Uuid(s)),
+            ScalarType::Uri       if format::is_uri(&s)      => Ok(JsonTString::Uri(s)),
+            ScalarType::Email     if format::is_email(&s)    => Ok(JsonTString::Email(s)),
+            ScalarType::Hostname  if format::is_hostname(&s) => Ok(JsonTString::Hostname(s)),
+            ScalarType::Ipv4      if format::is_ipv4(&s)     => Ok(JsonTString::Ipv4(s)),
+            ScalarType::Ipv6      if format::is_ipv6(&s)     => Ok(JsonTString::Ipv6(s)),
+            ScalarType::Date      if format::is_date(&s)     => Ok(JsonTString::Date(s)),
+            ScalarType::Time      if format::is_time(&s)     => Ok(JsonTString::Time(s)),
+            ScalarType::DateTime  if format::is_date_time(&s) => Ok(JsonTString::DateTime(s)),
+            ScalarType::Timestamp if format::is_timestamp(&s) => Ok(JsonTString::Timestamp(s)),
+            ScalarType::Tsz       if format::is_tsz(&s)      => Ok(JsonTString::Tsz(s)),
+            ScalarType::Inst      if format::is_inst(&s)     => Ok(JsonTString::Inst(s)),
+            ScalarType::Duration  if format::is_duration(&s) => Ok(JsonTString::Duration(s)),
+            ScalarType::Base64    if format::is_base64(&s)   => Ok(JsonTString::Base64(s)),
+            ScalarType::Hex       if format::is_hex(&s)      => Ok(JsonTString::Hex(s)),
+            ScalarType::Oid       if format::is_oid(&s)      => Ok(JsonTString::Oid(s)),
+            
+            _ => Err("format violation"),
         }
     }
 }
 
 /// A typed numeric value.
-///
-/// Each variant carries the Rust native type matching the JsonT type keyword's
-/// intended memory footprint:
-///
-/// | JsonT | Rust            |
-/// |-------|-----------------|
-/// | i16   | i16             |
-/// | i32   | i32             |
-/// | i64   | i64             |
-/// | u16   | u16             |
-/// | u32   | u32             |
-/// | u64   | u64             |
-/// | d32   | f32             |
-/// | d64   | f64             |
-/// | d128  | Decimal (96-bit)|
-///
-/// Note: `d128` uses `rust_decimal::Decimal` (96-bit mantissa) because Rust
-/// stable has no `f128`. This covers financial/high-precision use cases.
-/// Swap to `f128` when it stabilises without changing the enum shape.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonTNumber {
     I16(i16),
@@ -266,6 +306,12 @@ pub enum JsonTNumber {
     D32(f32),
     D64(f64),
     D128(Decimal),
+
+    // ── Integer temporal variants ──────────
+    Date(u32),
+    Time(u32),
+    DateTime(u64),
+    Timestamp(i64),
 }
 
 impl JsonTNumber {
@@ -281,6 +327,10 @@ impl JsonTNumber {
             JsonTNumber::D32(n)  => *n as f64,
             JsonTNumber::D64(n)  => *n,
             JsonTNumber::D128(n) => n.to_string().parse::<f64>().unwrap_or(f64::NAN),
+            JsonTNumber::Date(n) => *n as f64,
+            JsonTNumber::Time(n) => *n as f64,
+            JsonTNumber::DateTime(n) => *n as f64,
+            JsonTNumber::Timestamp(n) => *n as f64,
         }
     }
 
@@ -295,12 +345,107 @@ impl JsonTNumber {
             JsonTNumber::D32(_)  => "d32",
             JsonTNumber::D64(_)  => "d64",
             JsonTNumber::D128(_) => "d128",
+            JsonTNumber::Date(_) => "date",
+            JsonTNumber::Time(_) => "time",
+            JsonTNumber::DateTime(_) => "datetime",
+            JsonTNumber::Timestamp(_) => "timestamp",
+        }
+    }
+
+    pub fn as_date(&self) -> Option<u32> { match self { JsonTNumber::Date(n) => Some(*n), _ => None } }
+    pub fn as_time(&self) -> Option<u32> { match self { JsonTNumber::Time(n) => Some(*n), _ => None } }
+    pub fn as_datetime(&self) -> Option<u64> { match self { JsonTNumber::DateTime(n) => Some(*n), _ => None } }
+    pub fn as_timestamp(&self) -> Option<i64> { match self { JsonTNumber::Timestamp(n) => Some(*n), _ => None } }
+
+    /// Promotes a raw integer to a temporal variant.
+    pub(crate) fn promote_temporal(self, ty: &ScalarType) -> Result<Self, &'static str> {
+        match (self, ty) {
+            (JsonTNumber::Date(n), ScalarType::Date) => Ok(JsonTNumber::Date(n)),
+            (JsonTNumber::Time(n), ScalarType::Time) => Ok(JsonTNumber::Time(n)),
+            (JsonTNumber::DateTime(n), ScalarType::DateTime) => Ok(JsonTNumber::DateTime(n)),
+            (JsonTNumber::Timestamp(n), ScalarType::Timestamp) => Ok(JsonTNumber::Timestamp(n)),
+
+            (n, ScalarType::Date) => {
+                let val = match n {
+                    JsonTNumber::I16(v) => v as u32,
+                    JsonTNumber::I32(v) => v as u32,
+                    JsonTNumber::I64(v) => v as u32,
+                    JsonTNumber::U16(v) => v as u32,
+                    JsonTNumber::U32(v) => v,
+                    JsonTNumber::U64(v) => v as u32,
+                    JsonTNumber::D32(v) => v as u32,
+                    JsonTNumber::D64(v) => v as u32,
+                    JsonTNumber::D128(v) => {
+                        use rust_decimal::prelude::ToPrimitive;
+                        v.to_u32().ok_or("decimal out of range for date")?
+                    }
+                    _ => return Err("non-integer for date"),
+                };
+                if !format::is_date_int(val) { return Err("invalid date format YYYYMMDD"); }
+                Ok(JsonTNumber::Date(val))
+            }
+            (n, ScalarType::Time) => {
+                let val = match n {
+                    JsonTNumber::I16(v) => v as u32,
+                    JsonTNumber::I32(v) => v as u32,
+                    JsonTNumber::I64(v) => v as u32,
+                    JsonTNumber::U16(v) => v as u32,
+                    JsonTNumber::U32(v) => v,
+                    JsonTNumber::U64(v) => v as u32,
+                    JsonTNumber::D32(v) => v as u32,
+                    JsonTNumber::D64(v) => v as u32,
+                    JsonTNumber::D128(v) => {
+                        use rust_decimal::prelude::ToPrimitive;
+                        v.to_u32().ok_or("decimal out of range for time")?
+                    }
+                    _ => return Err("non-integer for time"),
+                };
+                if !format::is_time_int(val) { return Err("invalid time format HHmmss"); }
+                Ok(JsonTNumber::Time(val))
+            }
+            (n, ScalarType::DateTime) => {
+                let val = match n {
+                    JsonTNumber::I16(v) => v as u64,
+                    JsonTNumber::I32(v) => v as u64,
+                    JsonTNumber::I64(v) => v as u64,
+                    JsonTNumber::U16(v) => v as u64,
+                    JsonTNumber::U32(v) => v as u64,
+                    JsonTNumber::U64(v) => v,
+                    JsonTNumber::D32(v) => v as u64,
+                    JsonTNumber::D64(v) => v as u64,
+                    JsonTNumber::D128(v) => {
+                        use rust_decimal::prelude::ToPrimitive;
+                        v.to_u64().ok_or("decimal out of range for datetime")?
+                    }
+                    _ => return Err("non-integer for datetime"),
+                };
+                if !format::is_date_time_int(val) { return Err("invalid datetime format YYYYMMDDHHmmss"); }
+                Ok(JsonTNumber::DateTime(val))
+            }
+            (n, ScalarType::Timestamp) => {
+                let val = match n {
+                    JsonTNumber::I16(v) => v as i64,
+                    JsonTNumber::I32(v) => v as i64,
+                    JsonTNumber::I64(v) => v,
+                    JsonTNumber::U16(v) => v as i64,
+                    JsonTNumber::U32(v) => v as i64,
+                    JsonTNumber::U64(v) => v as i64,
+                    JsonTNumber::D32(v) => v as i64,
+                    JsonTNumber::D64(v) => v as i64,
+                    JsonTNumber::D128(v) => {
+                        use rust_decimal::prelude::ToPrimitive;
+                        v.to_i64().ok_or("decimal out of range for timestamp")?
+                    }
+                    _ => return Err("non-integer for timestamp"),
+                };
+                Ok(JsonTNumber::Timestamp(val))
+            }
+            (n, _) => Ok(n),
         }
     }
 }
 
-/// A single data row — an ordered sequence of values corresponding to the
-/// fields of the row's schema (positional, not named at the data layer).
+/// A single data row — an ordered sequence of values forming one data row.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonTRow {
     pub fields: Vec<JsonTValue>,
@@ -328,7 +473,7 @@ impl JsonTRow {
     }
 }
 
-/// An ordered sequence of values forming an array-typed field value.
+/// An ordered sequence of values forming an array field value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonTArray {
     pub items: Vec<JsonTValue>,

@@ -12,7 +12,7 @@
 use crate::error::{BuildError, JsonTError};
 use crate::model::schema::{JsonTSchema, SchemaKind};
 use crate::model::field::{JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
-use crate::model::data::{JsonTRow, JsonTValue, JsonTNumber};
+use crate::model::data::{JsonTRow, JsonTValue, JsonTNumber, JsonTString};
 
 /// Configuration for schema inference from a set of data rows.
 #[derive(Debug, Clone)]
@@ -185,23 +185,23 @@ fn infer_type(values: &[&JsonTValue]) -> ScalarType {
 
     // Semantic string variants: map each back to its declared ScalarType.
     // When all values share the same semantic variant, infer that type.
-    let all_nstr     = values.iter().all(|v| matches!(v, JsonTValue::Nstr(_)));
-    let all_uuid     = values.iter().all(|v| matches!(v, JsonTValue::Uuid(_)));
-    let all_uri      = values.iter().all(|v| matches!(v, JsonTValue::Uri(_)));
-    let all_email    = values.iter().all(|v| matches!(v, JsonTValue::Email(_)));
-    let all_hostname = values.iter().all(|v| matches!(v, JsonTValue::Hostname(_)));
-    let all_ipv4     = values.iter().all(|v| matches!(v, JsonTValue::Ipv4(_)));
-    let all_ipv6     = values.iter().all(|v| matches!(v, JsonTValue::Ipv6(_)));
-    let all_date     = values.iter().all(|v| matches!(v, JsonTValue::Date(_)));
-    let all_time     = values.iter().all(|v| matches!(v, JsonTValue::Time(_)));
-    let all_datetime = values.iter().all(|v| matches!(v, JsonTValue::DateTime(_)));
-    let all_ts       = values.iter().all(|v| matches!(v, JsonTValue::Timestamp(_)));
-    let all_tsz      = values.iter().all(|v| matches!(v, JsonTValue::Tsz(_)));
-    let all_inst     = values.iter().all(|v| matches!(v, JsonTValue::Inst(_)));
-    let all_duration = values.iter().all(|v| matches!(v, JsonTValue::Duration(_)));
-    let all_base64   = values.iter().all(|v| matches!(v, JsonTValue::Base64(_)));
-    let all_hex      = values.iter().all(|v| matches!(v, JsonTValue::Hex(_)));
-    let all_oid      = values.iter().all(|v| matches!(v, JsonTValue::Oid(_)));
+    let all_nstr     = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Nstr(_))));
+    let all_uuid     = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Uuid(_))));
+    let all_uri      = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Uri(_))));
+    let all_email    = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Email(_))));
+    let all_hostname = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Hostname(_))));
+    let all_ipv4     = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Ipv4(_))));
+    let all_ipv6     = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Ipv6(_))));
+    let all_date     = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Date(_))) || matches!(v, JsonTValue::Number(JsonTNumber::Date(_))));
+    let all_time     = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Time(_))) || matches!(v, JsonTValue::Number(JsonTNumber::Time(_))));
+    let all_datetime = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::DateTime(_))) || matches!(v, JsonTValue::Number(JsonTNumber::DateTime(_))));
+    let all_ts       = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Timestamp(_))) || matches!(v, JsonTValue::Number(JsonTNumber::Timestamp(_))));
+    let all_tsz      = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Tsz(_))));
+    let all_inst     = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Inst(_))));
+    let all_duration = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Duration(_))));
+    let all_base64   = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Base64(_))));
+    let all_hex      = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Hex(_))));
+    let all_oid      = values.iter().all(|v| matches!(v, JsonTValue::Str(JsonTString::Oid(_))));
 
     if all_nstr     { return ScalarType::NStr; }
     if all_uuid     { return ScalarType::Uuid; }
@@ -222,7 +222,23 @@ fn infer_type(values: &[&JsonTValue]) -> ScalarType {
     if all_oid      { return ScalarType::Oid; }
 
     // Plain strings (stored as Str at data layer).
+    // If all values are strings but some are plain, attempt deep inference.
     if values.iter().all(|v| matches!(v, JsonTValue::Str(_))) {
+        let raw_strings: Vec<&str> = values.iter().filter_map(|v| {
+            if let JsonTValue::Str(js) = v {
+                if let JsonTString::Plain(s) = js {
+                    return Some(s.as_str());
+                }
+            }
+            None
+        }).collect();
+
+        // If all are plain strings, attempt to find a more specific common subtype.
+        if raw_strings.len() == values.len() {
+            if let Some(subtype) = infer_string_subtype(&raw_strings) {
+                return subtype;
+            }
+        }
         return ScalarType::Str;
     }
 
@@ -231,8 +247,57 @@ fn infer_type(values: &[&JsonTValue]) -> ScalarType {
         return infer_numeric_type(values);
     }
 
-    // Mixed or unknown — fall back to Str.
+    // Mixed — fall back to Str.
     ScalarType::Str
+}
+
+fn infer_string_subtype(raw: &[&str]) -> Option<ScalarType> {
+    if raw.is_empty() { return None; }
+
+    // Candidates in order of specificity.
+    let candidates = [
+        ScalarType::Uuid, ScalarType::Email, ScalarType::Tsz, ScalarType::Inst,
+        ScalarType::DateTime, ScalarType::Date, ScalarType::Time, ScalarType::Timestamp,
+        ScalarType::Duration, ScalarType::Ipv4, ScalarType::Ipv6,
+        ScalarType::Oid,
+    ];
+
+    for &candidate in &candidates {
+        let mut all_match = true;
+        for &s in raw {
+            if !matches_format(s, candidate) {
+                all_match = false;
+                break;
+            }
+        }
+        if all_match {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn matches_format(s: &str, t: ScalarType) -> bool {
+    use crate::model::format;
+    match t {
+        ScalarType::Uuid     => format::is_uuid(s),
+        ScalarType::Email    => format::is_email(s),
+        ScalarType::Uri      => format::is_uri(s),
+        ScalarType::Hostname => format::is_hostname(s),
+        ScalarType::Ipv4     => format::is_ipv4(s),
+        ScalarType::Ipv6     => format::is_ipv6(s),
+        ScalarType::Date     => format::is_date(s),
+        ScalarType::Time     => format::is_time(s),
+        ScalarType::DateTime => format::is_date_time(s),
+        ScalarType::Timestamp => format::is_timestamp(s),
+        ScalarType::Tsz      => format::is_tsz(s),
+        ScalarType::Inst     => format::is_tsz(s), // inst is same as tsz logic
+        ScalarType::Duration => format::is_duration(s),
+        ScalarType::Base64   => format::is_base64(s),
+        ScalarType::Hex      => format::is_hex(s),
+        ScalarType::Oid      => format::is_oid(s),
+        _ => false,
+    }
 }
 
 fn infer_numeric_type(values: &[&JsonTValue]) -> ScalarType {
@@ -252,6 +317,8 @@ fn infer_numeric_type(values: &[&JsonTValue]) -> ScalarType {
                 JsonTNumber::D32(_)  => NumKind::D32,
                 JsonTNumber::D64(_)  => NumKind::D64,
                 JsonTNumber::D128(_) => NumKind::D128,
+                JsonTNumber::Date(_) | JsonTNumber::Time(_) => NumKind::I32,
+                JsonTNumber::DateTime(_) | JsonTNumber::Timestamp(_) => NumKind::I64,
             })
         } else {
             None

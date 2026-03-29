@@ -77,7 +77,7 @@ class JsonTValueTest {
     @Test
     void text_wrapsString() {
         JsonTValue v = JsonTValue.text("hello");
-        assertEquals("hello", ((JsonTValue.Text) v).value());
+        assertEquals("hello", v.asText());
         assertEquals("\"hello\"", v.toString());
     }
 
@@ -140,11 +140,12 @@ class JsonTValueTest {
     @Test
     void asText_returnsStringContent() {
         assertEquals("hello", JsonTValue.text("hello").asText());
+        assertEquals("2021-01-01", JsonTValue.date("2021-01-01").asText());
     }
 
     @Test
-    void asText_throwsForNonText() {
-        assertThrows(UnsupportedOperationException.class, () -> JsonTValue.i32(1).asText());
+    void asText_returnsEmptyForNonText() {
+        assertEquals("", JsonTValue.i32(1).asText());
     }
 
     // ─── Sealed instanceof dispatch ───────────────────────────────────────────
@@ -165,7 +166,7 @@ class JsonTValueTest {
         else if (v instanceof JsonTValue.D32)   label = "d32";
         else if (v instanceof JsonTValue.D64)   label = "d64";
         else if (v instanceof JsonTValue.D128)  label = "d128";
-        else if (v instanceof JsonTValue.Text)  label = "text";
+        else if (v instanceof JsonTValue.Str)   label = "text";
         else if (v instanceof JsonTValue.Array) label = "array";
         else label = "unknown";
         assertEquals("i32", label);
