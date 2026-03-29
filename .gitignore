@@ -40,6 +40,7 @@ GEMINI.md
 STATE.md
 settings.local.json
 .claude/settings.*
+.claude/worktrees/
 .claude/CLAUDE.md
 .agents
 .agentignore
