@@ -1,6 +1,8 @@
 package io.github.datakore.jsont.stringify;
 
+import io.github.datakore.jsont.model.JsonTNumber;
 import io.github.datakore.jsont.model.JsonTRow;
+import io.github.datakore.jsont.model.JsonTString;
 import io.github.datakore.jsont.model.JsonTValue;
 
 import java.io.IOException;
@@ -85,20 +87,22 @@ public final class RowWriter {
     private static void writeValue(JsonTValue v, Writer w) throws IOException {
         if (v instanceof JsonTValue.Null)        { w.write("null"); return; }
         if (v instanceof JsonTValue.Bool  b)     { w.write(Boolean.toString(b.value())); return; }
-        if (v instanceof JsonTValue.I16   n)     { w.write(Short.toString(n.value())); return; }
-        if (v instanceof JsonTValue.I32   n)     { w.write(Integer.toString(n.value())); return; }
-        if (v instanceof JsonTValue.I64   n)     { w.write(Long.toString(n.value())); return; }
-        if (v instanceof JsonTValue.U16   n)     { w.write(Integer.toString(n.value())); return; }
-        if (v instanceof JsonTValue.U32   n)     { w.write(Long.toString(n.value())); return; }
-        if (v instanceof JsonTValue.U64   n)     { w.write(Long.toUnsignedString(n.value())); return; }
-        if (v instanceof JsonTValue.D32   n)     { w.write(Float.toString(n.value())); return; }
-        if (v instanceof JsonTValue.D64   n)     { w.write(Double.toString(n.value())); return; }
-        if (v instanceof JsonTValue.D128  n)     { w.write(n.value().toPlainString()); return; }
-        if (v instanceof JsonTValue.Str   s)     { writeQuotedString(s.value().value(), w); return; }
-        if (v instanceof JsonTValue.Date  d)     { w.write(Integer.toString(d.value())); return; }
-        if (v instanceof JsonTValue.Time  t)     { w.write(Integer.toString(t.value())); return; }
-        if (v instanceof JsonTValue.DateTime dt) { w.write(Long.toString(dt.value())); return; }
-        if (v instanceof JsonTValue.Timestamp ts){ w.write(Long.toString(ts.value())); return; }
+
+        if (v instanceof JsonTNumber.I16 n)   { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.I32 n)   { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.I64 n)   { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.U16 n)   { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.U32 n)   { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.U64 n)   { w.write(Long.toUnsignedString(n.value())); return; }
+        if (v instanceof JsonTNumber.D32 n)   { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.D64 n)   { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.D128 n)  { w.write(n.value().toPlainString()); return; }
+
+        if (v instanceof JsonTNumber.Date n)      { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.Time n)      { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.DateTime n)  { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTNumber.Timestamp n) { w.write(String.valueOf(n.value())); return; }
+        if (v instanceof JsonTString  s) { writeQuotedString(s.value(), w); return; }
         if (v instanceof JsonTValue.Enum      e) { w.write(e.value()); return; }
         if (v instanceof JsonTValue.Unspecified) { w.write('_'); return; }
         if (v instanceof JsonTValue.Array     a) { writeArray(a.elements(), w); return; }

@@ -45,10 +45,10 @@ public final class JsonTStrings {
         try {
             long val = (long) value.toDouble();
             return switch (type) {
-                case DATE      -> isDateInt(val) ? Optional.of(new JsonTValue.Date((int) val)) : Optional.empty();
-                case TIME      -> isTimeInt(val) ? Optional.of(new JsonTValue.Time((int) val)) : Optional.empty();
-                case DATETIME  -> isDateTimeInt(val) ? Optional.of(new JsonTValue.DateTime(val)) : Optional.empty();
-                case TIMESTAMP -> Optional.of(new JsonTValue.Timestamp(val));
+                case DATE      -> isDateInt(val) ? Optional.of(new JsonTNumber.Date((int) val)) : Optional.empty();
+                case TIME      -> isTimeInt(val) ? Optional.of(new JsonTNumber.Time((int) val)) : Optional.empty();
+                case DATETIME  -> isDateTimeInt(val) ? Optional.of(new JsonTNumber.DateTime(val)) : Optional.empty();
+                case TIMESTAMP -> Optional.of(new JsonTNumber.Timestamp(val));
                 default        -> Optional.empty();
             };
         } catch (Exception e) {

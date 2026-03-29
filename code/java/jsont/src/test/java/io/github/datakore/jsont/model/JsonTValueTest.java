@@ -29,15 +29,15 @@ class JsonTValueTest {
     @Test
     void i32_wrapsValue() {
         JsonTValue v = JsonTValue.i32(42);
-        assertInstanceOf(JsonTValue.I32.class, v);
-        assertEquals(42, ((JsonTValue.I32) v).value());
+        assertInstanceOf(JsonTNumber.I32.class, v);
+        assertEquals(42, ((JsonTNumber.I32) v).value());
         assertEquals("42", v.toString());
     }
 
     @Test
     void i64_wrapsValue() {
         JsonTValue v = JsonTValue.i64(Long.MAX_VALUE);
-        assertEquals(Long.MAX_VALUE, ((JsonTValue.I64) v).value());
+        assertEquals(Long.MAX_VALUE, ((JsonTNumber.I64) v).value());
     }
 
     @Test
@@ -58,7 +58,7 @@ class JsonTValueTest {
     @Test
     void d64_wrapsDouble() {
         JsonTValue v = JsonTValue.d64(3.14);
-        assertEquals(3.14, ((JsonTValue.D64) v).value());
+        assertEquals(3.14, ((JsonTNumber.D64) v).value());
     }
 
     @Test
@@ -70,7 +70,7 @@ class JsonTValueTest {
     void d128_wrapsValue() {
         BigDecimal bd = new BigDecimal("123.456789012345678901234567890");
         JsonTValue v = JsonTValue.d128(bd);
-        assertEquals(bd, ((JsonTValue.D128) v).value());
+        assertEquals(bd, ((JsonTNumber.D128) v).value());
         assertEquals(bd.toPlainString(), v.toString());
     }
 
@@ -157,16 +157,16 @@ class JsonTValueTest {
         String label;
         if      (v instanceof JsonTValue.Null)  label = "null";
         else if (v instanceof JsonTValue.Bool)  label = "bool";
-        else if (v instanceof JsonTValue.I16)   label = "i16";
-        else if (v instanceof JsonTValue.I32)   label = "i32";
-        else if (v instanceof JsonTValue.I64)   label = "i64";
-        else if (v instanceof JsonTValue.U16)   label = "u16";
-        else if (v instanceof JsonTValue.U32)   label = "u32";
-        else if (v instanceof JsonTValue.U64)   label = "u64";
-        else if (v instanceof JsonTValue.D32)   label = "d32";
-        else if (v instanceof JsonTValue.D64)   label = "d64";
-        else if (v instanceof JsonTValue.D128)  label = "d128";
-        else if (v instanceof JsonTValue.Str)   label = "text";
+        else if (v instanceof JsonTNumber.I16)   label = "i16";
+        else if (v instanceof JsonTNumber.I32)   label = "i32";
+        else if (v instanceof JsonTNumber.I64)   label = "i64";
+        else if (v instanceof JsonTNumber.U16)   label = "u16";
+        else if (v instanceof JsonTNumber.U32)   label = "u32";
+        else if (v instanceof JsonTNumber.U64)   label = "u64";
+        else if (v instanceof JsonTNumber.D32)   label = "d32";
+        else if (v instanceof JsonTNumber.D64)   label = "d64";
+        else if (v instanceof JsonTNumber.D128)  label = "d128";
+        else if (v instanceof JsonTString)      label = "text";
         else if (v instanceof JsonTValue.Array) label = "array";
         else label = "unknown";
         assertEquals("i32", label);

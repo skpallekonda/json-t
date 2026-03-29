@@ -300,7 +300,7 @@ class CrossCompatTest {
     }
 
     private static void assertTextValue(String expected, int idx, JsonTValue val) {
-        assertInstanceOf(JsonTValue.Str.class, val, "field[" + idx + "] expected Text");
+        assertInstanceOf(io.github.datakore.jsont.model.JsonTString.class, val, "field[" + idx + "] expected Text");
         assertEquals(expected, val.asText(), "field[" + idx + "] text mismatch");
     }
 

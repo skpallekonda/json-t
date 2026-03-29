@@ -142,19 +142,19 @@ public final class SchemaInferrer {
 
         for (JsonTValue v : values) {
             if      (v instanceof JsonTValue.Bool)      { hasBool   = true; }
-            else if (v instanceof JsonTValue.I16)       { hasInt    = true; intWidth   = Math.max(intWidth, 16); }
-            else if (v instanceof JsonTValue.I32)       { hasInt    = true; intWidth   = Math.max(intWidth, 32); }
-            else if (v instanceof JsonTValue.I64)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); }
-            else if (v instanceof JsonTValue.U16)       { hasInt    = true; intWidth   = Math.max(intWidth, 32); } // promoted to I32
-            else if (v instanceof JsonTValue.U32)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); } // promoted to I64
-            else if (v instanceof JsonTValue.U64)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); }
-            else if (v instanceof JsonTValue.D32)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 32); }
-            else if (v instanceof JsonTValue.D64)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 64); }
-            else if (v instanceof JsonTValue.D128)      { hasFloat  = true; floatWidth = Math.max(floatWidth, 128); }
-            else if (v instanceof JsonTValue.Str s && s.value() instanceof JsonTString.Plain) { hasString = true; }
-            else {
+            else if (v instanceof JsonTNumber.I16)       { hasInt    = true; intWidth   = Math.max(intWidth, 16); }
+            else if (v instanceof JsonTNumber.I32)       { hasInt    = true; intWidth   = Math.max(intWidth, 32); }
+            else if (v instanceof JsonTNumber.I64)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); }
+            else if (v instanceof JsonTNumber.U16)       { hasInt    = true; intWidth   = Math.max(intWidth, 32); } // promoted to I32
+            else if (v instanceof JsonTNumber.U32)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); } // promoted to I64
+            else if (v instanceof JsonTNumber.U64)       { hasInt    = true; intWidth   = Math.max(intWidth, 64); }
+            else if (v instanceof JsonTNumber.D32)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 32); }
+            else if (v instanceof JsonTNumber.D64)       { hasFloat  = true; floatWidth = Math.max(floatWidth, 64); }
+            else if (v instanceof JsonTNumber.D128)      { hasFloat  = true; floatWidth = Math.max(floatWidth, 128); }
+            else if (v instanceof JsonTString.Plain)    { hasString = true; }
+            else if (v instanceof JsonTString js) {
                 // Semantic string variants or other types.
-                ScalarType sv = semanticTypeOf(v);
+                ScalarType sv = semanticTypeOf(js);
                 if (sv != null) {
                     if (uniformSemantic == null)      uniformSemantic = sv;
                     else if (uniformSemantic != sv)   semanticMixed = true;
@@ -162,13 +162,15 @@ public final class SchemaInferrer {
                     hasOther = true;
                 }
             }
+            else {
+                hasOther = true;
+            }
         }
 
         if (hasString) {
-            // If all non-null values are plain strings, attempt to infer a more specific semantic variant.
             List<String> rawStrings = values.stream()
-                .filter(v -> v instanceof JsonTValue.Str s && s.value() instanceof JsonTString.Plain)
-                .map(v -> ((JsonTValue.Str) v).value().value())
+                .filter(v -> v instanceof JsonTString.Plain)
+                .map(v -> ((JsonTString.Plain) v).value())
                 .toList();
             
             if (rawStrings.size() == values.size()) {
@@ -228,9 +230,7 @@ public final class SchemaInferrer {
      *
      * Used by {@link #inferType} to detect uniformly-typed semantic columns.
      */
-    private static ScalarType semanticTypeOf(JsonTValue v) {
-        if (!(v instanceof JsonTValue.Str s)) return null;
-        JsonTString js = s.value();
+    private static ScalarType semanticTypeOf(JsonTString js) {
         if (js instanceof JsonTString.Nstr)      return ScalarType.NSTR;
         if (js instanceof JsonTString.Uuid)      return ScalarType.UUID;
         if (js instanceof JsonTString.Uri)       return ScalarType.URI;

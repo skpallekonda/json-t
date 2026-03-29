@@ -131,15 +131,15 @@ public final class JsonTRowBuilder {
         if (isStringType(expected) && value.isStringLike()) return true;
         if (isTemporal(expected) && value.isNumeric()) return true;
         return switch (expected) {
-            case I16  -> value instanceof JsonTValue.I16;
-            case I32  -> value instanceof JsonTValue.I32;
-            case I64  -> value instanceof JsonTValue.I64;
-            case U16  -> value instanceof JsonTValue.U16;
-            case U32  -> value instanceof JsonTValue.U32;
-            case U64  -> value instanceof JsonTValue.U64;
-            case D32  -> value instanceof JsonTValue.D32;
-            case D64  -> value instanceof JsonTValue.D64;
-            case D128 -> value instanceof JsonTValue.D128;
+            case I16  -> value instanceof JsonTNumber.I16;
+            case I32  -> value instanceof JsonTNumber.I32;
+            case I64  -> value instanceof JsonTNumber.I64;
+            case U16  -> value instanceof JsonTNumber.U16;
+            case U32  -> value instanceof JsonTNumber.U32;
+            case U64  -> value instanceof JsonTNumber.U64;
+            case D32  -> value instanceof JsonTNumber.D32;
+            case D64  -> value instanceof JsonTNumber.D64;
+            case D128 -> value instanceof JsonTNumber.D128;
             default   -> false;
         };
     }

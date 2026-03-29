@@ -81,7 +81,7 @@ class JsonTRowBuilderTest {
                 .pushChecked(JsonTValue.text("Alice"))
                 .pushChecked(JsonTValue.text("alice@example.com"))
                 .buildChecked();
-        assertInstanceOf(JsonTValue.Str.class, row.get(2));
+        assertInstanceOf(JsonTString.class, row.get(2));
     }
 
     // ── too many values ───────────────────────────────────────────────────────
