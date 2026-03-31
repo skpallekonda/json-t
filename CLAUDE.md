@@ -1,24 +1,38 @@
 # jsont-rust: Engineering Constitution
 
-## 📂 Project Structure
-- **Rust:** `code/rust/jsont` (Reference)
+## Project Structure
+
+- **Rust:** `code/rust/jsont` (Reference implementation)
 - **Java 17:** `code/java/jsont` (Mirror)
 
-## 🏗️ Design Philosophy (HARD CONSTRAINTS)
-- **JsonT Grammar** must be same, irrespective of language implementation
-- **SOLID & Stateless:** Prioritize Single Responsibility. Avoid internal state.
-- **Thread-Safety:** Any essential state must use thread-safe primitives (Atomic/Concurrent in Java, Mutex/Arc in Rust).
-- **Fluid & Idempotent:** Use Fluid APIs and Builder patterns. Ensure operations are idempotent.
-- **Constraint Protocol:** If a task requires violating these principles, **stop and ask for confirmation** on alternate options before proceeding.
+## Context Routing — Load Only What's Needed
 
-## ✍️ Manual Style Guide
-- **Comments:** Explain *why*, not *what*. No boilerplate/docstrings for obvious methods.
-- **Names:** Use `ctx`, `cfg`, `err`, `val` for local variables.
-- **TODO (sasi):** [Enter any specific library bans or mandatory crates here]
-- **Style:** 4-space indentation; K&R braces (`{` on same line as declaration/control statement); trivial single-expression methods collapsed to one line (`@Override public String toString() { return "null"; }`); no blank lines between adjacent single-line record fields.
+| Task type | Files to load |
+| --- | --- |
+| Unfamiliar / general question | `ai_context/00_summary.md` |
+| Design / architecture | `ai_context/01_principles.md` + `ai_context/03_decisions.md` |
+| Current status | `ai_context/04_current_state.md` |
+| Planning / priorities | `ai_context/05_next_actions.md` |
+| Code / implementation | `ai_context/06_technical_map.md` |
+| Feature roadmap | `ai_context/99_features.md` |
 
-## Use Codegraph
-- Always use codegraph to understand the codebase, read `.codegraph/CLAUDE.md` for instructions.
+Never load all files. Start with one; expand only if the answer isn't there.
 
-## 🚨 Safety Valve
-- Monitor usage. If > 95%, execute the Panic Save to `STATE.md` and stop.
+## Code Query Protocol
+
+For any coding task (add feature, fix bug, modify API, understand behavior):
+
+1. **Read `ai_context/06_technical_map.md` first** — it contains full API signatures, types, builders, pipeline patterns, and error hierarchies for both Rust and Java.
+2. **Only open source files** if the technical map is missing a specific detail (e.g., internal algorithm, private helper, exact line to edit).
+3. **Do not open source files speculatively** — the map covers all public interfaces.
+
+## Hard Constraints
+
+- Schema-first, streaming-first — never load full datasets into memory
+- Core layer first; don't introduce Transform/Runtime unless explicitly needed
+- Prefer minimal, incremental changes — no over-engineering
+- Ask before introducing new abstractions or changing architecture scope
+
+## Safety Valve
+
+If context usage > 95%, save state to `STATE.md` and stop.
