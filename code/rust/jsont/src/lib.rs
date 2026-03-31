@@ -21,6 +21,9 @@ pub(crate) mod stringify;
 // transform: RowTransformer impl for JsonTSchema
 pub(crate) mod transform;
 
+// JSON interoperability — bidirectional JSON ↔ JsonTRow conversion.
+pub mod json;
+
 // Streaming row API — bypasses pest and per-row String allocation.
 pub use parse::rows::parse_rows;
 pub use parse::rows::parse_rows_streaming;
@@ -49,7 +52,7 @@ pub use model::constraint::{
     ArrayConstraintBool, ArrayConstraintNbr, JsonTConstraint, LengthConstraintKey,
     ValueConstraintKey,
 };
-pub use model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTValue};
+pub use model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTString, JsonTValue};
 pub use model::enumdef::JsonTEnum;
 pub use model::field::{JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
 pub use model::namespace::{JsonTCatalog, JsonTNamespace};

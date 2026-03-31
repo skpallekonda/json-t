@@ -359,6 +359,7 @@ DiagnosticEvent::fatal(kind) / warning(kind) / info(kind) -> Self
 ```
 
 Key `EventKind` variants:
+
 - `TypeMismatch`, `ShapeMismatch`, `RequiredFieldMissing`, `ConstraintViolation`
 - `RuleViolation`, `ConditionalRequirementViolation`, `UniqueViolation`, `FormatViolation`
 - `DatasetRuleViolation`, `ParseFailure`
@@ -428,9 +429,9 @@ void             writeRows(Iterable<JsonTRow> rows, Writer w) throws IOException
 
 ---
 
-### Model Types
+### Java Model Types
 
-#### `JsonTNamespace` (package: `model`)
+#### Java `JsonTNamespace` (package: `model`)
 
 ```java
 public class JsonTNamespace {
@@ -442,7 +443,7 @@ public class JsonTNamespace {
 }
 ```
 
-#### `JsonTCatalog`
+#### Java `JsonTCatalog`
 
 ```java
 public class JsonTCatalog {
@@ -452,7 +453,7 @@ public class JsonTCatalog {
 }
 ```
 
-#### `JsonTSchema`
+#### Java `JsonTSchema`
 
 ```java
 public class JsonTSchema {
@@ -489,7 +490,7 @@ sealed interface SchemaOperation {
 }
 ```
 
-#### `JsonTField`
+#### Java `JsonTField`
 
 ```java
 public class JsonTField {
@@ -531,7 +532,7 @@ enum ScalarType {
 }
 ```
 
-#### `JsonTValidationBlock`
+#### Java `JsonTValidationBlock`
 
 ```java
 record JsonTValidationBlock(List<List<FieldPath>> uniqueKeys, List<JsonTRule> rules) {
@@ -583,7 +584,7 @@ public class FieldPath {
 }
 ```
 
-#### Data Values
+#### Java Data Values
 
 ```java
 sealed interface JsonTValue {
@@ -815,4 +816,161 @@ try (Reader r = new FileReader("data.jsont")) {
     );
 }
 pipeline.finish();
+```
+
+---
+
+## JSON Interoperability
+
+Bidirectional conversion between standard JSON and `JsonTRow`.
+Schema provides the field-name ↔ position mapping; type coercion is guided by declared `ScalarType`.
+
+**Constraint:** Only **straight** schemas are supported directly. Resolve derived schemas first.
+
+### Type mapping (JSON → JsonT)
+
+| JSON type | Coerced to |
+| --- | --- |
+| `null` | `Null` (always, regardless of declared type) |
+| `boolean` | `Bool` |
+| integer number | `I16`–`U64`, `D32`, `D64`, `D128`, `Date`, `Time`, `DateTime`, `Timestamp` |
+| float number | `D32`, `D64`, `D128`, `Timestamp` |
+| `string` | `Str`, `NStr`, `Uuid`, `Uri`, `Email`, `Hostname`, `Ipv4`, `Ipv6`, `Tsz`, `Inst`, `Duration`, `Base64`, `Hex`, `Oid` |
+| `array` | `Array(JsonTArray)` — items coerced per element |
+| `object` | Not supported without nested schema resolution |
+
+**`Unspecified` on output:** mapped to JSON `null` (no JsonT wire token in JSON).
+
+---
+
+## 🟥 Rust JSON Interop (`json` module)
+
+**Module:** `code/rust/jsont/src/json/`
+
+```rust
+// ── Input/output mode enums ──────────────────────────────────────────────────
+pub enum JsonInputMode  { Ndjson, Array, Object }   // Default: Ndjson
+pub enum JsonOutputMode { Ndjson, Array }            // Default: Ndjson
+
+// ── Policy enums ─────────────────────────────────────────────────────────────
+pub enum UnknownFieldPolicy { Skip, Reject }         // Default: Skip
+pub enum MissingFieldPolicy { UseDefault, Reject }   // Default: UseDefault
+
+// ── Reader ────────────────────────────────────────────────────────────────────
+JsonReader::with_schema(schema: JsonTSchema) -> JsonReaderBuilder
+
+JsonReaderBuilder
+  .mode(JsonInputMode) -> Self
+  .unknown_fields(UnknownFieldPolicy) -> Self
+  .missing_fields(MissingFieldPolicy) -> Self
+  .build() -> JsonReader
+
+JsonReader
+  .read(&str, on_row: impl FnMut(JsonTRow)) -> Result<usize, JsonTError>
+  .read_streaming<R: BufRead>(reader: R, on_row: impl FnMut(JsonTRow)) -> Result<usize, JsonTError>
+  // Ndjson: true O(1) streaming; Array/Object: buffers full input
+
+// ── Writer ────────────────────────────────────────────────────────────────────
+JsonWriter::with_schema(schema: JsonTSchema) -> JsonWriterBuilder
+
+JsonWriterBuilder
+  .mode(JsonOutputMode) -> Self
+  .pretty(bool) -> Self
+  .build() -> JsonWriter
+
+JsonWriter
+  .write_row<W: Write>(row: &JsonTRow, w: &mut W) -> Result<(), JsonTError>
+  .write_rows<W: Write>(rows: &[JsonTRow], w: &mut W) -> Result<(), JsonTError>
+  .write_streaming<I, W>(iter: I, w: &mut W) -> Result<(), JsonTError>
+      where I: Iterator<Item = JsonTRow>, W: Write
+```
+
+---
+
+## 🟦 Java JSON Interop (`json` package)
+
+**Package:** `io.github.datakore.jsont.json`
+
+```java
+// ── Input/output mode enums ──────────────────────────────────────────────────
+enum JsonInputMode  { NDJSON, ARRAY, OBJECT }   // Default: NDJSON
+enum JsonOutputMode { NDJSON, ARRAY }            // Default: NDJSON
+
+// ── Policy enums ─────────────────────────────────────────────────────────────
+enum UnknownFieldPolicy { SKIP, REJECT }         // Default: SKIP
+enum MissingFieldPolicy { USE_DEFAULT, REJECT }  // Default: USE_DEFAULT
+
+// ── Reader ────────────────────────────────────────────────────────────────────
+JsonReader.withSchema(JsonTSchema schema) -> JsonReaderBuilder
+
+JsonReaderBuilder
+  .mode(JsonInputMode) -> JsonReaderBuilder
+  .unknownFields(UnknownFieldPolicy) -> JsonReaderBuilder
+  .missingFields(MissingFieldPolicy) -> JsonReaderBuilder
+  .build() -> JsonReader
+
+JsonReader
+  .read(String input, RowConsumer consumer) -> int
+  .readStreaming(Reader reader, RowConsumer consumer) throws IOException -> int
+  // Ndjson: true O(1) streaming; Array/Object: buffers full input
+
+// ── Writer ────────────────────────────────────────────────────────────────────
+JsonWriter.withSchema(JsonTSchema schema) -> JsonWriterBuilder
+
+JsonWriterBuilder
+  .mode(JsonOutputMode) -> JsonWriterBuilder
+  .pretty() -> JsonWriterBuilder
+  .build() -> JsonWriter
+
+JsonWriter
+  .writeRow(JsonTRow row) -> String
+  .writeRow(JsonTRow row, Writer w) throws IOException
+  .writeRows(Iterable<JsonTRow> rows, Writer w) throws IOException
+```
+
+### `JsonT` facade shortcuts
+
+```java
+JsonT.jsonReader(JsonTSchema schema) -> JsonReaderBuilder   // = JsonReader.withSchema(schema)
+JsonT.jsonWriter(JsonTSchema schema) -> JsonWriterBuilder   // = JsonWriter.withSchema(schema)
+JsonT.fromJson(String jsonObject, JsonTSchema schema) -> JsonTRow
+JsonT.toJson(JsonTRow row, JsonTSchema schema) -> String
+```
+
+### Java JSON pipeline example
+
+```java
+JsonTSchema schema = ns.findSchema("Order").orElseThrow();
+
+JsonReader  reader   = JsonT.jsonReader(schema).mode(JsonInputMode.NDJSON).build();
+JsonWriter  writer   = JsonT.jsonWriter(schema).mode(JsonOutputMode.NDJSON).build();
+ValidationPipeline pipeline = ValidationPipeline.builder(schema).build();
+
+try (Reader  src = new FileReader("orders.json");
+     Writer  dst = new FileWriter("orders.jsont")) {
+    reader.readStreaming(src, row ->
+        pipeline.validateEach(List.of(row), clean -> {
+            try { writer.writeRow(clean, dst); dst.write('\n'); }
+            catch (IOException e) { throw new UncheckedIOException(e); }
+        })
+    );
+}
+pipeline.finish();
+```
+
+### Rust JSON pipeline example
+
+```rust
+let schema = registry.get("Order").unwrap().clone();
+let reader = JsonReader::with_schema(schema.clone()).build();
+let writer = JsonWriter::with_schema(schema).build();
+
+let f = File::open("orders.json")?;
+let reader_buf = BufReader::new(f);
+let mut out = BufWriter::new(File::create("orders.jsont")?);
+
+reader.read_streaming(reader_buf, |row| {
+    writer.write_row(&row, &mut out).unwrap();
+    out.write_all(b"\n").unwrap();
+})?;
 ```

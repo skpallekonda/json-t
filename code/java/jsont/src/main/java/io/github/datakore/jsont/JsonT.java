@@ -1,6 +1,10 @@
 package io.github.datakore.jsont;
 
 import io.github.datakore.jsont.builder.JsonTSchemaBuilder;
+import io.github.datakore.jsont.json.JsonReader;
+import io.github.datakore.jsont.json.JsonReaderBuilder;
+import io.github.datakore.jsont.json.JsonWriter;
+import io.github.datakore.jsont.json.JsonWriterBuilder;
 import io.github.datakore.jsont.model.JsonTNamespace;
 import io.github.datakore.jsont.model.JsonTRow;
 import io.github.datakore.jsont.model.JsonTSchema;
@@ -98,5 +102,49 @@ public final class JsonT {
     /** Returns a lazy row iterator over {@code reader}. Caller must close the iterator. */
     public static RowIter rowIter(Reader reader) {
         return JsonTParser.rowIter(reader);
+    }
+
+    // ── JSON interoperability ─────────────────────────────────────────────────
+
+    /**
+     * Returns a builder for a {@link JsonReader} bound to the given schema.
+     * Shortcut for {@code JsonReader.withSchema(schema)}.
+     */
+    public static JsonReaderBuilder jsonReader(JsonTSchema schema) {
+        return JsonReader.withSchema(schema);
+    }
+
+    /**
+     * Returns a builder for a {@link JsonWriter} bound to the given schema.
+     * Shortcut for {@code JsonWriter.withSchema(schema)}.
+     */
+    public static JsonWriterBuilder jsonWriter(JsonTSchema schema) {
+        return JsonWriter.withSchema(schema);
+    }
+
+    /**
+     * Convenience: parse a single JSON object string into one {@link JsonTRow}.
+     *
+     * @param jsonObject a JSON object literal, e.g. {@code {"id":1,"name":"Alice"}}
+     * @param schema     the schema that defines field names and types
+     * @return a positional row
+     * @throws io.github.datakore.jsont.error.JsonTError.Parse on malformed JSON
+     */
+    public static JsonTRow fromJson(String jsonObject, JsonTSchema schema) {
+        JsonTRow[] holder = new JsonTRow[1];
+        JsonReader.withSchema(schema).build().read(jsonObject, row -> holder[0] = row);
+        return holder[0];
+    }
+
+    /**
+     * Convenience: serialise a single {@link JsonTRow} to a JSON object string.
+     *
+     * @param row    the row to serialise
+     * @param schema the schema that maps positions to JSON key names
+     * @return a JSON object string
+     * @throws io.github.datakore.jsont.error.JsonTError.Stringify on schema errors
+     */
+    public static String toJson(JsonTRow row, JsonTSchema schema) {
+        return JsonWriter.withSchema(schema).build().writeRow(row);
     }
 }

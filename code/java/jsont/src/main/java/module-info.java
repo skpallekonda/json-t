@@ -35,6 +35,7 @@ module io.github.datakore.jsont {
     exports io.github.datakore.jsont.validate;
     exports io.github.datakore.jsont.transform;
     exports io.github.datakore.jsont.diagnostic;
+    exports io.github.datakore.jsont.json;
 
     // ── io.github.datakore.jsont.internal  is NOT exported ──────────────────
 
