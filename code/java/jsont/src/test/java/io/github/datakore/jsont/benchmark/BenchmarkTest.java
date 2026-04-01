@@ -24,13 +24,22 @@
 // =============================================================================
 package io.github.datakore.jsont.benchmark;
 
+import io.github.datakore.jsont.builder.JsonTFieldBuilder;
+import io.github.datakore.jsont.builder.JsonTSchemaBuilder;
 import io.github.datakore.jsont.builder.SchemaRegistry;
 import io.github.datakore.jsont.diagnostic.DiagnosticSink;
 import io.github.datakore.jsont.error.JsonTError;
+import io.github.datakore.jsont.json.JsonInputMode;
+import io.github.datakore.jsont.json.JsonOutputMode;
+import io.github.datakore.jsont.json.JsonReader;
+import io.github.datakore.jsont.json.JsonWriter;
+import io.github.datakore.jsont.model.FieldKind;
+import io.github.datakore.jsont.model.JsonTField;
 import io.github.datakore.jsont.model.JsonTNamespace;
 import io.github.datakore.jsont.model.JsonTRow;
 import io.github.datakore.jsont.model.JsonTSchema;
 import io.github.datakore.jsont.model.JsonTValue;
+import io.github.datakore.jsont.model.ScalarType;
 import io.github.datakore.jsont.parse.JsonTParser;
 import io.github.datakore.jsont.stringify.RowWriter;
 import io.github.datakore.jsont.transform.RowTransformer;
@@ -378,10 +387,110 @@ class BenchmarkTest {
     }
 
     // =========================================================================
+    // JSON flat schema helper
+    // =========================================================================
+
+    /**
+     * Build a flat straight schema for JSON reading.
+     *
+     * {@code JsonWriter} serializes enum fields (FieldKind.OBJECT) as plain JSON
+     * strings.  {@code JsonReader} cannot handle Object-kind fields, so we replace
+     * them with optional {@code str} scalars for round-trip reading.
+     * All scalar fields are preserved as-is.
+     */
+    /**
+     * Build a flat straight schema for JSON reading.
+     *
+     * <p>{@code JsonWriter} writes values by their runtime {@code JsonTValue} variant, not
+     * their schema type.  Benchmark rows store temporal fields (datetime, time, duration) as
+     * {@code JsonTValue.text(...)}, so the writer emits them as JSON strings.  {@code JsonReader}
+     * then tries to coerce those strings using the schema type — and {@code datetime}/{@code time}
+     * only accept JSON integers, causing a type error.
+     *
+     * <p>Fix: map every field to a JSON-compatible reading type:
+     * <ul>
+     *   <li>{@code BOOL}              → {@code BOOL}   (JSON true/false)</li>
+     *   <li>Pure numeric              → keep           (JSON numbers read back correctly)</li>
+     *   <li>Everything else           → {@code STR}    ({@code coerce_scalar(STR)} accepts JSON
+     *       strings <em>and</em> JSON integers, so integer-valued timestamps work too)</li>
+     *   <li>Object (enum)             → {@code STR}    (enum values are written as JSON strings)</li>
+     * </ul>
+     */
+    private static JsonTSchema flatSchemaForJson(JsonTSchema schema) throws Exception {
+        JsonTSchemaBuilder builder = JsonTSchemaBuilder.straight(schema.name());
+        for (JsonTField field : schema.fields()) {
+            ScalarType scalar;
+            if (field.kind().isScalar()) {
+                scalar = switch (field.scalarType()) {
+                    case BOOL -> ScalarType.BOOL;
+                    case I16, I32, I64, U16, U32, U64, D32, D64, D128 -> field.scalarType();
+                    // All string-semantic and temporal types → STR.
+                    // coerce_scalar(STR) accepts JSON strings *and* JSON integers,
+                    // so integer-stored timestamps round-trip correctly too.
+                    default -> ScalarType.STR;
+                };
+            } else {
+                // Object/enum fields are written as JSON strings
+                scalar = ScalarType.STR;
+            }
+            JsonTFieldBuilder fb = JsonTFieldBuilder.scalar(field.name(), scalar);
+            if (field.optional()) fb = fb.optional();
+            builder.fieldFrom(fb);
+        }
+        return builder.build();
+    }
+
+    // =========================================================================
+    // JSON steps — Stringify and Parse using NDJSON format
+    // =========================================================================
+
+    private record JsonStringifyResult(Path path, long writeNs, long fileBytes) {}
+
+    /** Write each row as JSON NDJSON — row build time excluded (same as JsonT). */
+    private JsonStringifyResult stepStringifyJson(int count, JsonTSchema schema) throws IOException {
+        Path path = Path.of(System.getProperty("java.io.tmpdir"),
+                "jsont_wct_bench_" + count + ".json");
+        JsonWriter writer = JsonWriter.withSchema(schema).mode(JsonOutputMode.NDJSON).build();
+
+        long writeNs = 0L;
+        try (BufferedWriter w = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
+            for (int i = 0; i < count; i++) {
+                JsonTRow row = makeCricketRow(i);
+                long ts = System.nanoTime();
+                writer.writeRow(row, w);
+                w.write('\n');
+                writeNs += System.nanoTime() - ts;
+            }
+        }
+        return new JsonStringifyResult(path, writeNs, Files.size(path));
+    }
+
+    /** Stream-parse JSON NDJSON from file using the flat schema (enum fields → str). */
+    private ParseResult stepParseJson(Path path, JsonTSchema schema) throws Exception {
+        long loadedBytes = Files.size(path);
+        Runtime.getRuntime().gc();
+        long memBefore = heapSnapshot();
+
+        JsonTSchema flat = flatSchemaForJson(schema);
+        JsonReader reader = JsonReader.withSchema(flat).mode(JsonInputMode.NDJSON).build();
+
+        int[] count = {0};
+        long t0 = System.nanoTime();
+        try (var br = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            reader.readStreaming(br, row -> count[0]++);
+        }
+        long parseNs = System.nanoTime() - t0;
+
+        long peakHeap = Math.max(0, heapSnapshot() - memBefore);
+        double ms = Math.max(1, parseNs / 1_000_000.0);
+        return new ParseResult(count[0], parseNs, count[0] / ms, loadedBytes, peakHeap);
+    }
+
+    // =========================================================================
     // Core benchmark runner — all 4 options for a given count
     // =========================================================================
 
-    private void runBenchmark(int count) throws Exception {
+    private void runBenchmark(int count, boolean withJson) throws Exception {
         boolean parallel = count >= 100_000;
         String label = fmtCount(count);
         int cpus = Runtime.getRuntime().availableProcessors();
@@ -391,25 +500,49 @@ class BenchmarkTest {
 
         Schemas s = loadSchemas();
 
-        // ── Option 1: Stringify ──────────────────────────────────────────────
+        // ── [1] Stringify (JsonT) ─────────────────────────────────────────────
         StringifyResult sr = stepStringify(count);
-        System.out.printf("  [1] Stringify   %6s rows | build %10s | stringify %10s | file %12s%n",
+        System.out.printf("  [1] Stringify (JsonT) %6s rows | build %10s | write %10s | file %12s%n",
                 label, fmtMs(sr.buildNs()), fmtMs(sr.stringifyNs()), fmtBytes(sr.fileBytes()));
 
-        // ── Option 2: Parse Only ─────────────────────────────────────────────
+        // ── [2] Stringify (JSON) — optional ──────────────────────────────────
+        JsonStringifyResult jsonSr = null;
+        if (withJson) {
+            jsonSr = stepStringifyJson(count, s.cricket());
+            double sizePct = ((double) jsonSr.fileBytes() / sr.fileBytes() - 1.0) * 100.0;
+            System.out.printf("  [2] Stringify (JSON ) %6s rows |              | write %10s | file %12s | %+.1f%% vs JsonT%n",
+                    label, fmtMs(jsonSr.writeNs()), fmtBytes(jsonSr.fileBytes()), sizePct);
+        }
+
+        // ── [3] Parse (JsonT) ─────────────────────────────────────────────────
+        int jsontParseStep = withJson ? 3 : 2;
         ParseResult pr = stepParse(sr.path());
-        System.out.printf("  [2] Parse       %6s rows | time  %10s | %8.1f rows/ms | loaded %12s | peak %10s%n",
-                label, fmtMs(pr.parseNs()), pr.rowsPerMs(), fmtBytes(pr.loadedBytes()), fmtBytes(pr.peakHeap()));
+        System.out.printf("  [%d] Parse     (JsonT) %6s rows | time  %10s | %8.1f rows/ms | loaded %12s | peak %10s%n",
+                jsontParseStep, label, fmtMs(pr.parseNs()), pr.rowsPerMs(),
+                fmtBytes(pr.loadedBytes()), fmtBytes(pr.peakHeap()));
 
-        // ── Option 3: Parse + Validate ───────────────────────────────────────
+        // ── [4] Parse (JSON) — optional ───────────────────────────────────────
+        if (withJson && jsonSr != null) {
+            ParseResult jpr = stepParseJson(jsonSr.path(), s.cricket());
+            System.out.printf("  [4] Parse     (JSON ) %6s rows | time  %10s | %8.1f rows/ms | loaded %12s | peak %10s%n",
+                    label, fmtMs(jpr.parseNs()), jpr.rowsPerMs(),
+                    fmtBytes(jpr.loadedBytes()), fmtBytes(jpr.peakHeap()));
+            Files.deleteIfExists(jsonSr.path());
+        }
+
+        // ── Parse + Validate ──────────────────────────────────────────────────
+        int stepVal = withJson ? 5 : 3;
         ValidateResult vr = stepValidate(sr.path(), s.cricket(), parallel);
-        System.out.printf("  [3] Parse+Val   %6s rows | time  %10s | %8.1f rows/ms | clean %6s | peak %10s%n",
-                label, fmtMs(vr.elapsedNs()), vr.rowsPerMs(), fmtCount(vr.clean()), fmtBytes(vr.peakHeap()));
+        System.out.printf("  [%d] Parse+Val        %6s rows | time  %10s | %8.1f rows/ms | clean %6s | peak %10s%n",
+                stepVal, label, fmtMs(vr.elapsedNs()), vr.rowsPerMs(),
+                fmtCount(vr.clean()), fmtBytes(vr.peakHeap()));
 
-        // ── Option 4: Parse + Validate + Transform ───────────────────────────
+        // ── Parse + Validate + Transform ──────────────────────────────────────
+        int stepXfm = withJson ? 6 : 4;
         TransformResult tr = stepTransform(sr.path(), s.cricket(), s.broadcast(), s.registry(), parallel);
-        System.out.printf("  [4] Parse+Val+T %6s rows | time  %10s | %8.1f rows/ms | xfrmd %6s | peak %10s%n",
-                label, fmtMs(tr.elapsedNs()), tr.rowsPerMs(), fmtCount(tr.transformed()), fmtBytes(tr.peakHeap()));
+        System.out.printf("  [%d] Parse+Val+T      %6s rows | time  %10s | %8.1f rows/ms | xfrmd %6s | peak %10s%n",
+                stepXfm, label, fmtMs(tr.elapsedNs()), tr.rowsPerMs(),
+                fmtCount(tr.transformed()), fmtBytes(tr.peakHeap()));
 
         Files.deleteIfExists(sr.path());
     }
@@ -421,31 +554,31 @@ class BenchmarkTest {
     @Test
     void bench_1k() throws Exception {
         System.out.println("\n=== WCT Benchmark  1K records ===");
-        runBenchmark(1_000);
+        runBenchmark(1_000, true);
     }
 
     @Test
     void bench_10k() throws Exception {
         System.out.println("\n=== WCT Benchmark  10K records ===");
-        runBenchmark(10_000);
+        runBenchmark(10_000, true);
     }
 
     @Test
     void bench_100k() throws Exception {
         System.out.println("\n=== WCT Benchmark  100K records ===");
-        runBenchmark(100_000);
+        runBenchmark(100_000, true);
     }
 
     @Test
     void bench_1m() throws Exception {
         System.out.println("\n=== WCT Benchmark  1M records ===");
-        runBenchmark(1_000_000);
+        runBenchmark(1_000_000, true);
     }
 
-    /** Requires significant RAM and several minutes. */
+    /** Requires significant RAM and several minutes. JSON steps excluded at 10M. */
     @Test
     void bench_10m() throws Exception {
         System.out.println("\n=== WCT Benchmark  10M records ===");
-        runBenchmark(10_000_000);
+        runBenchmark(10_000_000, false);
     }
 }

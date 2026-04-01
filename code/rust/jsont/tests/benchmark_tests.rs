@@ -39,6 +39,7 @@ use jsont::{
 };
 use jsont::{parse_rows_streaming, RowIter};
 use jsont::{write_row, JsonTRow, JsonTRowBuilder, JsonTValue, Parseable};
+use jsont::json::{JsonInputMode, JsonOutputMode, JsonReader, JsonWriter};
 
 // =============================================================================
 // Tracking allocator
@@ -431,11 +432,126 @@ fn step_parse_validate_transform(
     }
 }
 
+/// Build a flat straight schema for JSON reading.
+///
+/// `JsonWriter` writes values by their runtime `JsonTValue` variant, not their schema type.
+/// The CricketMatch benchmark rows store temporal fields (datetime, time, duration) as
+/// `JsonTValue::Str(...)`, so `JsonWriter` emits them as JSON strings.  `JsonReader` then
+/// tries to coerce those strings using the *schema* type — and `datetime`/`time` only accept
+/// JSON integers, causing a type error.
+///
+/// Fix: map every field to a JSON-compatible reading type:
+/// - `Bool`          → `Bool`   (JSON true/false)
+/// - Pure numeric    → keep     (JSON numbers read back as the same numeric type)
+/// - Everything else → `Str`    (`JsonReader::coerce_scalar(Str)` accepts JSON strings *and*
+///                               JSON integers, so integer-valued timestamps also work)
+/// - Object (enum)   → `Str`    (enum values are written as JSON strings)
+fn flat_schema_for_json(schema: &jsont::JsonTSchema) -> jsont::JsonTSchema {
+    use jsont::{JsonTFieldBuilder, JsonTSchemaBuilder, JsonTFieldKind, ScalarType, SchemaKind};
+
+    let fields = match &schema.kind {
+        SchemaKind::Straight { fields } => fields,
+        _ => panic!("flat_schema_for_json requires a straight schema"),
+    };
+
+    let mut builder = JsonTSchemaBuilder::straight(&schema.name);
+    for field in fields {
+        let (scalar, optional) = match &field.kind {
+            JsonTFieldKind::Scalar { field_type, optional, .. } => {
+                let s = match field_type.scalar {
+                    ScalarType::Bool => ScalarType::Bool,
+                    ScalarType::I16 | ScalarType::I32 | ScalarType::I64
+                    | ScalarType::U16 | ScalarType::U32 | ScalarType::U64
+                    | ScalarType::D32 | ScalarType::D64 | ScalarType::D128 => field_type.scalar,
+                    // All string-semantic and temporal types → Str.
+                    // coerce_scalar(Str) accepts JSON strings *and* JSON integers,
+                    // so integer-stored timestamps round-trip correctly too.
+                    _ => ScalarType::Str,
+                };
+                (s, *optional)
+            }
+            JsonTFieldKind::Object { optional, .. } => (ScalarType::Str, *optional),
+        };
+        let mut fb = JsonTFieldBuilder::scalar(&field.name, scalar);
+        if optional { fb = fb.optional(); }
+        builder = builder.field_from(fb).unwrap();
+    }
+    builder.build().unwrap()
+}
+
+struct JsonStringifyResult {
+    path: std::path::PathBuf,
+    write_time: Duration,
+    file_bytes: usize,
+}
+
+/// Write each row as JSON NDJSON to a temp file.
+/// Row build time is not measured (same cost as JsonT — comparison is write-only).
+fn step_stringify_json(count: usize, schema: &jsont::JsonTSchema) -> JsonStringifyResult {
+    let path = std::env::temp_dir()
+        .join(format!("jsont_wct_bench_{}.json", count));
+    let file = File::create(&path).expect("cannot create temp file");
+    let mut w = BufWriter::new(file);
+
+    let writer = JsonWriter::with_schema(schema.clone())
+        .mode(JsonOutputMode::Ndjson)
+        .build();
+
+    let mut write_ns = 0u64;
+    for i in 0u64..count as u64 {
+        let row = make_cricket_row(i);
+        let ts = Instant::now();
+        writer.write_row(&row, &mut w).expect("json write failed");
+        w.write_all(b"\n").expect("write failed");
+        write_ns += ts.elapsed().as_nanos() as u64;
+    }
+    w.flush().expect("flush failed");
+
+    let file_bytes = fs::metadata(&path).expect("metadata failed").len() as usize;
+    JsonStringifyResult {
+        path,
+        write_time: Duration::from_nanos(write_ns),
+        file_bytes,
+    }
+}
+
+/// Stream-parse JSON NDJSON rows from file — O(1) memory, one row live at a time.
+/// Uses a flat schema (enum Object fields mapped to Str) so `JsonReader` can
+/// handle all 92 fields without requiring schema resolution.
+fn step_parse_json(path: &std::path::Path, schema: &jsont::JsonTSchema) -> ParseResult {
+    let baseline = reset_peak();
+    let loaded_bytes = fs::metadata(path).expect("metadata failed").len() as usize;
+
+    let file = File::open(path).expect("cannot open temp file");
+    let reader_buf = BufReader::new(file);
+
+    let flat = flat_schema_for_json(schema);
+    let json_reader = JsonReader::with_schema(flat)
+        .mode(JsonInputMode::Ndjson)
+        .build();
+
+    let t0 = Instant::now();
+    let mut count = 0usize;
+    json_reader.read_streaming(reader_buf, |_row| count += 1)
+        .expect("json parse failed");
+    let parse_time = t0.elapsed();
+
+    let peak_heap = peak_above(baseline);
+    let ms = parse_time.as_millis().max(1) as f64;
+    ParseResult {
+        row_count: count,
+        parse_time,
+        throughput_rms: count as f64 / ms,
+        loaded_bytes,
+        peak_heap,
+    }
+}
+
 // =============================================================================
 // Core benchmark runner — executes all 4 options for a given count
 // =============================================================================
 
-fn run_wct_benchmark(count: usize) {
+fn run_wct_benchmark(count: usize, with_json: bool) {
     let label = fmt_count(count);
     println!("  Schema : CricketMatch (92 fields, ~1 KB/row) | MatchBroadcastSummary (derived)");
     println!("  Workers: single-threaded (Rust sequential validation)");
@@ -443,20 +559,38 @@ fn run_wct_benchmark(count: usize) {
     // ── Load schemas once per run ─────────────────────────────────────────────
     let (cricket, broadcast, registry) = load_schemas();
 
-    // ── Option 1: Stringify ───────────────────────────────────────────────────
+    // ── [1] Stringify (JsonT) ─────────────────────────────────────────────────
     let sr = step_stringify(count);
     println!(
-        "  [1] Stringify   {:>6} rows | build {:>10} | stringify {:>10} | file {:>12}",
+        "  [1] Stringify (JsonT) {:>6} rows | build {:>10} | write {:>10} | file {:>12}",
         label,
         fmt_duration(sr.build_time),
         fmt_duration(sr.stringify_time),
         fmt_bytes(sr.file_bytes),
     );
 
-    // ── Option 2: Parse Only ──────────────────────────────────────────────────
+    // ── [2] Stringify (JSON) — optional ──────────────────────────────────────
+    let json_sr: Option<JsonStringifyResult> = if with_json {
+        let r = step_stringify_json(count, &cricket);
+        let size_pct = ((r.file_bytes as f64 / sr.file_bytes as f64) - 1.0) * 100.0;
+        println!(
+            "  [2] Stringify (JSON ) {:>6} rows |              | write {:>10} | file {:>12} | {:+.1}% vs JsonT",
+            label,
+            fmt_duration(r.write_time),
+            fmt_bytes(r.file_bytes),
+            size_pct,
+        );
+        Some(r)
+    } else {
+        None
+    };
+
+    // ── [3] Parse (JsonT) — step number shifts if JSON included ──────────────
+    let jsont_parse_step = if with_json { 3 } else { 2 };
     let pr = step_parse(&sr.path);
     println!(
-        "  [2] Parse       {:>6} rows | time  {:>10} | {:>8.1} rows/ms | loaded {:>12} | peak {:>10}",
+        "  [{}] Parse     (JsonT) {:>6} rows | time  {:>10} | {:>8.1} rows/ms | loaded {:>12} | peak {:>10}",
+        jsont_parse_step,
         label,
         fmt_duration(pr.parse_time),
         pr.throughput_rms,
@@ -464,10 +598,26 @@ fn run_wct_benchmark(count: usize) {
         fmt_bytes(pr.peak_heap),
     );
 
-    // ── Option 3: Parse + Validate ────────────────────────────────────────────
+    // ── [4] Parse (JSON) — optional ──────────────────────────────────────────
+    if let Some(ref jsr) = json_sr {
+        let jpr = step_parse_json(&jsr.path, &cricket);
+        println!(
+            "  [4] Parse     (JSON ) {:>6} rows | time  {:>10} | {:>8.1} rows/ms | loaded {:>12} | peak {:>10}",
+            label,
+            fmt_duration(jpr.parse_time),
+            jpr.throughput_rms,
+            fmt_bytes(jpr.loaded_bytes),
+            fmt_bytes(jpr.peak_heap),
+        );
+        let _ = fs::remove_file(&jsr.path);
+    }
+
+    // ── Parse + Validate ──────────────────────────────────────────────────────
+    let step_val = if with_json { 5 } else { 3 };
     let vr = step_parse_validate(&sr.path, cricket.clone());
     println!(
-        "  [3] Parse+Val   {:>6} rows | time  {:>10} | {:>8.1} rows/ms | clean {:>6} | peak {:>10}",
+        "  [{}] Parse+Val        {:>6} rows | time  {:>10} | {:>8.1} rows/ms | clean {:>6} | peak {:>10}",
+        step_val,
         label,
         fmt_duration(vr.elapsed),
         vr.throughput_rms,
@@ -475,10 +625,12 @@ fn run_wct_benchmark(count: usize) {
         fmt_bytes(vr.peak_heap),
     );
 
-    // ── Option 4: Parse + Validate + Transform ────────────────────────────────
+    // ── Parse + Validate + Transform ──────────────────────────────────────────
+    let step_xfm = if with_json { 6 } else { 4 };
     let tr = step_parse_validate_transform(&sr.path, cricket, broadcast, registry);
     println!(
-        "  [4] Parse+Val+T {:>6} rows | time  {:>10} | {:>8.1} rows/ms | xfrmd {:>6} | peak {:>10}",
+        "  [{}] Parse+Val+T      {:>6} rows | time  {:>10} | {:>8.1} rows/ms | xfrmd {:>6} | peak {:>10}",
+        step_xfm,
         label,
         fmt_duration(tr.elapsed),
         tr.throughput_rms,
@@ -496,32 +648,33 @@ fn run_wct_benchmark(count: usize) {
 #[test]
 fn bench_wct_1k() {
     println!("\n=== WCT Benchmark  1K records ===");
-    run_wct_benchmark(1_000);
+    run_wct_benchmark(1_000, true);
 }
 
 #[test]
 fn bench_wct_10k() {
     println!("\n=== WCT Benchmark  10K records ===");
-    run_wct_benchmark(10_000);
+    run_wct_benchmark(10_000, true);
 }
 
 #[test]
 fn bench_wct_100k() {
     println!("\n=== WCT Benchmark  100K records ===");
-    run_wct_benchmark(100_000);
+    run_wct_benchmark(100_000, true);
 }
 
 #[test]
 fn bench_wct_1m() {
     println!("\n=== WCT Benchmark  1M records ===");
-    run_wct_benchmark(1_000_000);
+    run_wct_benchmark(1_000_000, true);
 }
 
 /// Pipeline is fully streaming — row memory is O(1).
 /// Main cost is uniqueness-constraint HashSets (~640 MB per unique field at 10M rows)
 /// and the ~90s stringify time. Omit from regular runs.
+/// JSON steps are excluded at 10M — use 1M for format comparison.
 #[test]
 fn bench_wct_10m() {
     println!("\n=== WCT Benchmark  10M records ===");
-    run_wct_benchmark(10_000_000);
+    run_wct_benchmark(10_000_000, false);
 }

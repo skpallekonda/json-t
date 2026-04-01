@@ -29,13 +29,17 @@ class JsonInteropTest {
     // Order: id(i64) | product(str) | qty(i32) | active(bool) | price(d64, optional)
 
     private static JsonTSchema orderSchema() {
-        return JsonTSchemaBuilder.straight("Order")
-                .fieldFrom(JsonTFieldBuilder.scalar("id",      ScalarType.I64))
-                .fieldFrom(JsonTFieldBuilder.scalar("product", ScalarType.STR))
-                .fieldFrom(JsonTFieldBuilder.scalar("qty",     ScalarType.I32))
-                .fieldFrom(JsonTFieldBuilder.scalar("active",  ScalarType.BOOL))
-                .fieldFrom(JsonTFieldBuilder.scalar("price",   ScalarType.D64).optional())
-                .build();
+        try {
+            return JsonTSchemaBuilder.straight("Order")
+                    .fieldFrom(JsonTFieldBuilder.scalar("id",      ScalarType.I64))
+                    .fieldFrom(JsonTFieldBuilder.scalar("product", ScalarType.STR))
+                    .fieldFrom(JsonTFieldBuilder.scalar("qty",     ScalarType.I32))
+                    .fieldFrom(JsonTFieldBuilder.scalar("active",  ScalarType.BOOL))
+                    .fieldFrom(JsonTFieldBuilder.scalar("price",   ScalarType.D64).optional())
+                    .build();
+        } catch (Exception e) {
+            throw new RuntimeException("orderSchema build failed", e);
+        }
     }
 
     private static JsonTRow orderRow(long id, String product, int qty, boolean active, Double price) {
@@ -221,7 +225,7 @@ class JsonInteropTest {
         assertThrows(JsonTError.Parse.class,
                 () -> reader.read(
                         "{\"id\":1,\"product\":\"X\",\"qty\":1,\"active\":true,\"price\":null,\"extra\":\"oops\"}",
-                        _ -> {}));
+                        row -> {}));
     }
 
     @Test
@@ -231,7 +235,7 @@ class JsonInteropTest {
                 .missingFields(MissingFieldPolicy.REJECT)
                 .build();
         assertThrows(JsonTError.Parse.class,
-                () -> reader.read("{\"id\":1,\"product\":\"X\"}", _ -> {}));
+                () -> reader.read("{\"id\":1,\"product\":\"X\"}", row -> {}));
     }
 
     @Test
