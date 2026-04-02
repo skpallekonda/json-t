@@ -5,12 +5,16 @@ import io.github.datakore.jsont.diagnostic.DiagnosticEventKind;
 import io.github.datakore.jsont.diagnostic.DiagnosticSink;
 import io.github.datakore.jsont.internal.validate.ConstraintChecker;
 import io.github.datakore.jsont.internal.validate.RuleChecker;
+import io.github.datakore.jsont.model.AnyOfVariant;
 import io.github.datakore.jsont.model.FieldPath;
 import io.github.datakore.jsont.model.JsonTField;
+import io.github.datakore.jsont.model.JsonTNumber;
 import io.github.datakore.jsont.model.JsonTRow;
 import io.github.datakore.jsont.model.JsonTSchema;
+import io.github.datakore.jsont.model.JsonTString;
 import io.github.datakore.jsont.model.JsonTValidationBlock;
 import io.github.datakore.jsont.model.JsonTValue;
+import io.github.datakore.jsont.model.ScalarType;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -363,10 +367,47 @@ public final class ValidationPipeline {
             JsonTField field = i < fields.size() ? fields.get(i) : null;
             if (field != null && field.kind().isScalar()) {
                 val = JsonTValue.promote(val, field.scalarType());
+            } else if (field != null && field.kind().isAnyOf()) {
+                val = promoteAnyOf(val, field.anyOfVariants());
             }
             promoted.add(val);
         }
         return row.withValues(promoted);
+    }
+
+    /**
+     * Promotes a raw-scanned value for an {@code anyOf} field.
+     *
+     * <p>The row scanner always produces {@link JsonTString.Plain} for quoted strings
+     * and {@link JsonTNumber.D64} for numbers.  This method walks the declared variants
+     * in declaration order (first-match-wins — same rule as JSON reader dispatch) and
+     * applies {@link JsonTValue#promote} for the first scalar variant whose token
+     * category matches the value.  SchemaRef variants never need promotion.
+     */
+    private static JsonTValue promoteAnyOf(JsonTValue val, List<AnyOfVariant> variants) {
+        for (AnyOfVariant v : variants) {
+            if (!(v instanceof AnyOfVariant.Scalar s)) continue;
+            ScalarType type = s.type();
+
+            if (val instanceof JsonTValue.Bool && type == ScalarType.BOOL) {
+                return val; // already the right type
+            }
+            if (val instanceof JsonTNumber && type.isNumeric()) {
+                // handles temporal upgrade (Date, Time, DateTime, Timestamp);
+                // non-temporal numeric types pass through unchanged — same as scalar fields.
+                return JsonTValue.promote(val, type);
+            }
+            if (val instanceof JsonTString.Plain && type.isStringLike()) {
+                JsonTValue result = JsonTValue.promote(val, type);
+                // STR always maps to Plain (no-op), so accept immediately.
+                // For other string types, accept only if promotion succeeded (not still Plain).
+                if (type == ScalarType.STR || !(result instanceof JsonTString.Plain)) {
+                    return result;
+                }
+                // Promotion failed (e.g. invalid UUID format) — try next variant.
+            }
+        }
+        return val; // no scalar variant matched (SchemaRef / Enum / Object / Null)
     }
 
     private void emit(DiagnosticEvent event) {

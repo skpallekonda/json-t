@@ -55,8 +55,18 @@ public final class SchemaStringifier {
         if (f.kind().isScalar()) {
             String kw  = f.scalarType().keyword();
             String arr = f.kind().isArray() ? "[]" : "";
-            // format: {kw}{arr}{opt}: {name}{attrs}
             return prefix + kw + arr + opt + ":" + ctx.sp() + name + attrs;
+        } else if (f.kind().isAnyOf()) {
+            String variants = f.anyOfVariants().stream()
+                    .map(v -> v instanceof AnyOfVariant.Scalar s
+                            ? s.type().keyword()
+                            : "<" + ((AnyOfVariant.SchemaRef) v).name() + ">")
+                    .collect(java.util.stream.Collectors.joining(" | "));
+            String arr  = f.kind().isArray() ? "[]" : "";
+            String disc = f.discriminator() != null
+                    ? " on " + ValueStringifier.quoteString(f.discriminator())
+                    : "";
+            return prefix + "anyOf(" + variants + ")" + arr + disc + opt + ":" + ctx.sp() + name + attrs;
         } else {
             // object kind
             String ref = f.objectRef();

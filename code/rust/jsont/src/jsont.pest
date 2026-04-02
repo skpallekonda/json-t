@@ -127,8 +127,9 @@ field_block = {
 }
 
 // [D-1] scalar_field_decl starts with a type keyword; object_field_decl starts
-// with "<". They are disjoint, but we keep scalar first to match grammar intent.
-field_decl = { scalar_field_decl | object_field_decl }
+// with "<"; any_of_field_decl starts with "anyOf(". Try any_of first so that
+// "anyOf" is not consumed as a FIELDID inside scalar_field_decl.
+field_decl = { any_of_field_decl | scalar_field_decl | object_field_decl }
 
 scalar_field_decl = {
     scalar_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
@@ -139,6 +140,24 @@ object_field_decl = {
     object_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
     ~ ("[" ~ object_attribute ~ ("," ~ object_attribute)* ~ "]")?
 }
+
+// anyOf field — union of two or more scalar or schema-ref variants.
+// Discriminator clause (on "fieldName") required when ≥2 variants are full
+// object schemas; optional otherwise.  Constraints follow the object model
+// (required, array_items) since value/length constraints are variant-specific.
+any_of_field_decl = {
+    any_of_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
+    ~ ("[" ~ common_constraints_section ~ "]")?
+}
+
+any_of_type_ref = {
+    kw_any_of ~ "(" ~ any_of_variant ~ ("|" ~ any_of_variant)+ ~ ")"
+    ~ array_suffix?
+    ~ (kw_on ~ string)?
+}
+
+// object_type_ref tried first — "<" makes it unambiguous vs scalar keywords.
+any_of_variant = { object_type_ref | scalar_type_ref }
 
 scalar_attribute = { scalar_constraint | default_value | constant_value }
 object_attribute = { common_constraint }
@@ -465,6 +484,8 @@ kw_filter      = @{ "filter"      ~ !id_continue }
 kw_transform   = @{ "transform"   ~ !id_continue }
 kw_as          = @{ "as"          ~ !id_continue }
 kw_null        = @{ ("null" | "nil") ~ !id_continue }  // [D-5] "null" first — JSON convention
+kw_any_of      = @{ "anyOf"       ~ !id_continue }
+kw_on          = @{ "on"          ~ !id_continue }
 
 // Constraint keywords
 value_constraint_kw   = @{ ("minValue" | "maxValue" | "minPrecision" | "maxPrecision") ~ !id_continue }

@@ -33,7 +33,7 @@ field_block :
     KW_FIELDS ':' '{' field_decl (',' field_decl)* '}' ;
 
 field_decl :
-    scalar_field_decl | object_field_decl ;
+    any_of_field_decl | scalar_field_decl | object_field_decl ;
 
 scalar_field_decl :
     scalar_type_ref ':' ns_field_name optional_mark?
@@ -47,6 +47,23 @@ scalar_field_attributes :
 object_field_decl :
     object_type_ref ':' ns_field_name optional_mark?
     ('[' common_constraints_section ']')? ;
+
+// anyOf field — union of two or more scalar or schema-ref variants.
+// Discriminator clause (on "fieldName") required when ≥2 variants are full
+// object schemas; optional otherwise.  Constraints follow the object model
+// (required, array_items) since value/length constraints are variant-specific.
+any_of_field_decl :
+    any_of_type_ref ':' ns_field_name optional_mark?
+    ('[' common_constraints_section ']')? ;
+
+any_of_type_ref :
+    KW_ANY_OF '(' any_of_variant ('|' any_of_variant)+ ')'
+    array_suffix?
+    (KW_ON string_val)? ;
+
+// object_type_ref tried first — '<' makes it unambiguous vs scalar keywords.
+any_of_variant :
+    object_type_ref | scalar_type_ref ;
 
 optional_mark : '?' ;
 
@@ -301,6 +318,7 @@ field_id :
     | KW_MINVALUE | KW_MAXVALUE | KW_MINPRECISION | KW_MAXPRECISION
     | KW_MINLENGTH | KW_MAXLENGTH | KW_MINITEMS | KW_MAXITEMS
     | KW_MAXNULLITEMS | KW_ALLOWNULLITEMS | KW_REGEX | KW_PATTERN
+    | KW_ANY_OF | KW_ON
     | TRUE_VAL | FALSE_VAL | KW_NULL ;
 
 
@@ -328,7 +346,9 @@ KW_EXCLUDE : 'exclude' ;
 KW_PROJECT : 'project' ;
 KW_FILTER : 'filter' ;
 KW_TRANSFORM : 'transform' ;
-KW_AS : 'as' ;
+KW_AS     : 'as' ;
+KW_ANY_OF : 'anyOf' ;
+KW_ON     : 'on' ;
 
 KW_I16 : 'i16' ;
 KW_I32 : 'i32' ;

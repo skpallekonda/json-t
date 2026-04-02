@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.Reader;
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Converts JSON input into {@link JsonTRow} values guided by a {@link JsonTSchema}.
@@ -197,6 +198,11 @@ public final class JsonReader {
         if (node instanceof JsonValueNode.Null) return JsonTValue.nullValue();
 
         FieldKind kind = field.kind();
+
+        if (kind.isAnyOf()) {
+            return resolveAnyOf(node, field);
+        }
+
         if (kind.isObject()) {
             if (kind.isArray()) {
                 if (!(node instanceof JsonValueNode.Arr arr)) throw typeErr(field.name(), "JSON array", node);
@@ -211,6 +217,130 @@ public final class JsonReader {
         }
 
         return coerceScalarOrArray(node, field.scalarType(), kind.isArray(), field.name());
+    }
+
+    // ── anyOf resolution ──────────────────────────────────────────────────────
+
+    private JsonTValue resolveAnyOf(JsonValueNode node, JsonTField field) {
+        if (field.kind() == FieldKind.ARRAY_ANY_OF) {
+            if (!(node instanceof JsonValueNode.Arr arr)) throw typeErr(field.name(), "JSON array", node);
+            List<JsonTValue> items = new ArrayList<>();
+            for (JsonValueNode item : arr.items()) {
+                items.add(item instanceof JsonValueNode.Null
+                        ? JsonTValue.nullValue()
+                        : resolveAnyOfSingle(item, field));
+            }
+            return JsonTValue.array(items);
+        }
+        return resolveAnyOfSingle(node, field);
+    }
+
+    /**
+     * Dispatch a single JSON node against the declared anyOf variants.
+     * Rules (applied in order):
+     * <ol>
+     *   <li>Boolean token → first {@code bool} scalar variant wins.</li>
+     *   <li>Number token → first numeric scalar variant wins (try in order).</li>
+     *   <li>String token → SchemaRef variants first (stored as Enum), then string scalar variants.</li>
+     *   <li>Object token → single SchemaRef variant (direct); multiple SchemaRef variants require
+     *       discriminator field.</li>
+     * </ol>
+     */
+    private JsonTValue resolveAnyOfSingle(JsonValueNode node, JsonTField field) {
+        List<AnyOfVariant> variants = field.anyOfVariants();
+        String fname = field.name();
+
+        // ── Boolean ───────────────────────────────────────────────────────────
+        if (node instanceof JsonValueNode.Bool) {
+            for (AnyOfVariant v : variants) {
+                if (v instanceof AnyOfVariant.Scalar s && s.type() == ScalarType.BOOL) {
+                    return coerceScalar(node, ScalarType.BOOL, fname);
+                }
+            }
+            throw noMatch(fname, "bool", variants);
+        }
+
+        // ── Number ────────────────────────────────────────────────────────────
+        if (node instanceof JsonValueNode.IntNum || node instanceof JsonValueNode.FloatNum) {
+            for (AnyOfVariant v : variants) {
+                if (v instanceof AnyOfVariant.Scalar s && s.type().isNumeric()) {
+                    try { return coerceScalar(node, s.type(), fname); }
+                    catch (JsonTError.Parse ignored) {}
+                }
+            }
+            throw noMatch(fname, "number", variants);
+        }
+
+        // ── String ────────────────────────────────────────────────────────────
+        // Respect declaration order: try each variant in turn.
+        // SchemaRef → stored as Enum; string scalar → coerced normally.
+        if (node instanceof JsonValueNode.Str strNode) {
+            for (AnyOfVariant v : variants) {
+                if (v instanceof AnyOfVariant.SchemaRef) {
+                    return JsonTValue.enumValue(strNode.value());
+                }
+                if (v instanceof AnyOfVariant.Scalar s && !s.type().isNumeric() && s.type() != ScalarType.BOOL) {
+                    try { return coerceScalar(node, s.type(), fname); }
+                    catch (JsonTError.Parse ignored) {}
+                }
+            }
+            throw noMatch(fname, "string", variants);
+        }
+
+        // ── Object ────────────────────────────────────────────────────────────
+        if (node instanceof JsonValueNode.Obj objNode) {
+            List<AnyOfVariant.SchemaRef> objVariants = variants.stream()
+                    .filter(AnyOfVariant::isSchemaRef)
+                    .map(v -> (AnyOfVariant.SchemaRef) v)
+                    .collect(Collectors.toList());
+
+            if (objVariants.isEmpty()) {
+                throw new JsonTError.Parse("field '" + fname + "': JSON object value but no SchemaRef variant declared");
+            }
+            if (objVariants.size() == 1) {
+                // Single object variant — nested parse requires schema resolution; return placeholder
+                throw new JsonTError.Parse("field '" + fname + "': nested object variant <"
+                        + objVariants.get(0).name() + "> requires schema resolution");
+            }
+            // Multiple object variants — use discriminator
+            String disc = field.discriminator();
+            if (disc == null) {
+                throw new JsonTError.Parse("field '" + fname
+                        + "': multiple object variants require a discriminator (on \"fieldName\")");
+            }
+            String discValue = null;
+            for (var pair : objNode.pairs()) {
+                if (pair.getKey().equals(disc)) {
+                    if (pair.getValue() instanceof JsonValueNode.Str s) discValue = s.value();
+                    break;
+                }
+            }
+            if (discValue == null) {
+                throw new JsonTError.Parse("field '" + fname + "': discriminator field '"
+                        + disc + "' not found or not a string");
+            }
+            for (AnyOfVariant.SchemaRef ref : objVariants) {
+                if (ref.name().equals(discValue)) {
+                    // Matched — nested parse requires schema resolution; return placeholder
+                    throw new JsonTError.Parse("field '" + fname + "': matched variant <"
+                            + ref.name() + "> requires schema resolution for full parse");
+                }
+            }
+            throw new JsonTError.Parse("field '" + fname + "': discriminator value '"
+                    + discValue + "' does not match any declared variant");
+        }
+
+        throw new JsonTError.Parse("field '" + fname + "': value type " + nodeKind(node)
+                + " does not match any anyOf variant");
+    }
+
+    private static JsonTError.Parse noMatch(String fname, String tokenType, List<AnyOfVariant> variants) {
+        String declared = variants.stream()
+                .map(v -> v instanceof AnyOfVariant.Scalar s ? s.type().keyword()
+                        : "<" + ((AnyOfVariant.SchemaRef) v).name() + ">")
+                .collect(Collectors.joining(", "));
+        return new JsonTError.Parse("field '" + fname + "': " + tokenType
+                + " value does not match any anyOf variant [" + declared + "]");
     }
 
     private JsonTValue coerceScalarOrArray(JsonValueNode node, ScalarType scalar,

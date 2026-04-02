@@ -1,11 +1,14 @@
 package io.github.datakore.jsont.builder;
 
 import io.github.datakore.jsont.error.BuildError;
+import io.github.datakore.jsont.model.AnyOfVariant;
 import io.github.datakore.jsont.model.FieldConstraints;
 import io.github.datakore.jsont.model.FieldKind;
 import io.github.datakore.jsont.model.JsonTField;
 import io.github.datakore.jsont.model.JsonTValue;
 import io.github.datakore.jsont.model.ScalarType;
+
+import java.util.List;
 
 /**
  * Fluent builder for {@link JsonTField}.
@@ -33,6 +36,8 @@ public final class JsonTFieldBuilder {
     private FieldKind kind;
     private final ScalarType scalarType;
     private final String objectRef;
+    private final List<AnyOfVariant> anyOfVariants; // non-null for ANY_OF
+    private String discriminatorField;
 
     // modifiers
     private boolean optional = false;
@@ -66,6 +71,15 @@ public final class JsonTFieldBuilder {
         this.kind = kind;
         this.scalarType = scalarType;
         this.objectRef = objectRef;
+        this.anyOfVariants = null;
+    }
+
+    private JsonTFieldBuilder(String name, FieldKind kind, List<AnyOfVariant> anyOfVariants) {
+        this.name = name;
+        this.kind = kind;
+        this.scalarType = null;
+        this.objectRef = null;
+        this.anyOfVariants = List.copyOf(anyOfVariants);
     }
 
     // ─── Factory methods ──────────────────────────────────────────────────────
@@ -94,6 +108,23 @@ public final class JsonTFieldBuilder {
         return new JsonTFieldBuilder(name, FieldKind.OBJECT, null, schemaRef);
     }
 
+    /**
+     * Declares an {@code anyOf} field accepting two or more scalar or schema-ref variants.
+     *
+     * <p>Variants are tried left-to-right within each JSON token-type category; the first
+     * match wins.  When two or more variants are full object schemas (not enums), use
+     * {@link #discriminator(String)} to specify the field that resolves ambiguity.
+     *
+     * @param name     field name
+     * @param variants at least two {@link AnyOfVariant} arms
+     */
+    public static JsonTFieldBuilder anyOf(String name, List<AnyOfVariant> variants) {
+        if (name == null || name.isBlank()) throw new IllegalArgumentException("name must not be blank");
+        if (variants == null || variants.size() < 2)
+            throw new IllegalArgumentException("anyOf field '" + name + "' requires at least 2 variants");
+        return new JsonTFieldBuilder(name, FieldKind.ANY_OF, variants);
+    }
+
     // ─── Modifiers ────────────────────────────────────────────────────────────
 
     /** Marks the field as optional (may be absent or null in a row). */
@@ -105,10 +136,22 @@ public final class JsonTFieldBuilder {
     /** Promotes this field to an array type. Idempotent. */
     public JsonTFieldBuilder asArray() {
         this.kind = switch (kind) {
-            case SCALAR -> FieldKind.ARRAY_SCALAR;
-            case OBJECT -> FieldKind.ARRAY_OBJECT;
-            case ARRAY_SCALAR, ARRAY_OBJECT -> kind; // idempotent
+            case SCALAR      -> FieldKind.ARRAY_SCALAR;
+            case OBJECT      -> FieldKind.ARRAY_OBJECT;
+            case ANY_OF      -> FieldKind.ARRAY_ANY_OF;
+            case ARRAY_SCALAR, ARRAY_OBJECT, ARRAY_ANY_OF -> kind; // idempotent
         };
+        return this;
+    }
+
+    /**
+     * Sets the discriminator field name for multi-object {@code anyOf} dispatch.
+     * Required when two or more variants are full object schemas (not enums).
+     *
+     * @param fieldName the name of the field present in all object variants
+     */
+    public JsonTFieldBuilder discriminator(String fieldName) {
+        this.discriminatorField = fieldName;
         return this;
     }
 
@@ -212,6 +255,8 @@ public final class JsonTFieldBuilder {
             throw new BuildError("Scalar field '" + name + "' requires a ScalarType");
         if (kind.isObject() && (objectRef == null || objectRef.isBlank()))
             throw new BuildError("Object field '" + name + "' requires a schema reference");
+        if (kind.isAnyOf() && (anyOfVariants == null || anyOfVariants.size() < 2))
+            throw new BuildError("anyOf field '" + name + "' requires at least 2 variants");
         if (minValue != null && maxValue != null && minValue > maxValue)
             throw new BuildError("Field '" + name + "': minValue (" + minValue + ") > maxValue (" + maxValue + ")");
         if (minLength != null && maxLength != null && minLength > maxLength)
@@ -232,6 +277,9 @@ public final class JsonTFieldBuilder {
                 constantValue
         );
 
+        if (kind.isAnyOf()) {
+            return new JsonTField(name, kind, anyOfVariants, discriminatorField, optional, constraints);
+        }
         return new JsonTField(name, kind, scalarType, objectRef, optional, constraints);
     }
 }

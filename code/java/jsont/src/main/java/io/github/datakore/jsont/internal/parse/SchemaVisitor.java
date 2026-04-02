@@ -176,10 +176,53 @@ public final class SchemaVisitor extends JsonTSchemaBaseVisitor<Object> {
 
     @Override
     public Object visitField_decl(JsonTSchemaParser.Field_declContext ctx) {
+        if (ctx.any_of_field_decl() != null) {
+            return visitAny_of_field_decl(ctx.any_of_field_decl());
+        }
         if (ctx.scalar_field_decl() != null) {
             return visitScalar_field_decl(ctx.scalar_field_decl());
         }
         return visitObject_field_decl(ctx.object_field_decl());
+    }
+
+    @Override
+    public Object visitAny_of_field_decl(JsonTSchemaParser.Any_of_field_declContext ctx) {
+        String name = ctx.ns_field_name().getText();
+        var typeRef = ctx.any_of_type_ref();
+
+        List<AnyOfVariant> variants = new ArrayList<>();
+        for (var vCtx : typeRef.any_of_variant()) {
+            if (vCtx.object_type_ref() != null) {
+                String refName = vCtx.object_type_ref().object_type_name().getText();
+                variants.add(AnyOfVariant.schemaRef(refName));
+            } else {
+                String kw = vCtx.scalar_type_ref().scalar_types().getText();
+                ScalarType st;
+                try {
+                    st = ScalarType.fromKeyword(kw);
+                } catch (IllegalArgumentException e) {
+                    throw new JsonTError.Parse("Unknown scalar type in anyOf: " + kw);
+                }
+                variants.add(AnyOfVariant.scalar(st));
+            }
+        }
+
+        var fb = JsonTFieldBuilder.anyOf(name, variants);
+
+        if (typeRef.array_suffix() != null) fb = fb.asArray();
+        if (ctx.optional_mark() != null)    fb = fb.optional();
+        if (typeRef.KW_ON() != null) {
+            String raw = typeRef.string_val().getText();
+            fb = fb.discriminator(raw.substring(1, raw.length() - 1));
+        }
+
+        if (ctx.common_constraints_section() != null) {
+            for (var consCtx : ctx.common_constraints_section().common_constraint()) {
+                fb = applyCommonConstraint(fb, consCtx);
+            }
+        }
+
+        return fb;
     }
 
     @Override
