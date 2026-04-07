@@ -18,7 +18,7 @@ use crate::model::namespace::{JsonTNamespace, JsonTCatalog};
 use crate::model::data::{JsonTValue, JsonTRow, JsonTArray};
 use crate::model::validation::JsonTExpression;
 use crate::model::schema::{JsonTSchema, SchemaOperation, RenamePair, FieldPath};
-use crate::model::field::{JsonTField, ScalarType};
+use crate::model::field::{AnyOfVariant, JsonTField, ScalarType};
 use crate::model::enumdef::JsonTEnum;
 use crate::model::constraint::{
     JsonTConstraint, ValueConstraintKey, LengthConstraintKey,
@@ -331,11 +331,97 @@ fn walk_field_path_list(pair: Pair<Rule>) -> Result<Vec<FieldPath>, JsonTError> 
 }
 
 fn walk_field_decl(pair: Pair<Rule>) -> Result<JsonTField, JsonTError> {
-    // field_decl = { scalar_field_decl | object_field_decl }
+    // field_decl = { any_of_field_decl | scalar_field_decl | object_field_decl }
     let inner = pair.into_inner().next().unwrap();
     match inner.as_rule() {
+        Rule::any_of_field_decl => walk_any_of_field(inner),
         Rule::scalar_field_decl => walk_scalar_field(inner),
         Rule::object_field_decl => walk_object_field(inner),
+        _ => unreachable!(),
+    }
+}
+
+fn walk_any_of_field(pair: Pair<Rule>) -> Result<JsonTField, JsonTError> {
+    // any_of_field_decl = {
+    //   any_of_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
+    //   ~ ("[" ~ common_constraints_section ~ "]")?
+    // }
+    let mut inner = pair.into_inner();
+
+    let type_ref_pair = inner.next().unwrap();
+    let (variants, is_array, discriminator) = walk_any_of_type_ref(type_ref_pair)?;
+
+    let name_pair = inner.next().unwrap();
+    let name = name_pair.as_str().to_string();
+
+    let mut builder = JsonTFieldBuilder::any_of(name, variants);
+    if is_array { builder = builder.as_array(); }
+    if let Some(disc) = discriminator { builder = builder.discriminator(disc); }
+
+    while let Some(pair) = inner.next() {
+        match pair.as_rule() {
+            Rule::optional_mark => { builder = builder.optional(); }
+            Rule::common_constraints_section => {
+                for cc_pair in pair.into_inner() {
+                    if cc_pair.as_rule() == Rule::common_constraint {
+                        walk_common_constraint(cc_pair, &mut builder)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    builder.build()
+}
+
+fn walk_any_of_type_ref(
+    pair: Pair<Rule>,
+) -> Result<(Vec<AnyOfVariant>, bool, Option<String>), JsonTError> {
+    // any_of_type_ref = {
+    //   kw_any_of ~ "(" ~ any_of_variant ~ ("|" ~ any_of_variant)+ ~ ")"
+    //   ~ array_suffix?
+    //   ~ (kw_on ~ string)?
+    // }
+    let mut variants = Vec::new();
+    let mut is_array = false;
+    let mut discriminator: Option<String> = None;
+    let mut saw_on = false;
+
+    for child in pair.into_inner() {
+        match child.as_rule() {
+            Rule::kw_any_of => {}
+            Rule::any_of_variant => {
+                variants.push(walk_any_of_variant(child)?);
+            }
+            Rule::array_suffix => {
+                is_array = true;
+            }
+            Rule::kw_on => {
+                saw_on = true;
+            }
+            Rule::string => {
+                if saw_on {
+                    discriminator = Some(walk_string(child)?);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((variants, is_array, discriminator))
+}
+
+fn walk_any_of_variant(pair: Pair<Rule>) -> Result<AnyOfVariant, JsonTError> {
+    // any_of_variant = { object_type_ref | scalar_type_ref }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::object_type_ref => {
+            let (schema_ref, _) = walk_object_type_ref(inner)?;
+            Ok(AnyOfVariant::schema_ref(schema_ref))
+        }
+        Rule::scalar_type_ref => {
+            let (scalar_type, _) = walk_scalar_type_ref(inner)?;
+            Ok(AnyOfVariant::scalar(scalar_type))
+        }
         _ => unreachable!(),
     }
 }

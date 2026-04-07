@@ -294,6 +294,7 @@ impl JsonReader {
                             default.clone().unwrap_or(JsonTValue::Null)
                         }
                         JsonTFieldKind::Object { .. } => JsonTValue::Null,
+                        JsonTFieldKind::AnyOf { .. } => JsonTValue::Null,
                     };
                     values.push(default_val);
                 }
@@ -347,7 +348,132 @@ fn node_to_value(node: &JsonNode, field: &JsonTField) -> Result<JsonTValue, Json
                 ))))
             }
         }
+
+        JsonTFieldKind::AnyOf { variants, is_array, .. } => {
+            if *is_array {
+                match node {
+                    JsonNode::Array(items) => {
+                        let converted: Result<Vec<JsonTValue>, _> = items.iter()
+                            .map(|item| resolve_any_of_single(item, variants, &field.name))
+                            .collect();
+                        Ok(JsonTValue::Array(crate::model::data::JsonTArray::new(converted?)))
+                    }
+                    _ => Err(type_err(&field.name, "array", node)),
+                }
+            } else {
+                resolve_any_of_single(node, variants, &field.name)
+            }
+        }
     }
+}
+
+/// First-match-wins dispatch for a single JSON node against an anyOf variant list.
+///
+/// Mirrors Java `JsonReader.resolveAnyOfSingle` exactly:
+/// - Null node   → `JsonTValue::Null`
+/// - Bool node   → first BOOL scalar variant wins; error if none declared
+/// - Number node → first numeric scalar variant wins (coerce to its type, fall
+///                 through on coercion error); error if none match
+/// - String node → variants tried in declaration order:
+///     - `SchemaRef` → JSON string is treated as an enum constant
+///     - string-like scalar → coercion attempted; fall through on failure
+///     - error if nothing matches
+/// - Object/Array node → error (schema-ref object resolution requires a registry
+///                        pass, not implemented at this layer)
+fn resolve_any_of_single(
+    node:     &JsonNode,
+    variants: &[crate::model::field::AnyOfVariant],
+    fname:    &str,
+) -> Result<JsonTValue, JsonTError> {
+    use crate::model::field::AnyOfVariant;
+
+    match node {
+        JsonNode::Null => return Ok(JsonTValue::Null),
+
+        // ── Bool ─────────────────────────────────────────────────────────────
+        JsonNode::Bool(b) => {
+            for v in variants {
+                if let AnyOfVariant::Scalar(t) = v {
+                    if *t == ScalarType::Bool {
+                        return Ok(JsonTValue::bool(*b));
+                    }
+                }
+            }
+            return Err(no_match_err(fname, "bool", variants));
+        }
+
+        // ── Number ───────────────────────────────────────────────────────────
+        JsonNode::Integer(_) | JsonNode::Float(_) => {
+            for v in variants {
+                if let AnyOfVariant::Scalar(t) = v {
+                    if t.is_numeric() {
+                        match coerce_any_of_scalar(node, t, fname) {
+                            Ok(val) => return Ok(val),
+                            Err(_)  => continue, // coercion failed — try next numeric variant
+                        }
+                    }
+                }
+            }
+            return Err(no_match_err(fname, "number", variants));
+        }
+
+        // ── String ───────────────────────────────────────────────────────────
+        // Variants are tried in declaration order.
+        // SchemaRef variant: the string value is treated as an enum constant.
+        // Scalar string-like variant: coercion is attempted; format failures fall through.
+        JsonNode::Str(s) => {
+            for v in variants {
+                match v {
+                    AnyOfVariant::SchemaRef(_) => {
+                        // String token with a SchemaRef variant → treat as enum constant.
+                        return Ok(JsonTValue::Enum(s.clone()));
+                    }
+                    AnyOfVariant::Scalar(t) if t.is_string_like() => {
+                        if *t == ScalarType::Str {
+                            // Plain str always succeeds.
+                            return coerce_any_of_scalar(node, t, fname);
+                        }
+                        match coerce_any_of_scalar(node, t, fname) {
+                            Ok(val) => return Ok(val),
+                            Err(_)  => continue, // format check failed — try next
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+            return Err(no_match_err(fname, "string", variants));
+        }
+
+        // ── Object / Array ───────────────────────────────────────────────────
+        // Full schema-ref object resolution requires a SchemaRegistry pass.
+        // Return an error consistent with Java's behaviour.
+        JsonNode::Object(_) | JsonNode::Array(_) => {
+            return Err(JsonTError::Parse(ParseError::Unexpected(format!(
+                "field '{}': JSON object/array in anyOf requires schema resolution (registry pass)",
+                fname
+            ))));
+        }
+    }
+}
+
+/// Build the "no variant matched" error, listing all declared variants.
+fn no_match_err(fname: &str, token_type: &str, variants: &[crate::model::field::AnyOfVariant]) -> JsonTError {
+    use crate::model::field::AnyOfVariant;
+    let declared: Vec<String> = variants.iter()
+        .map(|v| match v {
+            AnyOfVariant::Scalar(t)    => t.keyword().to_string(),
+            AnyOfVariant::SchemaRef(n) => format!("<{n}>"),
+        })
+        .collect();
+    JsonTError::Parse(ParseError::Unexpected(format!(
+        "field '{}': {} value does not match any anyOf variant [{}]",
+        fname, token_type, declared.join(", ")
+    )))
+}
+
+/// Coerce a JSON node to a specific scalar type (single value, not array).
+fn coerce_any_of_scalar(node: &JsonNode, scalar: &ScalarType, fname: &str) -> Result<JsonTValue, JsonTError> {
+    coerce_scalar_or_array(node, scalar, false, fname)
 }
 
 fn coerce_scalar_or_array(

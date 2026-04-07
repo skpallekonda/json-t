@@ -238,6 +238,36 @@ impl JsonTField {
                     prefix = prefix, schema = schema_ref, arr = arr_str,
                     sp = ctx.sp(), name = self.name, opt = opt_str, constr = con_str)
             }
+
+            JsonTFieldKind::AnyOf { variants, is_array, optional, discriminator, constraints } => {
+                use crate::model::field::AnyOfVariant;
+                let variant_str = variants.iter()
+                    .map(|v| match v {
+                        AnyOfVariant::Scalar(t) => t.keyword().to_string(),
+                        AnyOfVariant::SchemaRef(s) => format!("<{s}>"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                let arr_str = if *is_array { "[]" } else { "" };
+                let opt_str = if *optional { "?" } else { "" };
+                let disc_str = discriminator.as_deref()
+                    .map(|d| format!(" on \"{d}\""))
+                    .unwrap_or_default();
+                let con_str = if constraints.is_empty() {
+                    String::new()
+                } else {
+                    let inner = constraints.iter()
+                        .map(stringify_constraint)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(" [{inner}]")
+                };
+
+                format!("{prefix}anyOf({variants}){arr}{disc}:{sp}{name}{opt}{constr}",
+                    prefix = prefix, variants = variant_str, arr = arr_str,
+                    disc = disc_str, sp = ctx.sp(), name = self.name,
+                    opt = opt_str, constr = con_str)
+            }
         }
     }
 }

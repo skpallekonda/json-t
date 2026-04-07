@@ -6,7 +6,7 @@
 // =============================================================================
 
 use crate::error::{BuildError, JsonTError};
-use crate::model::field::{JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
+use crate::model::field::{AnyOfVariant, JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
 use crate::model::constraint::{
     JsonTConstraint, ValueConstraintKey, LengthConstraintKey,
     ArrayConstraintNbr, ArrayConstraintBool, ArrayItemsConstraint,
@@ -37,6 +37,11 @@ enum FieldBuildKind {
     Object {
         schema_ref: String,
         is_array:   bool,
+    },
+    AnyOf {
+        variants:      Vec<AnyOfVariant>,
+        is_array:      bool,
+        discriminator: Option<String>,
     },
 }
 
@@ -69,6 +74,20 @@ impl JsonTFieldBuilder {
         }
     }
 
+    /// Create a union field that accepts one of the given variants (first-match-wins).
+    pub fn any_of(name: impl Into<String>, variants: Vec<AnyOfVariant>) -> Self {
+        Self {
+            name: name.into(),
+            kind: FieldBuildKind::AnyOf {
+                variants,
+                is_array:      false,
+                discriminator: None,
+            },
+            optional:    false,
+            constraints: Vec::new(),
+        }
+    }
+
     // ── Common modifiers ──────────────────────────────────────────────────
 
     pub fn optional(mut self) -> Self {
@@ -80,6 +99,15 @@ impl JsonTFieldBuilder {
         match &mut self.kind {
             FieldBuildKind::Scalar { is_array, .. } => *is_array = true,
             FieldBuildKind::Object { is_array, .. } => *is_array = true,
+            FieldBuildKind::AnyOf  { is_array, .. } => *is_array = true,
+        }
+        self
+    }
+
+    /// Set the discriminator field name for `anyOf` fields with multiple object variants.
+    pub fn discriminator(mut self, field: impl Into<String>) -> Self {
+        if let FieldBuildKind::AnyOf { discriminator, .. } = &mut self.kind {
+            *discriminator = Some(field.into());
         }
         self
     }
@@ -231,6 +259,41 @@ impl JsonTFieldBuilder {
                     schema_ref,
                     is_array,
                     optional: self.optional,
+                    constraints: self.constraints,
+                }
+            }
+
+            FieldBuildKind::AnyOf { variants, is_array, discriminator } => {
+                if variants.len() < 2 {
+                    return Err(BuildError::InvalidField {
+                        field: self.name.clone(),
+                        reason: "anyOf requires at least two variants".into(),
+                    }.into());
+                }
+                // Only Required and ArrayItems are valid on anyOf fields.
+                for c in &self.constraints {
+                    match c {
+                        JsonTConstraint::Required(_) => {}
+                        JsonTConstraint::ArrayItems(_) => {}
+                        other => {
+                            errors.push(BuildError::InvalidConstraintForType {
+                                field: self.name.clone(),
+                                field_type: "anyOf".into(),
+                                constraint: format!("{:?}", other),
+                            });
+                        }
+                    }
+                }
+
+                if !errors.is_empty() {
+                    return Err(errors.remove(0).into());
+                }
+
+                JsonTFieldKind::AnyOf {
+                    variants,
+                    is_array,
+                    optional: self.optional,
+                    discriminator,
                     constraints: self.constraints,
                 }
             }

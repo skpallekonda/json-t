@@ -158,6 +158,10 @@ fn validate_value_for_field(
                 }.into());
             }
         }
+
+        // AnyOf: any non-null value is acceptable at the row-builder layer;
+        // precise type checking happens after promotion in the validation pass.
+        JsonTFieldKind::AnyOf { .. } => {}
     }
 
     Ok(())

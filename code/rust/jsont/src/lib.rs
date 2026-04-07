@@ -54,7 +54,7 @@ pub use model::constraint::{
 };
 pub use model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTString, JsonTValue};
 pub use model::enumdef::JsonTEnum;
-pub use model::field::{JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
+pub use model::field::{AnyOfVariant, JsonTField, JsonTFieldKind, JsonTFieldType, ScalarType};
 pub use model::namespace::{JsonTCatalog, JsonTNamespace};
 pub use model::schema::{FieldPath, JsonTSchema, RenamePair, SchemaKind, SchemaOperation};
 pub use model::validation::{BinaryOp, JsonTExpression, JsonTRule, JsonTValidationBlock, UnaryOp};

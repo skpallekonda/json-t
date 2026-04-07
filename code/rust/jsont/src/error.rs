@@ -176,6 +176,10 @@ pub enum BuildError {
     #[error("duplicate enum value: '{0}'")]
     DuplicateEnumValue(String),
 
+    /// A field definition is structurally invalid (e.g., anyOf with < 2 variants).
+    #[error("invalid field '{field}': {reason}")]
+    InvalidField { field: String, reason: String },
+
     /// The names hint supplied to SchemaInferrer does not match row field count.
     #[error("name hint count ({hint}) does not match row field count ({row})")]
     NameHintMismatch { hint: usize, row: usize },

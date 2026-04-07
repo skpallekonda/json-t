@@ -61,7 +61,7 @@ use std::time::Instant;
 
 use crate::diagnostic::{DiagnosticEvent, EventKind, Severity, SinkError};
 use crate::model::data::{JsonTRow, JsonTValue};
-use crate::model::field::{JsonTField, JsonTFieldKind};
+use crate::model::field::{AnyOfVariant, JsonTField, JsonTFieldKind, ScalarType};
 use crate::model::schema::{JsonTSchema, SchemaKind};
 use crate::model::validation::JsonTValidationBlock;
 use crate::ConsoleSink;
@@ -523,28 +523,80 @@ fn try_promote_row(
         .into_iter()
         .zip(fields.iter())
         .map(|(val, field)| {
-            if let JsonTFieldKind::Scalar { field_type, .. } = &field.kind {
-                let original = val.clone();
-                match val.promote(&field_type.scalar) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        events.push(
-                            DiagnosticEvent::fatal(EventKind::FormatViolation {
-                                field:    field.name.clone(),
-                                expected: field_type.scalar.keyword().to_string(),
-                                actual:   constraint::describe_value(&original),
-                            })
-                            .at_row(row_idx),
-                        );
-                        original // Keep original value but flagged as fatal
+            match &field.kind {
+                JsonTFieldKind::Scalar { field_type, .. } => {
+                    let original = val.clone();
+                    match val.promote(&field_type.scalar) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            events.push(
+                                DiagnosticEvent::fatal(EventKind::FormatViolation {
+                                    field:    field.name.clone(),
+                                    expected: field_type.scalar.keyword().to_string(),
+                                    actual:   constraint::describe_value(&original),
+                                })
+                                .at_row(row_idx),
+                            );
+                            original // Keep original value but flagged as fatal
+                        }
                     }
                 }
-            } else {
-                val
+
+                JsonTFieldKind::AnyOf { variants, .. } => {
+                    promote_any_of(val, variants)
+                }
+
+                // Object and unknown kinds: pass through unchanged.
+                _ => val,
             }
         })
         .collect();
     (JsonTRow::new(promoted), events)
+}
+
+/// Promote a raw scanned value against a list of anyOf variants (first-match-wins).
+///
+/// Mirrors Java's `promoteAnyOf` behaviour exactly:
+/// - Bool   → first BOOL variant wins immediately.
+/// - Number → first numeric variant wins; promotion is applied (may return the
+///            original if precision/range doesn't fit), but no fallthrough to the
+///            next numeric variant — same as Java's unconditional `return promote(val, type)`.
+/// - String → first string-like variant wins; format variants that reject coercion
+///            (e.g. "hello" is not a valid UUID) are skipped; plain `str` acts as
+///            catch-all and always succeeds.
+/// - Everything else (SchemaRef variants, Object, Null) passes through unchanged.
+fn promote_any_of(val: JsonTValue, variants: &[AnyOfVariant]) -> JsonTValue {
+    for v in variants {
+        let AnyOfVariant::Scalar(t) = v else { continue };
+
+        match &val {
+            JsonTValue::Bool(_) if *t == ScalarType::Bool => return val,
+
+            // First numeric variant always wins — no fallthrough on failure.
+            // Java's promote() for numeric→numeric never throws; it returns the
+            // original if the conversion is not applicable. We mirror that: if
+            // our promote() returns Err (range/precision violation), we still
+            // return the original rather than trying the next numeric variant.
+            JsonTValue::Number(_) if t.is_numeric() => {
+                return val.clone().promote(t).unwrap_or(val);
+            }
+
+            JsonTValue::Str(_) if t.is_string_like() => {
+                if *t == ScalarType::Str {
+                    // Plain str always succeeds — stop here.
+                    return val.clone().promote(t).unwrap_or(val);
+                }
+                // Format-specific type: try coercion, fall through on failure.
+                match val.clone().promote(t) {
+                    Ok(promoted) => return promoted,
+                    Err(_)       => continue,
+                }
+            }
+
+            _ => continue,
+        }
+    }
+    val // no scalar variant matched — return as-is
 }
 
 /// Build a composite uniqueness key as a single null-byte-separated `String`.

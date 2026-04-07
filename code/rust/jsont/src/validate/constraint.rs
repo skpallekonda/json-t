@@ -50,6 +50,12 @@ pub fn check_field(
             constraints,
             ..
         } => (*optional, None, constraints.as_slice()),
+
+        JsonTFieldKind::AnyOf {
+            optional,
+            constraints,
+            ..
+        } => (*optional, None, constraints.as_slice()),
     };
 
     // Explicit `required = true/false` constraint overrides the `optional` flag.
