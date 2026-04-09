@@ -91,6 +91,14 @@ impl JsonTSchemaBuilder {
         Ok(self)
     }
 
+    /// Append a `Decrypt` operation to a derived schema's pipeline.
+    ///
+    /// The named fields are decrypted in-place at transform time.
+    /// Returns an error if called on a straight schema.
+    pub fn decrypt(self, fields: Vec<String>) -> Result<Self, JsonTError> {
+        self.operation(SchemaOperation::Decrypt { fields })
+    }
+
     // ── Shared ────────────────────────────────────────────────────────────
 
     pub fn validation(mut self, block: JsonTValidationBlock) -> Self {

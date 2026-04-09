@@ -53,9 +53,10 @@ public final class SchemaStringifier {
         String attrs   = buildConstraintAttrs(f.constraints());
 
         if (f.kind().isScalar()) {
-            String kw  = f.scalarType().keyword();
-            String arr = f.kind().isArray() ? "[]" : "";
-            return prefix + kw + arr + opt + ":" + ctx.sp() + name + attrs;
+            String kw   = f.scalarType().keyword();
+            String arr  = f.kind().isArray() ? "[]" : "";
+            String sens = f.sensitive() ? "~" : "";
+            return prefix + kw + arr + sens + opt + ":" + ctx.sp() + name + attrs;
         } else if (f.kind().isAnyOf()) {
             String variants = f.anyOfVariants().stream()
                     .map(v -> v instanceof AnyOfVariant.Scalar s
@@ -128,6 +129,9 @@ public final class SchemaStringifier {
         if (op instanceof SchemaOperation.Transform transform) {
             return "transform " + transform.target().dotJoined()
                     + " = " + ValueStringifier.stringifyExpr(transform.expr());
+        }
+        if (op instanceof SchemaOperation.Decrypt decrypt) {
+            return "decrypt(" + String.join(", ", decrypt.fields()) + ")";
         }
         throw new IllegalArgumentException("Unknown SchemaOperation: " + op);
     }
@@ -225,11 +229,11 @@ public final class SchemaStringifier {
 
             if (ctx.opts.isPretty()) {
                 return ctx.indent() + schema.name() + ":" + ctx.sp() + "FROM " + parent + ctx.sp() + "{" + ctx.nl()
-                        + c.indent() + "operations(" + opsStr + ")"
+                        + c.indent() + "operations:" + ctx.sp() + "(" + opsStr + ")"
                         + valStr + ctx.nl()
                         + ctx.indent() + "}";
             } else {
-                return schema.name() + ":FROM " + parent + "{operations(" + opsStr + ")" + valStr + "}";
+                return schema.name() + ":FROM " + parent + "{operations:(" + opsStr + ")" + valStr + "}";
             }
         }
     }

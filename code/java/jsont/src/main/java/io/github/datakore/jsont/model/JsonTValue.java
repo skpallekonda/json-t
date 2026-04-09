@@ -12,7 +12,7 @@ public sealed interface JsonTValue
                 JsonTValue.Bool,
                 JsonTNumber,
                 JsonTString,
-                JsonTValue.Enum, JsonTValue.Array {
+                JsonTValue.Enum, JsonTValue.Array, JsonTValue.Encrypted {
 
     // ─── Nested record implementations ────────────────────────────────────────
 
@@ -38,6 +38,22 @@ public sealed interface JsonTValue
         @Override public String toString() { return elements.toString(); }
     }
 
+    /**
+     * A field value that is encrypted at rest.
+     *
+     * <p>The {@code envelope} bytes are an opaque binary blob produced by
+     * {@code CryptoConfig.encrypt()}. The value flows through
+     * parse → validate → transform unchanged and is only decrypted on demand
+     * (via the {@code decrypt} pipeline operation or the on-demand API).
+     */
+    record Encrypted(byte[] envelope) implements JsonTValue {
+        public Encrypted {
+            Objects.requireNonNull(envelope, "envelope must not be null");
+            envelope = envelope.clone(); // defensive copy
+        }
+        @Override public String toString() { return "<encrypted>"; }
+    }
+
     // ─── Static factories ─────────────────────────────────────────────────────
 
     static JsonTValue nullValue() { return new Null(); }
@@ -55,6 +71,7 @@ public sealed interface JsonTValue
     static JsonTValue d128(java.math.BigDecimal v) { return new JsonTNumber.D128(v); }
     static JsonTValue text(String v) { return new JsonTString.Plain(v); }
     static JsonTValue array(List<JsonTValue> elements) { return new Array(elements); }
+    static JsonTValue encrypted(byte[] envelope) { return new Encrypted(envelope); }
 
     // ── Semantic string factories ──────────────────────────────────────────────
     static JsonTValue nstr(String v) { return new JsonTString.Nstr(v); }
@@ -122,6 +139,11 @@ public sealed interface JsonTValue
 
     default boolean isStringLike() {
         return this instanceof JsonTString;
+    }
+
+    /** Returns {@code true} if this value is an encrypted envelope. */
+    default boolean isEncrypted() {
+        return this instanceof Encrypted;
     }
 
     default String asText() {

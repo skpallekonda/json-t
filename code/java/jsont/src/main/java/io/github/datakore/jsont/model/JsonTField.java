@@ -31,6 +31,7 @@ public final class JsonTField {
     private final List<AnyOfVariant> anyOfVariants; // non-null when kind.isAnyOf()
     private final String discriminator;           // non-null when anyOf with multi-object dispatch
     private final boolean optional;
+    private final boolean sensitive;              // true only for scalar fields with ~ marker
     private final FieldConstraints constraints;
 
     /** Use {@code JsonTFieldBuilder} for validated construction. Scalar / object fields. */
@@ -40,7 +41,7 @@ public final class JsonTField {
                       String objectRef,
                       boolean optional,
                       FieldConstraints constraints) {
-        this(name, kind, scalarType, objectRef, null, null, optional, constraints);
+        this(name, kind, scalarType, objectRef, null, null, optional, false, constraints);
     }
 
     /** Use {@code JsonTFieldBuilder} for validated construction. AnyOf fields. */
@@ -50,7 +51,18 @@ public final class JsonTField {
                       String discriminator,
                       boolean optional,
                       FieldConstraints constraints) {
-        this(name, kind, null, null, anyOfVariants, discriminator, optional, constraints);
+        this(name, kind, null, null, anyOfVariants, discriminator, optional, false, constraints);
+    }
+
+    /** Use {@code JsonTFieldBuilder} for validated construction. Scalar fields with sensitivity. */
+    public JsonTField(String name,
+                      FieldKind kind,
+                      ScalarType scalarType,
+                      String objectRef,
+                      boolean optional,
+                      boolean sensitive,
+                      FieldConstraints constraints) {
+        this(name, kind, scalarType, objectRef, null, null, optional, sensitive, constraints);
     }
 
     private JsonTField(String name,
@@ -60,6 +72,7 @@ public final class JsonTField {
                        List<AnyOfVariant> anyOfVariants,
                        String discriminator,
                        boolean optional,
+                       boolean sensitive,
                        FieldConstraints constraints) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(kind, "kind");
@@ -77,6 +90,7 @@ public final class JsonTField {
         this.anyOfVariants = anyOfVariants == null ? null : List.copyOf(anyOfVariants);
         this.discriminator = discriminator;
         this.optional = optional;
+        this.sensitive = sensitive;
         this.constraints = constraints;
     }
 
@@ -129,6 +143,14 @@ public final class JsonTField {
     /** Returns {@code true} if the field may be absent or null in a row. */
     public boolean optional() { return optional; }
 
+    /**
+     * Returns {@code true} if this is a sensitive scalar field.
+     *
+     * <p>Sensitive fields carry encrypted values on the wire ({@code base64:xxx}).
+     * Only valid for scalar fields — always {@code false} for object and anyOf fields.
+     */
+    public boolean sensitive() { return sensitive; }
+
     /** Constraint set for this field (never {@code null}; use {@link FieldConstraints#hasAny()}). */
     public FieldConstraints constraints() { return constraints; }
 
@@ -155,6 +177,7 @@ public final class JsonTField {
         if (this == o) return true;
         if (!(o instanceof JsonTField f)) return false;
         return optional == f.optional
+                && sensitive == f.sensitive
                 && name.equals(f.name)
                 && kind == f.kind
                 && Objects.equals(scalarType, f.scalarType)
@@ -166,6 +189,6 @@ public final class JsonTField {
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, kind, scalarType, objectRef, anyOfVariants, discriminator, optional, constraints);
+        return Objects.hash(name, kind, scalarType, objectRef, anyOfVariants, discriminator, optional, sensitive, constraints);
     }
 }

@@ -218,6 +218,7 @@ pub fn describe_value(v: &JsonTValue) -> String {
         JsonTValue::Number(n)    => n.as_f64().to_string(),
         JsonTValue::Object(_)    => "{...}".into(),
         JsonTValue::Array(_)     => "[...]".into(),
+        JsonTValue::Encrypted(_) => "<encrypted>".into(),
     }
 }
 

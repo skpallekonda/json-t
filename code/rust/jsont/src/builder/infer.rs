@@ -150,6 +150,7 @@ impl SchemaInferrer {
                     default:     None,
                     constant:    None,
                     constraints: Vec::new(),
+                    sensitive:   false,
                 },
             });
         }

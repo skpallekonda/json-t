@@ -290,6 +290,9 @@ fn validate_pipeline(
                     }
                 }
             }
+
+            // Phase 8: field-state tracking (Encrypted→Plain) will be added here.
+            SchemaOperation::Decrypt { .. } => {}
         }
     }
 
@@ -480,7 +483,9 @@ fn resolve_effective_fields(
                         field_names.retain(|n| keep.contains(n));
                     }
 
-                    SchemaOperation::Filter { .. } | SchemaOperation::Transform { .. } => {}
+                    SchemaOperation::Filter { .. }
+                    | SchemaOperation::Transform { .. }
+                    | SchemaOperation::Decrypt { .. } => {}
                 }
             }
 
@@ -604,6 +609,10 @@ fn apply_operation(
             w[pos].1 = new_val;
             Ok(w)
         }
+
+        // Phase 8: CryptoConfig-based decryption will be implemented here.
+        // For now, Decrypt is a no-op pass-through at the row level.
+        SchemaOperation::Decrypt { .. } => Ok(working),
     }
 }
 

@@ -295,6 +295,17 @@ fn walk_schema_operation(pair: Pair<Rule>) -> Result<SchemaOperation, JsonTError
             let refs = crate::transform::collect_field_refs(&expr);
             Ok(SchemaOperation::Transform { target, expr, refs })
         }
+        Rule::decrypt_operation => {
+            // decrypt_operation = { kw_decrypt ~ "(" ~ field_path_list ~ ")" }
+            let path_list = inner.into_inner()
+                .find(|p| p.as_rule() == Rule::field_path_list)
+                .ok_or_else(|| ParseError::Unexpected("decrypt missing field list".into()))?;
+            let fields: Vec<String> = walk_field_path_list(path_list)?
+                .into_iter()
+                .map(|fp| fp.0.join("."))
+                .collect();
+            Ok(SchemaOperation::Decrypt { fields })
+        }
         other => Err(ParseError::Unexpected(format!("unknown schema operation: {:?}", other)).into()),
     }
 }
@@ -427,17 +438,25 @@ fn walk_any_of_variant(pair: Pair<Rule>) -> Result<AnyOfVariant, JsonTError> {
 }
 
 fn walk_scalar_field(pair: Pair<Rule>) -> Result<JsonTField, JsonTError> {
-    // scalar_field_decl = { scalar_type_ref ~ ":" ~ ns_field_name ~ optional_mark? ... }
+    // scalar_field_decl = { scalar_type_ref ~ sensitive_mark? ~ ":" ~ ns_field_name ~ optional_mark? ... }
+    // Note: sensitive_mark is optional and appears BEFORE ns_field_name, so we cannot
+    // blindly take the second child as the name. Check its rule first.
     let mut inner = pair.into_inner();
-    
+
     let type_ref_pair = inner.next().unwrap();
     let (scalar_type, is_array) = walk_scalar_type_ref(type_ref_pair)?;
-    
-    let name_pair = inner.next().unwrap();
-    let name = name_pair.as_str().to_string();
-    
+
+    // Next pair is either sensitive_mark or ns_field_name
+    let next = inner.next().unwrap();
+    let (sensitive, name) = if next.as_rule() == Rule::sensitive_mark {
+        (true, inner.next().unwrap().as_str().to_string())
+    } else {
+        (false, next.as_str().to_string())
+    };
+
     let mut builder = JsonTFieldBuilder::scalar(name, scalar_type);
     if is_array { builder = builder.as_array(); }
+    if sensitive { builder = builder.sensitive(); }
 
     while let Some(pair) = inner.next() {
         match pair.as_rule() {

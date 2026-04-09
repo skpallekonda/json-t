@@ -73,7 +73,7 @@ class JsonTSchemaStringifyTest {
                         FieldPath.single("id"), FieldPath.single("product")))
                 .build();
         String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
-        assertEquals("OrderSummary:FROM Order{operations(project(id, product))}", text);
+        assertEquals("OrderSummary:FROM Order{operations:(project(id, product))}", text);
     }
 
     @Test void derivedSchema_compact_rename() throws Exception {
@@ -81,7 +81,7 @@ class JsonTSchemaStringifyTest {
                 .operation(SchemaOperation.rename(RenamePair.of("product", "productName")))
                 .build();
         String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
-        assertEquals("Summary:FROM Order{operations(rename(product as productName))}", text);
+        assertEquals("Summary:FROM Order{operations:(rename(product as productName))}", text);
     }
 
     @Test void derivedSchema_compact_exclude() throws Exception {
@@ -89,7 +89,7 @@ class JsonTSchemaStringifyTest {
                 .operation(SchemaOperation.exclude(FieldPath.single("id"), FieldPath.single("qty")))
                 .build();
         String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
-        assertEquals("Lite:FROM Order{operations(exclude(id, qty))}", text);
+        assertEquals("Lite:FROM Order{operations:(exclude(id, qty))}", text);
     }
 
     @Test void derivedSchema_compact_filter() throws Exception {
@@ -98,7 +98,7 @@ class JsonTSchemaStringifyTest {
                         binary(BinaryOp.GT, fieldName("qty"), literal(i32(0)))))
                 .build();
         String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
-        assertEquals("Active:FROM Order{operations(filter qty > 0)}", text);
+        assertEquals("Active:FROM Order{operations:(filter qty > 0)}", text);
     }
 
     @Test void derivedSchema_compact_transform() throws Exception {
@@ -107,7 +107,7 @@ class JsonTSchemaStringifyTest {
                         binary(BinaryOp.MUL, fieldName("price"), literal(d64(0.9)))))
                 .build();
         String text = JsonTStringifier.stringify(s, StringifyOptions.compact());
-        assertEquals("Discounted:FROM Order{operations(transform price = price * 0.9)}", text);
+        assertEquals("Discounted:FROM Order{operations:(transform price = price * 0.9)}", text);
     }
 
     // ── Enum ───────────────────────────────────────────────────────────────────

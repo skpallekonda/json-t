@@ -242,6 +242,8 @@ public final class SchemaVisitor extends JsonTSchemaBaseVisitor<Object> {
 
         if (typeRef.array_suffix() != null)
             fb = fb.asArray();
+        if (ctx.sensitive_mark() != null)
+            fb = fb.sensitive();
         if (ctx.optional_mark() != null)
             fb = fb.optional();
 
@@ -425,6 +427,13 @@ public final class SchemaVisitor extends JsonTSchemaBaseVisitor<Object> {
             String target = top.field_path().getText();
             var expr = (JsonTExpression) visit(top.expression());
             return SchemaOperation.transform(target, expr);
+        }
+        if (ctx.decrypt_operation() != null) {
+            List<String> fields = new ArrayList<>();
+            for (var fp : ctx.decrypt_operation().field_path_list().field_path()) {
+                fields.add(fp.getText());
+            }
+            return SchemaOperation.decrypt(fields);
         }
         throw new JsonTError.Parse("Unknown derived schema operation");
     }

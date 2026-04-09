@@ -61,6 +61,14 @@ fn write_value<W: Write>(v: &JsonTValue, w: &mut W) -> io::Result<()> {
         JsonTValue::Number(n) => write_number(n, w),
         JsonTValue::Object(row) => write_row(row, w),
         JsonTValue::Array(arr) => write_array(arr, w),
+        // Encrypted values carry a Base64 envelope; CryptoConfig enforcement
+        // is handled in the schema-aware stringify path (Phase 7). The raw-row
+        // writer should never receive an Encrypted value without prior crypto
+        // resolution — panic here surfaces the programming error early.
+        JsonTValue::Encrypted(_) => panic!(
+            "Encrypted value cannot be written without CryptoConfig; \
+             use StringifyOptions::with_crypto() (Phase 7)"
+        ),
     }
 }
 

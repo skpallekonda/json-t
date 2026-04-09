@@ -132,9 +132,12 @@ field_block = {
 field_decl = { any_of_field_decl | scalar_field_decl | object_field_decl }
 
 scalar_field_decl = {
-    scalar_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
+    scalar_type_ref ~ sensitive_mark? ~ ":" ~ ns_field_name ~ optional_mark?
     ~ ("[" ~ scalar_attribute ~ ("," ~ scalar_attribute)* ~ "]")?
 }
+
+/// Marks a scalar field as sensitive (encrypted on the wire).
+sensitive_mark = { "~" }
 
 object_field_decl = {
     object_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
@@ -253,9 +256,11 @@ schema_operation = {
     | project_operation
     | transform_operation
     | filter_operation
+    | decrypt_operation
 }
 
 rename_operation    = { kw_rename    ~ "(" ~ rename_pair ~ ("," ~ rename_pair)* ~ ")" }
+decrypt_operation   = { kw_decrypt   ~ "(" ~ field_path_list ~ ")" }
 rename_pair         = { field_path ~ kw_as ~ ns_field_name }
 exclude_operation   = { kw_exclude   ~ "(" ~ field_path_list ~ ")" }
 project_operation   = { kw_project   ~ "(" ~ field_path_list ~ ")" }
@@ -478,6 +483,7 @@ kw_unique      = @{ "unique"      ~ !id_continue }
 kw_dataset     = @{ "dataset"     ~ !id_continue }
 kw_required    = @{ "required"    ~ !id_continue }
 kw_rename      = @{ "rename"      ~ !id_continue }
+kw_decrypt     = @{ "decrypt"     ~ !id_continue }
 kw_exclude     = @{ "exclude"     ~ !id_continue }
 kw_project     = @{ "project"     ~ !id_continue }
 kw_filter      = @{ "filter"      ~ !id_continue }

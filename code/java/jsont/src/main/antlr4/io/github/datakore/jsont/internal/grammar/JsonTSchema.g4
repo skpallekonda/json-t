@@ -36,8 +36,10 @@ field_decl :
     any_of_field_decl | scalar_field_decl | object_field_decl ;
 
 scalar_field_decl :
-    scalar_type_ref ':' ns_field_name optional_mark?
+    scalar_type_ref sensitive_mark? ':' ns_field_name optional_mark?
     ('[' scalar_field_attributes ']')? ;
+
+sensitive_mark : '~' ;
 
 scalar_field_attributes :
       scalar_constraints_section (',' default_value)? (',' constant_value)?
@@ -135,10 +137,14 @@ schema_operation :
     | exclude_operation
     | project_operation
     | transform_operation
-    | filter_operation ;
+    | filter_operation
+    | decrypt_operation ;
 
 rename_operation :
     KW_RENAME '(' rename_pair (',' rename_pair)* ')' ;
+
+decrypt_operation :
+    KW_DECRYPT '(' field_path_list ')' ;
 
 rename_pair :
     field_path KW_AS ns_field_name ;
@@ -308,7 +314,7 @@ field_id :
     | KW_NAMESPACE | KW_BASE_URL | KW_VERSION | KW_CATALOGS | KW_SCHEMAS
     | KW_DATA_SCHEMA | KW_ENUMS | KW_FIELDS | KW_FROM | KW_VALIDATIONS
     | KW_OPERATIONS | KW_DEFAULT | KW_CONST | KW_RULES | KW_UNIQUE
-    | KW_DATASET | KW_REQUIRED | KW_RENAME | KW_EXCLUDE | KW_PROJECT
+    | KW_DATASET | KW_REQUIRED | KW_RENAME | KW_EXCLUDE | KW_PROJECT | KW_DECRYPT
     | KW_FILTER | KW_TRANSFORM | KW_AS
     | KW_I16 | KW_I32 | KW_I64 | KW_U16 | KW_U32 | KW_U64
     | KW_D32 | KW_D64 | KW_D128 | KW_DATE | KW_TIME | KW_DATETIME
@@ -342,6 +348,7 @@ KW_UNIQUE : 'unique' ;
 KW_DATASET : 'dataset' ;
 KW_REQUIRED : 'required' ;
 KW_RENAME : 'rename' ;
+KW_DECRYPT : 'decrypt' ;
 KW_EXCLUDE : 'exclude' ;
 KW_PROJECT : 'project' ;
 KW_FILTER : 'filter' ;

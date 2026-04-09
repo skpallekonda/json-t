@@ -78,6 +78,20 @@ pub enum SchemaOperation {
         expr: crate::model::validation::JsonTExpression,
         refs: Vec<String>,
     },
+
+    /// Decrypt the listed fields in-place.
+    ///
+    /// Each named field must carry a [`JsonTValue::Encrypted`] value; the runtime
+    /// calls [`CryptoConfig::decrypt`] and replaces the value with the decoded
+    /// plaintext.  Fields already in plaintext state are silently skipped
+    /// (idempotent).
+    ///
+    /// This operation acts as the declassification gate: operations that appear
+    /// after `Decrypt` may reference the named fields as if they were plaintext.
+    Decrypt {
+        /// Names of fields to decrypt.  Non-existent names are a build error.
+        fields: Vec<String>,
+    },
 }
 
 /// A single rename mapping in a Rename operation.

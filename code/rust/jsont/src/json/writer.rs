@@ -249,6 +249,9 @@ fn write_json_value<W: Write>(
             w.write_all(b"}")
         }
         JsonTValue::Array(arr) => write_json_array(&arr.items, pretty, depth, w),
+        // Encrypted values cannot be serialised to JSON without first decrypting.
+        // Emit as JSON null to avoid leaking ciphertext into JSON output.
+        JsonTValue::Encrypted(_) => w.write_all(b"null"),
     }
 }
 

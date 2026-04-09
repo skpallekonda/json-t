@@ -155,13 +155,13 @@ impl JsonTSchema {
                     .collect::<Vec<_>>()
                     .join(&ctx.sep());
                 if ctx.opts.pretty {
-                    format!("FROM {from}{sp}{{{nl}{ci}operations({ops}){val}{nl}{c_ind}}}",
+                    format!("FROM {from}{sp}{{{nl}{ci}operations:{sp}({ops}){val}{nl}{c_ind}}}",
                         from = from, sp = ctx.sp(), nl = ctx.nl(),
                         ci = c.indent(), c_ind = ctx.indent(),
                         ops = ops_str,
                         val = validation_str(&self.validation, &c))
                 } else {
-                    format!("FROM {from}{{operations({ops}){val}}}",
+                    format!("FROM {from}{{operations:({ops}){val}}}",
                         from = from, ops = ops_str,
                         val = validation_str(&self.validation, &c))
                 }
@@ -174,6 +174,13 @@ impl JsonTSchema {
         } else {
             format!("{name}:{body}", name = self.name, body = body)
         }
+    }
+}
+
+impl Stringification for JsonTSchema {
+    fn stringify(&self, options: StringifyOptions) -> String {
+        let ctx = Ctx::new(&options);
+        self.stringify_ctx(&ctx)
     }
 }
 
@@ -195,10 +202,11 @@ impl JsonTField {
         let prefix = if ctx.opts.pretty { ctx.indent() } else { String::new() };
 
         match &self.kind {
-            JsonTFieldKind::Scalar { field_type, optional, default, constant, constraints } => {
+            JsonTFieldKind::Scalar { field_type, optional, default, constant, constraints, sensitive } => {
                 let type_str  = stringify_field_type(field_type);
+                let sens_str  = if *sensitive { "~" } else { "" };
                 let opt_str   = if *optional { "?" } else { "" };
-                
+
                 let mut attrs = Vec::new();
                 if let Some(v) = default {
                     attrs.push(format!("default {}", stringify_value(v)));
@@ -216,9 +224,9 @@ impl JsonTField {
                     format!(" [{}]", attrs.join(", "))
                 };
 
-                format!("{prefix}{type_str}:{sp}{name}{opt}{attrs}",
+                format!("{prefix}{type_str}{sens}:{sp}{name}{opt}{attrs}",
                     prefix = prefix, sp = ctx.sp(), name = self.name,
-                    opt = opt_str, attrs = attr_str)
+                    sens = sens_str, opt = opt_str, attrs = attr_str)
             }
 
             JsonTFieldKind::Object { schema_ref, is_array, optional, constraints } => {
@@ -344,6 +352,9 @@ fn stringify_operation(op: &SchemaOperation, ctx: &Ctx) -> String {
         }
         SchemaOperation::Transform { target, expr, .. } => {
             format!("transform{sp}{}{sp}={sp}{}", target.join(), stringify_expr(expr), sp = sp)
+        }
+        SchemaOperation::Decrypt { fields } => {
+            format!("decrypt({})", fields.join(", "))
         }
     }
 }
@@ -497,6 +508,7 @@ pub fn stringify_value(v: &JsonTValue) -> String {
         JsonTValue::Number(n)   => stringify_number(n),
         JsonTValue::Object(row) => stringify_row(row),
         JsonTValue::Array(arr)  => stringify_array(arr),
+        JsonTValue::Encrypted(_) => "<encrypted>".to_string(),
     }
 }
 

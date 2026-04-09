@@ -118,6 +118,19 @@ public final class JsonTSchemaBuilder {
         return this;
     }
 
+    /**
+     * Appends a {@link SchemaOperation.Decrypt} operation to a derived schema's pipeline.
+     *
+     * <p>The named fields are decrypted in-place at transform time. Returns an error if
+     * called on a straight schema.
+     *
+     * @param fields one or more field names to decrypt
+     * @throws BuildError if called on a straight schema or if fields list is empty
+     */
+    public JsonTSchemaBuilder decrypt(String... fields) throws BuildError {
+        return operation(SchemaOperation.decrypt(fields));
+    }
+
     // ─── Build ────────────────────────────────────────────────────────────────
 
     /** @throws BuildError if the schema is misconfigured (e.g. no fields, duplicate names) */

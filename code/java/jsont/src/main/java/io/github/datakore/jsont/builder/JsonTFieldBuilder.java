@@ -41,6 +41,7 @@ public final class JsonTFieldBuilder {
 
     // modifiers
     private boolean optional = false;
+    private boolean sensitive = false;
 
     // numeric constraints
     private Double minValue;
@@ -130,6 +131,17 @@ public final class JsonTFieldBuilder {
     /** Marks the field as optional (may be absent or null in a row). */
     public JsonTFieldBuilder optional() {
         this.optional = true;
+        return this;
+    }
+
+    /**
+     * Marks this field as sensitive (encrypted on the wire).
+     *
+     * <p>Only valid on scalar fields. Calling this on an {@code object} or
+     * {@code anyOf} field causes {@link #build()} to throw a {@link BuildError}.
+     */
+    public JsonTFieldBuilder sensitive() {
+        this.sensitive = true;
         return this;
     }
 
@@ -265,6 +277,8 @@ public final class JsonTFieldBuilder {
             throw new BuildError("Field '" + name + "': minItems (" + minItems + ") > maxItems (" + maxItems + ")");
         if (maxPrecision != null && maxPrecision < 0)
             throw new BuildError("Field '" + name + "': maxPrecision must be >= 0");
+        if (sensitive && !kind.isScalar())
+            throw new BuildError("Field '" + name + "': sensitive() is only valid on scalar fields, not " + kind);
 
         FieldConstraints constraints = new FieldConstraints(
                 minValue, maxValue,
@@ -280,6 +294,6 @@ public final class JsonTFieldBuilder {
         if (kind.isAnyOf()) {
             return new JsonTField(name, kind, anyOfVariants, discriminatorField, optional, constraints);
         }
-        return new JsonTField(name, kind, scalarType, objectRef, optional, constraints);
+        return new JsonTField(name, kind, scalarType, objectRef, optional, sensitive, constraints);
     }
 }

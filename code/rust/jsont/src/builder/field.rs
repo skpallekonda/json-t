@@ -23,6 +23,7 @@ pub struct JsonTFieldBuilder {
     name:        String,
     kind:        FieldBuildKind,
     optional:    bool,
+    sensitive:   bool,
     constraints: Vec<JsonTConstraint>,
 }
 
@@ -58,6 +59,7 @@ impl JsonTFieldBuilder {
                 constant: None,
             },
             optional:    false,
+            sensitive:   false,
             constraints: Vec::new(),
         }
     }
@@ -70,6 +72,7 @@ impl JsonTFieldBuilder {
                 is_array:   false,
             },
             optional:    false,
+            sensitive:   false,
             constraints: Vec::new(),
         }
     }
@@ -84,6 +87,7 @@ impl JsonTFieldBuilder {
                 discriminator: None,
             },
             optional:    false,
+            sensitive:   false,
             constraints: Vec::new(),
         }
     }
@@ -92,6 +96,15 @@ impl JsonTFieldBuilder {
 
     pub fn optional(mut self) -> Self {
         self.optional = true;
+        self
+    }
+
+    /// Mark this field as sensitive (encrypted on the wire).
+    ///
+    /// Only valid on scalar fields. Calling this on an `object` or `anyOf`
+    /// field causes [`build`] to return a [`BuildError`].
+    pub fn sensitive(mut self) -> Self {
+        self.sensitive = true;
         self
     }
 
@@ -232,10 +245,17 @@ impl JsonTFieldBuilder {
                     default,
                     constant,
                     constraints: self.constraints,
+                    sensitive: self.sensitive,
                 }
             }
 
             FieldBuildKind::Object { schema_ref, is_array } => {
+                if self.sensitive {
+                    return Err(BuildError::InvalidField {
+                        field: self.name.clone(),
+                        reason: "sensitive() is only valid on scalar fields, not object fields".into(),
+                    }.into());
+                }
                 // Only Required and ArrayItems are valid on object fields.
                 for c in &self.constraints {
                     match c {
@@ -264,6 +284,12 @@ impl JsonTFieldBuilder {
             }
 
             FieldBuildKind::AnyOf { variants, is_array, discriminator } => {
+                if self.sensitive {
+                    return Err(BuildError::InvalidField {
+                        field: self.name.clone(),
+                        reason: "sensitive() is only valid on scalar fields, not anyOf fields".into(),
+                    }.into());
+                }
                 if variants.len() < 2 {
                     return Err(BuildError::InvalidField {
                         field: self.name.clone(),

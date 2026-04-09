@@ -24,7 +24,8 @@ public sealed interface SchemaOperation
                 SchemaOperation.Exclude,
                 SchemaOperation.Project,
                 SchemaOperation.Filter,
-                SchemaOperation.Transform {
+                SchemaOperation.Transform,
+                SchemaOperation.Decrypt {
 
     // ─── Variants ─────────────────────────────────────────────────────────────
 
@@ -122,5 +123,31 @@ public sealed interface SchemaOperation
 
     static SchemaOperation transform(String targetField, JsonTExpression expr) {
         return new Transform(FieldPath.single(targetField), expr);
+    }
+
+    /**
+     * Decrypts the listed fields in-place.
+     *
+     * <p>Each named field must carry a {@link JsonTValue.Encrypted} value; the runtime
+     * calls {@code CryptoConfig.decrypt()} and replaces the value with the decoded
+     * plaintext. Fields already in plaintext state are silently skipped (idempotent).
+     *
+     * <p>This operation acts as the declassification gate: operations that appear
+     * after {@code Decrypt} may reference the named fields as if they were plaintext.
+     */
+    record Decrypt(List<String> fields) implements SchemaOperation {
+        public Decrypt {
+            Objects.requireNonNull(fields, "fields must not be null");
+            if (fields.isEmpty()) throw new IllegalArgumentException("Decrypt must specify at least one field");
+            fields = List.copyOf(fields);
+        }
+    }
+
+    static SchemaOperation decrypt(List<String> fields) {
+        return new Decrypt(fields);
+    }
+
+    static SchemaOperation decrypt(String... fields) {
+        return new Decrypt(List.of(fields));
     }
 }

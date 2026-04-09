@@ -62,6 +62,14 @@ pub enum JsonTFieldKind {
         /// Stored in declaration order; validated for type compatibility at
         /// build/parse time.
         constraints: Vec<JsonTConstraint>,
+
+        /// When `true`, this field carries sensitive data (PII, PHI, secrets).
+        ///
+        /// On the wire, sensitive values are encrypted: the raw row bytes contain
+        /// a Base64-encoded envelope (`base64:<b64>`) instead of the plaintext.
+        /// The value is parsed into [`JsonTValue::Encrypted`] and remains opaque
+        /// until an explicit `decrypt` pipeline operation or on-demand API call.
+        sensitive: bool,
     },
 
     Object {
@@ -102,6 +110,11 @@ pub enum JsonTFieldKind {
 impl JsonTFieldKind {
     /// True if this kind is `AnyOf`.
     pub fn is_any_of(&self) -> bool { matches!(self, JsonTFieldKind::AnyOf { .. }) }
+
+    /// True if this is a sensitive scalar field (encrypted on the wire).
+    pub fn is_sensitive(&self) -> bool {
+        matches!(self, JsonTFieldKind::Scalar { sensitive: true, .. })
+    }
 
     /// True if this field holds an array of values (applies to all kinds).
     pub fn is_array(&self) -> bool {

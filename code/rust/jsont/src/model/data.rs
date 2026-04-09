@@ -39,6 +39,14 @@ pub enum JsonTValue {
 
     /// An array of values.
     Array(JsonTArray),
+
+    /// A field value that is encrypted at rest.
+    ///
+    /// The inner bytes are an opaque envelope produced by [`CryptoConfig::encrypt`].
+    /// The value flows through parse → validate → transform unchanged and is only
+    /// decrypted on demand (via the `decrypt` pipeline operation or the on-demand
+    /// `decrypt()` helper).
+    Encrypted(Vec<u8>),
 }
 
 impl JsonTValue {
@@ -82,6 +90,8 @@ impl JsonTValue {
 
     // ── Numeric temporal constructors ─────────────────────────────────────
 
+    pub fn encrypted(bytes: Vec<u8>) -> Self { JsonTValue::Encrypted(bytes) }
+
     pub fn date_int(n: u32) -> Self { JsonTValue::Number(JsonTNumber::Date(n)) }
     pub fn time_int(n: u32) -> Self { JsonTValue::Number(JsonTNumber::Time(n)) }
     pub fn datetime_int(n: u64) -> Self { JsonTValue::Number(JsonTNumber::DateTime(n)) }
@@ -92,6 +102,12 @@ impl JsonTValue {
     pub fn is_null(&self) -> bool { matches!(self, JsonTValue::Null) }
     pub fn is_numeric(&self) -> bool { matches!(self, JsonTValue::Number(_)) }
     pub fn is_string(&self) -> bool { matches!(self, JsonTValue::Str(_)) }
+    pub fn is_encrypted(&self) -> bool { matches!(self, JsonTValue::Encrypted(_)) }
+
+    /// Returns the raw envelope bytes if this value is encrypted.
+    pub fn as_encrypted(&self) -> Option<&[u8]> {
+        match self { JsonTValue::Encrypted(b) => Some(b), _ => None }
+    }
 
     pub fn as_f64(&self) -> Option<f64> {
         match self {
@@ -135,8 +151,9 @@ impl JsonTValue {
             JsonTValue::Bool(_)     => "bool",
             JsonTValue::Str(js)     => js.type_name(),
             JsonTValue::Enum(_)     => "enum",
-            JsonTValue::Object(_)   => "object",
-            JsonTValue::Array(_)    => "array",
+            JsonTValue::Object(_)    => "object",
+            JsonTValue::Array(_)     => "array",
+            JsonTValue::Encrypted(_) => "encrypted",
         }
     }
 
