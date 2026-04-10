@@ -17,31 +17,8 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 /**
- * Entry point for all JsonT parsing operations.
- *
- * <h2>Schema DSL parsing</h2>
- * <pre>{@code
- *   String dsl = """
- *       namespace "https://example.com" {
- *         catalog {
- *           schema Order {
- *             fields { id: i64, name: str }
- *           }
- *         }
- *       }
- *       """;
- *   JsonTNamespace ns = JsonTParser.parseNamespace(dsl);
- * }</pre>
- *
- * <h2>Data row parsing</h2>
- * <pre>{@code
- *   List<JsonTRow> rows = new ArrayList<>();
- *   JsonTParser.parseRows("{1,\"Alice\",true},{2,\"Bob\",false}", rows::add);
- *
- *   try (RowIter iter = JsonTParser.rowIter(new FileReader("data.jsont"))) {
- *       iter.forEachRemaining(pipeline::process);
- *   }
- * }</pre>
+ * Entry point for parsing JsonT. You can parse namespaces or 
+ * scan data rows from strings and readers easily.
  */
 public final class JsonTParser {
 

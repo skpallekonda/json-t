@@ -366,24 +366,22 @@ public final class ValidationPipeline {
             JsonTValue val = row.values().get(i);
             JsonTField field = i < fields.size() ? fields.get(i) : null;
             if (field != null && field.kind().isScalar()) {
-                // If the field is sensitive and the wire value carries a "base64:" envelope,
-                // decode it into Encrypted now that we have schema context.
-                // The row scanner emits it as a plain string; promotion is the first
-                // place the schema is known.
-                if (field.sensitive() && val instanceof JsonTString.Plain p
-                        && p.value().startsWith("base64:")) {
-                    String b64 = p.value().substring("base64:".length());
+                // Sensitive fields use plain base64 on the wire — the ~
+                // schema marker is the authority, not a string prefix.
+                // The row scanner emits the wire value as a plain string;
+                // promotion is the first place the schema is known.
+                if (field.sensitive() && val instanceof JsonTString.Plain p) {
                     try {
-                        byte[] bytes = java.util.Base64.getDecoder().decode(b64);
+                        byte[] bytes = java.util.Base64.getDecoder().decode(p.value());
                         val = JsonTValue.encrypted(bytes);
                     } catch (IllegalArgumentException e) {
-                        // Invalid base64 — emit a fatal FormatViolation so the row
-                        // is rejected. Leave val as-is (plain string) for context.
+                        // Not valid base64 — emit a fatal FormatViolation so the
+                        // row is rejected. Leave val as-is (plain string) for context.
                         events.add(DiagnosticEvent.fatal(
                                 new DiagnosticEventKind.ConstraintViolation(
                                         field.name(),
-                                        "base64-encoded envelope",
-                                        "invalid base64 in \"" + p.value() + "\""))
+                                        "base64-encoded ciphertext",
+                                        "invalid base64: \"" + p.value() + "\""))
                                 .atRow(rowIdx));
                     }
                 } else {

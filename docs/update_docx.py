@@ -31,14 +31,20 @@ def add_body(doc, text):
 
 def add_code(doc, code):
     p = doc.add_paragraph()
-    p.style = "No Spacing"
+    try:
+        p.style = "No Spacing"
+    except KeyError:
+        p.style = "Normal"
     run = p.add_run(code)
     run.font.name = "Courier New"
     run.font.size = Pt(9)
     run.font.color.rgb = RGBColor(0x20, 0x20, 0x20)
 
 def add_bullet(doc, text):
-    doc.add_paragraph(text, style="List Bullet")
+    try:
+        doc.add_paragraph(text, style="List Bullet")
+    except KeyError:
+        doc.add_paragraph(text) # fallback to normal paragraph
 
 existing = heading_texts(doc)
 

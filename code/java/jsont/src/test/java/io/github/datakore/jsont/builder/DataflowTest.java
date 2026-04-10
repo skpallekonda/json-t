@@ -66,9 +66,9 @@ class DataflowTest {
                 .build();
     }
 
-    /** Encode bytes as wire-format value. */
+    /** Encode bytes as plain-base64 wire-format value (no prefix). */
     static JsonTValue b64Wire(byte[] plaintext) {
-        return JsonTValue.text("base64:" + Base64.getEncoder().encodeToString(plaintext));
+        return JsonTValue.text(Base64.getEncoder().encodeToString(plaintext));
     }
 
     // ── run helpers ───────────────────────────────────────────────────────────

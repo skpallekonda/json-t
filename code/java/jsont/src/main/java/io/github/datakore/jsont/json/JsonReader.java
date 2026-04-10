@@ -14,21 +14,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Converts JSON input into {@link JsonTRow} values guided by a {@link JsonTSchema}.
- *
- * <p>Obtain a configured reader via the fluent builder:
- * <pre>{@code
- *   JsonReader reader = JsonReader.withSchema(schema)
- *       .mode(JsonInputMode.NDJSON)
- *       .unknownFields(UnknownFieldPolicy.SKIP)
- *       .build();
- *
- *   reader.read(jsonString, row -> pipeline.process(row));
- * }</pre>
- *
- * <h2>Schema requirement</h2>
- * <p>Only <em>straight</em> schemas are supported directly. For derived schemas,
- * resolve the full field list with a registry before constructing the reader.
+ * This converts JSON input into {@link JsonTRow} based on a {@link JsonTSchema}. 
+ * You can use the fluent builder to configure it.
  */
 public final class JsonReader {
 
@@ -236,15 +223,8 @@ public final class JsonReader {
     }
 
     /**
-     * Dispatch a single JSON node against the declared anyOf variants.
-     * Rules (applied in order):
-     * <ol>
-     *   <li>Boolean token → first {@code bool} scalar variant wins.</li>
-     *   <li>Number token → first numeric scalar variant wins (try in order).</li>
-     *   <li>String token → SchemaRef variants first (stored as Enum), then string scalar variants.</li>
-     *   <li>Object token → single SchemaRef variant (direct); multiple SchemaRef variants require
-     *       discriminator field.</li>
-     * </ol>
+     * Matches a JSON node against anyOf variants using specific rules for 
+     * Boolean, Number, String, and Object tokens.
      */
     private JsonTValue resolveAnyOfSingle(JsonValueNode node, JsonTField field) {
         List<AnyOfVariant> variants = field.anyOfVariants();

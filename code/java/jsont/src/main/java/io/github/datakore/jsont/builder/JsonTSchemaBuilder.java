@@ -14,28 +14,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Fluent builder for {@link JsonTSchema}.
- *
- * <p>Use {@link #straight} for schemas that declare their own fields, or
- * {@link #derived} for schemas that project/transform a parent schema.
- *
- * <pre>{@code
- *   // Straight schema
- *   JsonTSchema order = JsonTSchemaBuilder.straight("Order")
- *       .fieldFrom(JsonTFieldBuilder.scalar("id",      ScalarType.I64))
- *       .fieldFrom(JsonTFieldBuilder.scalar("product", ScalarType.STR).minLength(2))
- *       .fieldFrom(JsonTFieldBuilder.scalar("qty",     ScalarType.I32).minValue(1).maxValue(999))
- *       .fieldFrom(JsonTFieldBuilder.scalar("price",   ScalarType.D64).minValue(0.01))
- *       .validationFrom(
- *           JsonTValidationBlockBuilder.create().unique("id"))
- *       .build();
- *
- *   // Derived schema — keeps only id and product
- *   JsonTSchema summary = JsonTSchemaBuilder.derived("OrderSummary", "Order")
- *       .operation(SchemaOperation.project(
- *           FieldPath.single("id"), FieldPath.single("product")))
- *       .build();
- * }</pre>
+ * Fluent builder for {@link JsonTSchema}. Use {@link #straight} for new fields 
+ * or {@link #derived} to transform an existing schema.
  */
 public final class JsonTSchemaBuilder {
 
@@ -173,16 +153,8 @@ public final class JsonTSchemaBuilder {
     }
 
     /**
-     * Build-time dataflow check: detects {@code Transform} or {@code Filter} operations
-     * that reference a field appearing in a later (or absent) {@code Decrypt} operation.
-     *
-     * <p>The check is conservative: any field listed in <em>any</em> {@code Decrypt} op
-     * in the pipeline is treated as encrypted at the start.  An expression that references
-     * such a field before its {@code Decrypt} op fires is a build error.
-     *
-     * <p>This analysis is purely self-contained within the operations list — no parent
-     * schema is required.  For cross-schema validation (e.g. "decrypt field must exist in
-     * parent"), call {@link JsonTSchema#validateWithParent} once the parent is available.
+     * Checks if Transform or Filter use any encrypted fields before Decrypt. 
+     * This logic is self-contained within the operations list.
      */
     private void checkOperationDataflow(List<SchemaOperation> ops) throws BuildError {
         // Collect all field names appearing in any Decrypt op — presumed sensitive.

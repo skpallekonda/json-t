@@ -10,27 +10,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * An immutable schema definition — either <em>straight</em> (declares own fields)
- * or <em>derived</em> (projects/transforms another schema).
- *
- * <p>Instances are produced exclusively by {@code JsonTSchemaBuilder.build()}:
- *
- * <pre>{@code
- *   // Straight schema
- *   JsonTSchema order = JsonTSchemaBuilder.straight("Order")
- *       .fieldFrom(JsonTFieldBuilder.scalar("id",      ScalarType.I64))
- *       .fieldFrom(JsonTFieldBuilder.scalar("product", ScalarType.STR).minLength(2))
- *       .fieldFrom(JsonTFieldBuilder.scalar("qty",     ScalarType.I32).minValue(1).maxValue(999))
- *       .fieldFrom(JsonTFieldBuilder.scalar("price",   ScalarType.D64).minValue(0.01))
- *       .validationFrom(
- *           JsonTValidationBlockBuilder.create().unique(FieldPath.single("id")))
- *       .build();
- *
- *   // Derived schema
- *   JsonTSchema summary = JsonTSchemaBuilder.derived("OrderSummary", "Order")
- *       .operation(SchemaOperation.project(FieldPath.single("id"), FieldPath.single("product")))
- *       .build();
- * }</pre>
+ * Immutable schema definition, either straight or derived. 
+ * Please use {@link JsonTSchemaBuilder.build()} for creating instances.
  */
 public final class JsonTSchema {
 
@@ -97,35 +78,8 @@ public final class JsonTSchema {
     public int fieldCount() { return fields.size(); }
 
     /**
-     * Simulates the full operation pipeline against a resolved parent schema,
-     * detecting field-level errors at build time rather than at row-evaluation time.
-     *
-     * <p>Tracked invariants across every operation:
-     * <ul>
-     *   <li><b>Existence</b>: a field removed by {@code Exclude} or {@code Project} cannot
-     *       be referenced by any later operation.</li>
-     *   <li><b>Identity</b>: after a {@code Rename}, only the new name is in scope; the
-     *       old name is gone.</li>
-     *   <li><b>Encryption state</b>: a field marked {@code sensitive (~)} in the parent
-     *       starts encrypted; it must pass through a {@code Decrypt} op before a
-     *       {@code Transform} or {@code Filter} expression may reference it.</li>
-     * </ul>
-     *
-     * <p>Errors detected:
-     * <ul>
-     *   <li>{@code Decrypt}   on a nonexistent or non-sensitive field.</li>
-     *   <li>{@code Project}   referencing a field not in scope.</li>
-     *   <li>{@code Exclude}   referencing a field not in scope.</li>
-     *   <li>{@code Rename}    from a field not in scope, or to a name already in scope.</li>
-     *   <li>{@code Transform}/{@code Filter} expression references a field not in scope.</li>
-     *   <li>{@code Transform}/{@code Filter} expression references an encrypted field.</li>
-     *   <li>{@code Transform} target field not in scope or still encrypted.</li>
-     * </ul>
-     *
-     * <p>For straight schemas this is a no-op.
-     *
-     * @param parent the resolved parent schema
-     * @throws BuildError if any operation violates field-scope or encryption-state invariants
+     * This validates the transformation pipeline against the parent schema. 
+     * It checks for field existence, renames, and encryption states properly.
      */
     public void validateWithParent(JsonTSchema parent) throws BuildError {
         if (kind != SchemaKind.DERIVED) return;

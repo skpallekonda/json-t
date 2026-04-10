@@ -91,10 +91,10 @@ public final class RowWriter {
      *
      * <ul>
      *   <li>Sensitive field with a non-{@code Encrypted} value → plaintext bytes
-     *       are passed to {@code crypto.encrypt} and written as
-     *       {@code "base64:<b64>"}.</li>
+     *       are passed to {@code crypto.encrypt} and written as plain base64
+     *       (no prefix — the {@code ~} schema marker is the authority).</li>
      *   <li>Sensitive field already holding an {@code Encrypted} value → ciphertext
-     *       bytes are re-encoded to {@code "base64:<b64>"} (no crypto call).</li>
+     *       bytes are re-encoded as plain base64 (no crypto call).</li>
      *   <li>Non-sensitive fields → written normally.</li>
      * </ul>
      *
@@ -124,7 +124,7 @@ public final class RowWriter {
                     byte[] plaintext = valueToText(v).getBytes(java.nio.charset.StandardCharsets.UTF_8);
                     ciphertext = crypto.encrypt(field.name(), plaintext);
                 }
-                writeQuotedString("base64:" + Base64.getEncoder().encodeToString(ciphertext), w);
+                writeQuotedString(Base64.getEncoder().encodeToString(ciphertext), w);
             } else {
                 writeValue(v, w);
             }
@@ -180,7 +180,7 @@ public final class RowWriter {
         if (v instanceof JsonTValue.Unspecified) { w.write('_'); return; }
         if (v instanceof JsonTValue.Array     a) { writeArray(a.elements(), w); return; }
         if (v instanceof JsonTValue.Encrypted e) {
-            writeQuotedString("base64:" + Base64.getEncoder().encodeToString(e.envelope()), w);
+            writeQuotedString(Base64.getEncoder().encodeToString(e.envelope()), w);
             return;
         }
         throw new IllegalArgumentException("Unknown JsonTValue: " + v);

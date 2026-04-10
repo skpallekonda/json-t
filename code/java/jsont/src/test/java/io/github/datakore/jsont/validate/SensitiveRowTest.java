@@ -5,18 +5,18 @@ package io.github.datakore.jsont.validate;
 // =============================================================================
 // The row scanner has no schema context, so it always emits quoted strings as
 // JsonTString.Plain("…"). promoteRow, which runs inside the validation pipeline
-// and has both field and value, upgrades plain "base64:…" values to
-// JsonTValue.Encrypted for sensitive fields.
+// and has both field and value, decodes the wire value as base64 ciphertext for
+// sensitive fields (the ~ schema marker is the authority, not a string prefix).
 //
 // These tests construct rows that mimic scanner output (plain text values) and
 // feed them through ValidationPipeline.validateRows, then inspect the
 // promoted row values.
 //
 // Coverage:
-//   • base64: prefix on sensitive field → Encrypted after promoteRow
+//   • base64 string on sensitive field → Encrypted after promoteRow
 //   • Encrypted value carries correct decoded bytes
-//   • Non-sensitive field with base64: prefix stays plain Str (no promotion)
-//   • Sensitive field with no base64: prefix stays Str (normal promotion)
+//   • Non-sensitive field with base64-looking string stays plain Str
+//   • Sensitive field that is already Encrypted passes through unchanged
 //   • Null on optional sensitive field stays Null
 //   • Multiple sensitive fields in one row — all decoded
 //   • Two rows processed independently — both decoded correctly
@@ -62,10 +62,9 @@ class SensitiveRowTest {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    /** Encode bytes as the wire-format string the scanner would produce. */
+    /** Encode bytes as the plain-base64 wire-format string the scanner would produce. */
     static JsonTValue b64Wire(byte[] plaintext) {
-        String encoded = Base64.getEncoder().encodeToString(plaintext);
-        return JsonTValue.text("base64:" + encoded);
+        return JsonTValue.text(Base64.getEncoder().encodeToString(plaintext));
     }
 
     static JsonTValue b64Wire(String plaintext) {
@@ -114,10 +113,10 @@ class SensitiveRowTest {
 
     @Test
     void non_sensitive_field_base64_prefix_stays_str() throws Exception {
-        // name is not sensitive — "base64:…" is a literal string value
+        // name is not sensitive — a base64-looking string stays as plain Str
         var row = JsonTRow.of(
-                JsonTValue.text("123-45-6789"),
-                JsonTValue.text("base64:aGVsbG8=")
+                b64Wire("123-45-6789"),   // sensitive ssn — will be decoded
+                JsonTValue.text("aGVsbG8=") // name is not sensitive — stays as Str
         );
         var clean = runSilent(personSchema(), List.of(row));
 
@@ -127,16 +126,20 @@ class SensitiveRowTest {
     }
 
     @Test
-    void sensitive_field_without_base64_prefix_stays_str() throws Exception {
+    void sensitive_field_already_encrypted_passes_through() throws Exception {
+        // If the value is already Encrypted (e.g. after a prior promotion),
+        // promoteRow must leave it unchanged — no double-decoding.
+        byte[] ciphertext = "already-decoded-bytes".getBytes();
         var row = JsonTRow.of(
-                JsonTValue.text("plain-no-prefix"),
+                JsonTValue.encrypted(ciphertext),
                 JsonTValue.text("Dave")
         );
         var clean = runSilent(personSchema(), List.of(row));
 
-        assertFalse(clean.get(0).values().get(0).isEncrypted(),
-                "no prefix → stays Str");
-        assertInstanceOf(JsonTString.class, clean.get(0).values().get(0));
+        assertTrue(clean.get(0).values().get(0).isEncrypted(),
+                "pre-Encrypted value must stay Encrypted");
+        assertArrayEquals(ciphertext,
+                ((JsonTValue.Encrypted) clean.get(0).values().get(0)).envelope());
     }
 
     @Test
@@ -186,7 +189,7 @@ class SensitiveRowTest {
     @Test
     void invalid_base64_payload_row_is_rejected() throws Exception {
         var row = JsonTRow.of(
-                JsonTValue.text("base64:!!!not-valid-base64!!!"),
+                JsonTValue.text("!!!not-valid-base64!!!"),
                 JsonTValue.text("Grace")
         );
         var result = runWithEvents(personSchema(), List.of(row));

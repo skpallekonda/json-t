@@ -176,15 +176,22 @@ impl SchemaRegistry {
         self.schemas.get(name)
     }
 
-    /// Build a registry from a parsed namespace (all catalogs, all schemas).
-    pub fn from_namespace(ns: &JsonTNamespace) -> Self {
+    /// Builds the registry from a namespace and validates everything like field refs 
+    /// and parent chains. If validation fails, it will return an Err.
+    pub fn from_namespace(ns: &JsonTNamespace) -> Result<Self, JsonTError> {
         let mut registry = Self::new();
         for catalog in &ns.catalogs {
             for schema in &catalog.schemas {
                 registry.register(schema.clone());
             }
         }
-        registry
+        // Validate every schema now that the full registry is populated.
+        for catalog in &ns.catalogs {
+            for schema in &catalog.schemas {
+                schema.validate_schema(&registry)?;
+            }
+        }
+        Ok(registry)
     }
 }
 

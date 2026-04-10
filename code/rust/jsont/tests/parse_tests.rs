@@ -292,7 +292,7 @@ fn test_e2e_demo_parse_and_generate_data() {
     println!("{}", ns.stringify(StringifyOptions::pretty()));
 
     // 3. Build 10 records using the data-schema ("Person")
-    let registry = SchemaRegistry::from_namespace(&ns);
+    let registry = SchemaRegistry::from_namespace(&ns).expect("registry build failed");
     let person_schema = registry.get(&ns.data_schema).expect("Person schema not found");
     let address_schema = registry.get("Address").expect("Address schema not found");
 

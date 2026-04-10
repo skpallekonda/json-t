@@ -40,12 +40,8 @@ pub enum JsonTValue {
     /// An array of values.
     Array(JsonTArray),
 
-    /// A field value that is encrypted at rest.
-    ///
-    /// The inner bytes are an opaque envelope produced by [`CryptoConfig::encrypt`].
-    /// The value flows through parse → validate → transform unchanged and is only
-    /// decrypted on demand (via the `decrypt` pipeline operation or the on-demand
-    /// `decrypt()` helper).
+    /// Encrypted field value. It stays opaque during pipeline steps and is only 
+    /// decrypted when needed via the `decrypt` operation or helper.
     Encrypted(Vec<u8>),
 }
 
@@ -159,13 +155,8 @@ impl JsonTValue {
 
     // ── On-demand decrypt ─────────────────────────────────────────────────
 
-    /// Decrypt this value if it is `Encrypted`, otherwise return it unchanged.
-    ///
-    /// Returns the raw plaintext bytes on success.  The caller is responsible
-    /// for interpreting the bytes (e.g., converting to UTF-8 with
-    /// [`decrypt_str`](JsonTValue::decrypt_str)).
-    ///
-    /// Returns `None` (without calling `crypto`) if the value is not `Encrypted`.
+    /// Decrypts the value if it's Encrypted, returning raw bytes. If not 
+    /// encrypted, it returns None without calling the crypto logic.
     pub fn decrypt_bytes(
         &self,
         field: &str,
@@ -531,15 +522,8 @@ impl JsonTRow {
         self.fields.get(index)
     }
 
-    /// Find a field by name in a named working context is not possible on positional rows.
-    ///
-    /// Decrypt the value at position `index` and return the plaintext as a UTF-8 string.
-    ///
-    /// `field_name` is passed to `crypto.decrypt()` for key derivation; it must
-    /// match the name used when the value was encrypted.
-    ///
-    /// Returns `None` if the value is not `Encrypted` (already plaintext, null, etc.)
-    /// Returns `Err` on crypto or UTF-8 failure.
+    /// Decrypts a specific field by index and returns it as a UTF-8 string. 
+    /// Requires the original field name for decryption. Returns Err on failure.
     pub fn decrypt_field_str(
         &self,
         index: usize,

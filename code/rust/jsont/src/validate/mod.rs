@@ -2,13 +2,8 @@
 // validate/mod.rs — Row validation pipeline with non-blocking diagnostic sinks
 // =============================================================================
 //
-// # Responsibilities
-//
-//   1. Apply field-level constraints (required, value bounds, length, regex, …)
-//   2. Apply row-level rules from the schema's `validations` block
-//   3. Enforce uniqueness constraints across the batch
-//   4. Deliver every DiagnosticEvent to registered sinks asynchronously —
-//      sink I/O never stalls the validation loop
+// This part handles field constraints, row rules, and uniqueness. 
+// It sends events to sinks asynchronously so there is no stalling.
 //
 // # Severity contract
 //
@@ -525,28 +520,26 @@ fn try_promote_row(
         .map(|(val, field)| {
             match &field.kind {
                 JsonTFieldKind::Scalar { field_type, sensitive, .. } => {
-                    // If the field is sensitive and the wire value carries a
-                    // "base64:" envelope, decode it into Encrypted now that we
-                    // have schema context.  The row scanner emits it as a plain
-                    // Str — promotion is the first place the schema is known.
+                    // Sensitive fields use plain base64 on the wire — the ~
+                    // schema marker is the authority, not a string prefix.
+                    // The row scanner emits the wire value as a plain Str;
+                    // promotion is the first place the schema is known.
                     if *sensitive {
                         if let JsonTValue::Str(ref js) = val {
                             if let crate::model::data::JsonTString::Plain(ref s) = *js {
-                                if let Some(b64) = s.strip_prefix("base64:") {
-                                    use base64::Engine as _;
-                                    match base64::engine::general_purpose::STANDARD.decode(b64) {
-                                        Ok(bytes) => return JsonTValue::encrypted(bytes),
-                                        Err(_) => {
-                                            events.push(
-                                                DiagnosticEvent::fatal(EventKind::FormatViolation {
-                                                    field:    field.name.clone(),
-                                                    expected: "base64-encoded envelope".to_string(),
-                                                    actual:   format!("invalid base64 in \"base64:{}\"", b64),
-                                                })
-                                                .at_row(row_idx),
-                                            );
-                                            return val;
-                                        }
+                                use base64::Engine as _;
+                                match base64::engine::general_purpose::STANDARD.decode(s.as_str()) {
+                                    Ok(bytes) => return JsonTValue::encrypted(bytes),
+                                    Err(_) => {
+                                        events.push(
+                                            DiagnosticEvent::fatal(EventKind::FormatViolation {
+                                                field:    field.name.clone(),
+                                                expected: "base64-encoded ciphertext".to_string(),
+                                                actual:   format!("invalid base64: \"{}\"", s),
+                                            })
+                                            .at_row(row_idx),
+                                        );
+                                        return val;
                                     }
                                 }
                             }
@@ -582,17 +575,8 @@ fn try_promote_row(
     (JsonTRow::new(promoted), events)
 }
 
-/// Promote a raw scanned value against a list of anyOf variants (first-match-wins).
-///
-/// Mirrors Java's `promoteAnyOf` behaviour exactly:
-/// - Bool   → first BOOL variant wins immediately.
-/// - Number → first numeric variant wins; promotion is applied (may return the
-///            original if precision/range doesn't fit), but no fallthrough to the
-///            next numeric variant — same as Java's unconditional `return promote(val, type)`.
-/// - String → first string-like variant wins; format variants that reject coercion
-///            (e.g. "hello" is not a valid UUID) are skipped; plain `str` acts as
-///            catch-all and always succeeds.
-/// - Everything else (SchemaRef variants, Object, Null) passes through unchanged.
+/// Promotes the scanned value against anyOf variants (first-match-wins). 
+/// This matches the Java implementation for Bool, Number, and String.
 fn promote_any_of(val: JsonTValue, variants: &[AnyOfVariant]) -> JsonTValue {
     for v in variants {
         let AnyOfVariant::Scalar(t) = v else { continue };
@@ -627,17 +611,8 @@ fn promote_any_of(val: JsonTValue, variants: &[AnyOfVariant]) -> JsonTValue {
     val // no scalar variant matched — return as-is
 }
 
-/// Build a composite uniqueness key as a single null-byte-separated `String`.
-///
-/// Using a single `String` instead of `Vec<String>` reduces per-key allocation
-/// from ~84+ bytes (Vec header + String headers + heap data) to ~60 bytes
-/// (single String header + heap data), improving cache density in the HashSet.
-///
-/// The `\x00` separator cannot appear in any serialised JsonTValue, so two
-/// distinct value combinations can never produce the same composite key.
-///
-/// Only top-level (single-segment) field paths are currently supported.
-/// Nested paths produce a `"<nested>"` placeholder — conservative and safe.
+/// Builds a composite uniqueness key using null-byte separator for better performance. 
+/// Only top-level fields are supported for now; nested paths use placeholders.
 fn build_unique_key(
     fields: &[JsonTField],
     values: &[JsonTValue],

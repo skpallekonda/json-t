@@ -98,7 +98,7 @@ const WCT20_SCHEMA: &str = include_str!("../../../benchmark-schema/wct20-match.j
 
 fn load_schemas() -> (jsont::JsonTSchema, jsont::JsonTSchema, SchemaRegistry) {
     let ns = JsonTNamespace::parse(WCT20_SCHEMA).expect("wct20 schema parse failed");
-    let registry = SchemaRegistry::from_namespace(&ns);
+    let registry = SchemaRegistry::from_namespace(&ns).expect("registry build failed");
     let cricket = registry.get("CricketMatch")
         .expect("CricketMatch schema not found")
         .clone();

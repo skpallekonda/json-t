@@ -1,5 +1,7 @@
 package io.github.datakore.jsont.builder;
 
+import io.github.datakore.jsont.error.JsonTError;
+import io.github.datakore.jsont.internal.validate.SchemaValidator;
 import io.github.datakore.jsont.model.JsonTCatalog;
 import io.github.datakore.jsont.model.JsonTNamespace;
 import io.github.datakore.jsont.model.JsonTSchema;
@@ -26,7 +28,7 @@ import java.util.Set;
  *   registry.names();                  // Set<String>
  * }</pre>
  */
-public final class SchemaRegistry {
+public final class SchemaRegistry implements SchemaResolver {
 
     private final Map<String, JsonTSchema> schemas;
 
@@ -45,6 +47,16 @@ public final class SchemaRegistry {
      * Builds a registry from all schemas found in every catalog of the namespace.
      * Schemas declared later in the namespace override earlier ones with the same name.
      */
+    /**
+     * Builds a registry from all schemas found in every catalog of the namespace,
+     * then validates every schema against the complete registry.
+     *
+     * <p>Object field references, derived-schema parent chains, operation field
+     * paths, and validation-block field references are all checked here so that
+     * downstream code never encounters a structurally invalid schema.
+     *
+     * @throws JsonTError.SchemaInvalid if any schema fails structural validation
+     */
     public static SchemaRegistry fromNamespace(JsonTNamespace ns) {
         if (ns == null) throw new IllegalArgumentException("namespace must not be null");
         Map<String, JsonTSchema> map = new LinkedHashMap<>();
@@ -53,6 +65,8 @@ public final class SchemaRegistry {
                 map.put(schema.name(), schema);
             }
         }
+        // Validate every schema now that the full registry is populated.
+        SchemaValidator.validateAll(map);
         return new SchemaRegistry(map);
     }
 
@@ -88,6 +102,7 @@ public final class SchemaRegistry {
      * @param name schema name
      * @return the schema, or {@link Optional#empty()} if not registered
      */
+    @Override
     public Optional<JsonTSchema> resolve(String name) {
         return Optional.ofNullable(schemas.get(name));
     }
@@ -99,6 +114,7 @@ public final class SchemaRegistry {
      * @return the schema
      * @throws IllegalArgumentException if not registered
      */
+    @Override
     public JsonTSchema resolveOrThrow(String name) {
         JsonTSchema s = schemas.get(name);
         if (s == null)
@@ -107,6 +123,7 @@ public final class SchemaRegistry {
     }
 
     /** Returns {@code true} if a schema with the given name is registered. */
+    @Override
     public boolean contains(String name) {
         return schemas.containsKey(name);
     }

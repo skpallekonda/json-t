@@ -1,6 +1,6 @@
 package io.github.datakore.jsont.internal.transform;
 
-import io.github.datakore.jsont.builder.SchemaRegistry;
+import io.github.datakore.jsont.builder.SchemaResolver;
 import io.github.datakore.jsont.crypto.CryptoConfig;
 import io.github.datakore.jsont.crypto.CryptoError;
 import io.github.datakore.jsont.error.JsonTError;
@@ -157,7 +157,7 @@ public class OperationApplicator {
 
     public static List<String> resolveEffectiveFields(
             JsonTSchema schema,
-            SchemaRegistry registry,
+            SchemaResolver registry,
             List<String> chain) throws JsonTError.Transform {
 
         // Cycle detection

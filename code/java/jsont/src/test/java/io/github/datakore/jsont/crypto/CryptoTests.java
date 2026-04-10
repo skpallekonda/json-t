@@ -54,9 +54,9 @@ class CryptoTests {
                 .build();
     }
 
-    /** Produce the "base64:<b64>" wire representation of bytes. */
+    /** Produce the plain-base64 wire representation of bytes (no prefix). */
     static String base64Wire(byte[] bytes) {
-        return "base64:" + Base64.getEncoder().encodeToString(bytes);
+        return Base64.getEncoder().encodeToString(bytes);
     }
 
     /** Build parent+derived+registry for Decrypt transform tests. */
@@ -96,11 +96,11 @@ class CryptoTests {
         String out = sw.toString();
 
         assertTrue(out.contains("\"Alice\""), "name should be plain: " + out);
-        assertTrue(out.contains("\"base64:"), "ssn should be base64-encoded: " + out);
-
-        // Passthrough crypto is identity — base64 of "123-45-6789" UTF-8 bytes must appear.
+        // Passthrough crypto is identity — plain base64 of "123-45-6789" UTF-8 bytes must appear.
         String expectedB64 = base64Wire("123-45-6789".getBytes());
         assertTrue(out.contains(expectedB64), "base64 payload mismatch: " + out);
+        // The ssn must not appear in plaintext.
+        assertFalse(out.contains("\"123-45-6789\""), "ssn must be encrypted: " + out);
     }
 
     @Test
@@ -135,8 +135,8 @@ class CryptoTests {
         RowWriter.writeRow(row, schema.fields(), crypto, sw);
         String out = sw.toString();
 
-        assertTrue(out.contains("\"Carol\""), "name should be plain: " + out);
-        assertFalse(out.startsWith("{\"base64:"), "name field should not be encrypted: " + out);
+        // name (non-sensitive) must be written as a plain quoted first field.
+        assertTrue(out.startsWith("{\"Carol\""), "name should be plain first field: " + out);
     }
 
     @Test

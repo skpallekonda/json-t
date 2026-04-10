@@ -26,10 +26,14 @@ JsonT provides composable capabilities:
 3. Transform
    Apply derived schema operations (project, filter, transform)
 
-4. Execute (Planned)
+4. Encrypt / Decrypt (jsont-crypto — separate module)
+   Envelope encryption for sensitive fields; versioned algorithm selection;
+   on-demand per-field decryption with caller-managed CryptoContext
+
+5. Execute (Planned)
    Runtime engine for streaming pipelines
 
-5. Expose (Planned)
+6. Expose (Planned)
    Service layer for API definitions and contracts
 
 Each capability:
@@ -66,12 +70,16 @@ These are co-located but logically distinct:
 
 ## Packaging Model
 
-JsonT is distributed as a single bundle.
+JsonT is distributed as two modules:
+
+* `jsont` — core (parse, validate, transform). Depends on `jsont-crypto` for the `CryptoConfig` interface.
+* `jsont-crypto` — independent module owning `CryptoConfig`, `CryptoContext`, and all cipher implementations. No dependency on `jsont` core.
 
 Internally:
 
 * Parsing, Validation, and Transform are decoupled
 * Users can use only required capabilities
+* Crypto is opt-in via `jsont-crypto`
 
 ---
 

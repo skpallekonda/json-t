@@ -53,9 +53,9 @@ pub fn write_rows<W: Write>(rows: &[JsonTRow], w: &mut W) -> io::Result<()> {
 ///
 /// - If a field is `sensitive` and its value is **not** `Encrypted`, the
 ///   value's text representation is encrypted via `crypto` and written as
-///   `"base64:<b64>"`.
+///   plain base64 (no prefix).
 /// - If a field is `sensitive` and its value **is** `Encrypted`, the stored
-///   ciphertext bytes are re-encoded as `"base64:<b64>"` (no crypto call).
+///   ciphertext bytes are re-encoded as plain base64 (no crypto call).
 /// - Non-sensitive fields are written normally.
 ///
 /// Returns `Err` on any I/O error; crypto failures are mapped to `io::Error`.
@@ -87,7 +87,7 @@ pub fn write_row_with_schema<W: Write>(
                 }
             };
             let b64 = base64::engine::general_purpose::STANDARD.encode(&ciphertext);
-            write_quoted_str(&format!("base64:{}", b64), w)?;
+            write_quoted_str(&b64, w)?;
         } else {
             write_value(v, w)?;
         }
@@ -141,12 +141,12 @@ fn write_value<W: Write>(v: &JsonTValue, w: &mut W) -> io::Result<()> {
         JsonTValue::Number(n) => write_number(n, w),
         JsonTValue::Object(row) => write_row(row, w),
         JsonTValue::Array(arr) => write_array(arr, w),
-        // Encrypted values hold raw ciphertext bytes. Re-encode them as the
-        // base64: wire envelope so the output is valid JsonT data.
+        // Encrypted values hold raw ciphertext bytes. Re-encode them as plain
+        // base64 so the output is valid JsonT data.
         JsonTValue::Encrypted(ciphertext) => {
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD.encode(ciphertext);
-            write_quoted_str(&format!("base64:{}", b64), w)
+            write_quoted_str(&b64, w)
         }
     }
 }

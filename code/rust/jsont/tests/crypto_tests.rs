@@ -50,13 +50,10 @@ fn schema_fields(schema: &jsont::JsonTSchema) -> &[JsonTField] {
     }
 }
 
-/// Encode bytes to the "base64:<b64>" wire prefix.
+/// Encode bytes to the plain base64 wire format (no prefix).
 fn base64_wire(bytes: &[u8]) -> String {
     use base64::Engine as _;
-    format!(
-        "base64:{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 // =============================================================================
@@ -80,15 +77,14 @@ fn write_row_with_schema_plaintext_sensitive_encrypted_on_wire() {
 
     // name should be written as a quoted plain string.
     assert!(out.contains("\"Alice\""), "name should be quoted: {out}");
-    // ssn should be written as base64:... envelope.
-    assert!(out.contains("\"base64:"), "ssn should be base64-encoded: {out}");
-    // The passthrough crypto leaves bytes identical — base64 of UTF-8 bytes of
-    // "123-45-6789" must appear in the output.
+    // ssn should be written as plain base64 (no prefix).
     let expected = base64_wire(b"123-45-6789");
     assert!(
-        out.contains(&expected[7..]), // strip "base64:" prefix, check b64 portion
+        out.contains(&expected),
         "base64 payload mismatch: {out}"
     );
+    // The ssn field must not be written as a plain-text string.
+    assert!(!out.contains("\"123-45-6789\""), "ssn must be encrypted: {out}");
 }
 
 #[test]
@@ -128,13 +124,8 @@ fn write_row_with_schema_non_sensitive_written_plain() {
     write_row_with_schema(&row, schema_fields(&schema), &crypto, &mut buf).unwrap();
     let out = String::from_utf8(buf.into_inner()).unwrap();
 
-    // name (non-sensitive) must NOT be base64-encoded.
-    assert!(out.contains("\"Carol\""), "name should be plain: {out}");
-    // The output must NOT start with {"base64: for the name field.
-    assert!(
-        !out.starts_with("{\"base64:"),
-        "name field should not be encrypted: {out}"
-    );
+    // name (non-sensitive) must be written as a plain quoted string.
+    assert!(out.starts_with("{\"Carol\""), "name should be plain first field: {out}");
 }
 
 #[test]

@@ -1,4 +1,19 @@
-Questions
-1. Does binary content, specifically base64 or hex content require any prefixes like base64 or 0x as per the implementation? - my question is tied to the method in @code/java/jsont/src/test/java/io/github/datakore/jsont/crypto/CryptoTests.java `static String base64Wire(byte[] bytes) {` method returning 'base64:' + bytes  - This java method `public static Optional<JsonTString> base64(String s) {` of @code/java/jsont/src/main/java/io/github/datakore/jsont/model/JsonTStrings.java doesn't require any prefix, if so, for crypto tests, why do we use base64: prefix? Shouldn't we be consistent?
-2. During parse of namespace, are we validating whether all schema(s) - or atleast the complete hierarchy of data-schema is a valid data schema or not?  Because if the schema is not valid - could be an entity referred not defined as schema, or enum, similarly constraints, validations and expressions in validatons are referring to valid fields or not, whether schema operations are properly structured or not - We must ensure all these are proper for the schema.  Check if this is done, as part of namespace parse, and deriving the namespace and schemas.  If that is not the right place, suggest the best place to do this.
-3. Should encrypt/decrypt be outside this library? Or implement as we discussed on the encrypted payload structure?
+Thoughts on encryption/decryption
+
+1. Want to have 2 options for KEK determination - a. Using receiver's public key b. Using ECDH (sender keys + receiver public key), generate shared key, using the shared key as KEK
+2. Want to use version number based encryption algorithm determination, that is, v1 -> AES ; v2 -> Chacha ; v3 -> ascom (something like this, recently developed for limited resources device); etc.,
+3. EncryptedPayload shall have a structure
+    [
+        version: u16 [1 reserved bit (signed - unused) ; 4 bits for format version; 4 bits for receiver certificate version; 4 bits for encryption algo version; 2 bits unused; 1 bit for kek selection as listed in poinnt 1],,
+        len_enc_dek: u32,
+        len_digest: u32,
+        len_iv: u16,
+        len_sha: u32,
+        enc_dek: byte[],
+        iv: byte[],
+        sha256: byte[],
+        enc_content: byte[]
+    ]
+
+    Push all these into ByteBuf, and then use Base64 encode to arrive at encrypted text
+4.  So, we expect clients to supply appropriate keys (public / public+private to enable decrypt/encrypt for the library)

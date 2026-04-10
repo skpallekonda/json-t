@@ -3,18 +3,18 @@
 // =============================================================================
 // The row scanner has no schema context, so it always emits quoted strings as
 // JsonTValue::Str(Plain("…")).  promote_row, which runs inside the validation
-// pipeline and has both field and value, upgrades plain "base64:…" values to
-// JsonTValue::Encrypted for sensitive fields.
+// pipeline and has both field and value, decodes the wire value as base64
+// ciphertext for sensitive fields (the ~ schema marker is the authority).
 //
 // These tests construct rows that mimic scanner output (plain Str values) and
 // feed them through ValidationPipeline::validate_rows, then inspect the
 // promoted row values.
 //
 // Coverage:
-//   • base64: prefix on sensitive field → Encrypted after promote_row
+//   • base64 string on sensitive field → Encrypted after promote_row
 //   • Encrypted value carries correct decoded bytes
-//   • Non-sensitive field with base64: prefix stays Str (no promotion)
-//   • Sensitive field with no base64: prefix stays Str (normal promotion)
+//   • Non-sensitive field with base64-looking string stays Str (no promotion)
+//   • Sensitive field that is already Encrypted passes through unchanged
 //   • Null on optional sensitive field stays Null
 //   • Multiple sensitive fields in one row — all decoded
 //   • Two rows processed independently — both decoded correctly
@@ -94,7 +94,7 @@ fn run_with_events(
 fn b64(plaintext: &[u8]) -> JsonTValue {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(plaintext);
-    JsonTValue::str(format!("base64:{}", encoded))
+    JsonTValue::str(encoded)
 }
 
 // =============================================================================
@@ -124,10 +124,10 @@ fn encrypted_value_carries_correct_bytes() {
 
 #[test]
 fn non_sensitive_field_base64_prefix_stays_str() {
-    // name is not sensitive — "base64:…" is a literal string value
+    // name is not sensitive — a base64-looking string stays as Str
     let row = JsonTRow::new(vec![
-        JsonTValue::str("123-45-6789"),
-        JsonTValue::str("base64:aGVsbG8="),
+        b64(b"123-45-6789"), // sensitive ssn field — will be decoded
+        JsonTValue::str("aGVsbG8="), // name is not sensitive — stays as Str
     ]);
     let clean = run_silent(person_schema(), vec![row]);
 
@@ -136,16 +136,18 @@ fn non_sensitive_field_base64_prefix_stays_str() {
 }
 
 #[test]
-fn sensitive_field_without_base64_prefix_stays_str() {
-    // Sensitive field but no base64: prefix — plain string passes through
+fn sensitive_field_already_encrypted_passes_through() {
+    // If the value is already Encrypted (e.g. after a prior promotion),
+    // promote_row must leave it unchanged — no double-decoding.
+    let ciphertext = b"already-decoded-bytes".to_vec();
     let row = JsonTRow::new(vec![
-        JsonTValue::str("no-prefix-here"),
+        JsonTValue::encrypted(ciphertext.clone()),
         JsonTValue::str("Dave"),
     ]);
     let clean = run_silent(person_schema(), vec![row]);
 
-    assert!(!clean[0].fields[0].is_encrypted(), "no prefix → stays Str");
-    assert!(matches!(&clean[0].fields[0], JsonTValue::Str(_)));
+    assert!(clean[0].fields[0].is_encrypted(), "pre-Encrypted value must stay Encrypted");
+    assert_eq!(clean[0].fields[0].as_encrypted().unwrap(), ciphertext.as_slice());
 }
 
 #[test]
@@ -191,9 +193,9 @@ fn two_rows_both_decoded_independently() {
 
 #[test]
 fn invalid_base64_payload_emits_format_violation() {
-    // "base64:!!!" is not valid base64 — should emit a FormatViolation and reject the row
+    // "!!!" is not valid base64 — should emit a FormatViolation and reject the row
     let row = JsonTRow::new(vec![
-        JsonTValue::str("base64:!!!not-valid-base64!!!"),
+        JsonTValue::str("!!!not-valid-base64!!!"),
         JsonTValue::str("Grace"),
     ]);
     let (clean, events) = run_with_events(person_schema(), vec![row]);

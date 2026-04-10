@@ -32,14 +32,9 @@ pub enum SchemaKind {
         fields: Vec<JsonTField>,
     },
 
-    /// A derived schema references a parent schema by name and applies a
-    /// sequence of operations to its field set.
-    ///
-    /// Operations are stored in declaration order and applied as a pipeline
-    /// when `RowTransformer::transform` is called.
+    /// Derived schema that uses a parent and applies operations in order.
+    /// Parent name is resolved later to support forward references.
     Derived {
-        /// The name of the parent schema (resolved via SchemaRegistry at
-        /// transform time — not resolved at parse time to allow forward refs).
         from: String,
         /// The ordered list of operations to apply to each incoming row.
         operations: Vec<SchemaOperation>,
@@ -79,15 +74,8 @@ pub enum SchemaOperation {
         refs: Vec<String>,
     },
 
-    /// Decrypt the listed fields in-place.
-    ///
-    /// Each named field must carry a [`JsonTValue::Encrypted`] value; the runtime
-    /// calls [`CryptoConfig::decrypt`] and replaces the value with the decoded
-    /// plaintext.  Fields already in plaintext state are silently skipped
-    /// (idempotent).
-    ///
-    /// This operation acts as the declassification gate: operations that appear
-    /// after `Decrypt` may reference the named fields as if they were plaintext.
+    /// This will decrypt the mentioned fields in-place. Subsequent operations 
+    /// can treat these as plaintext. It skips if already in plaintext.
     Decrypt {
         /// Names of fields to decrypt.  Non-existent names are a build error.
         fields: Vec<String>,

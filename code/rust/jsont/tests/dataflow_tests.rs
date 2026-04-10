@@ -59,7 +59,7 @@ impl DiagnosticSink for CaptureSink {
 fn b64(plaintext: &[u8]) -> JsonTValue {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(plaintext);
-    JsonTValue::str(format!("base64:{}", encoded))
+    JsonTValue::str(encoded)
 }
 
 fn person_schema() -> jsont::JsonTSchema {

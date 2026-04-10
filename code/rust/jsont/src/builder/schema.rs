@@ -140,16 +140,8 @@ impl JsonTSchemaBuilder {
 // Build-time dataflow analysis
 // =============================================================================
 
-/// Validates that no `Transform` or `Filter` operation references a field that
-/// is named in a `Decrypt` operation later in the sequence (or not yet reached).
-///
-/// The check is conservative: any field that appears in *any* `Decrypt` op is
-/// treated as sensitive and must be decrypted before a `Transform`/`Filter`
-/// can reference it.
-///
-/// This analysis runs entirely within the operations list — no parent schema is
-/// needed.  For cross-schema checks (e.g. "decrypt field does not exist in parent"),
-/// use `JsonTSchema::validate_with_parent` after all schemas are loaded.
+/// Validates that Transform or Filter don't use encrypted fields before they're decrypted. 
+/// This check is self-contained; for parent schema checks, use validate_with_parent.
 fn check_operation_dataflow(ops: &[SchemaOperation]) -> Result<(), JsonTError> {
     use crate::transform::collect_field_refs;
 
@@ -239,31 +231,8 @@ fn check_operation_dataflow(ops: &[SchemaOperation]) -> Result<(), JsonTError> {
 }
 
 impl JsonTSchema {
-    /// Simulate the full operation pipeline against a resolved parent schema,
-    /// detecting field-level errors at build time rather than at row-evaluation time.
-    ///
-    /// Tracked invariants across every operation:
-    /// - **Existence**: a field removed by `Exclude` or `Project` cannot be referenced
-    ///   by any later operation.
-    /// - **Identity**: after a `Rename`, only the new name is in scope; the old name
-    ///   is gone.
-    /// - **Encryption state**: a field marked `sensitive (~)` in the parent starts
-    ///   encrypted; it must pass through a `Decrypt` op before a `Transform` or
-    ///   `Filter` expression may reference it.
-    ///
-    /// Errors detected:
-    /// - `Decrypt`  on a nonexistent or non-sensitive field.
-    /// - `Project`  referencing a field not in scope.
-    /// - `Exclude`  referencing a field not in scope.
-    /// - `Rename`   from a field not in scope, or to a name already in scope.
-    /// - `Transform`/`Filter` expression references a field not in scope.
-    /// - `Transform`/`Filter` expression references an encrypted field (not yet decrypted).
-    /// - `Transform` target field not in scope or still encrypted.
-    ///
-    /// Nested field paths (e.g. `address.city`) are skipped for now — only
-    /// top-level single-segment paths are checked.
-    ///
-    /// Returns `Ok(())` for straight schemas (no-op) or when all checks pass.
+    /// Checks the transformation pipeline against a parent schema. It ensures fields exist, 
+    /// renames are valid, and encryption states are handled properly.
     pub fn validate_with_parent(&self, parent: &JsonTSchema) -> Result<(), JsonTError> {
         use crate::model::field::JsonTFieldKind;
         use crate::transform::collect_field_refs;

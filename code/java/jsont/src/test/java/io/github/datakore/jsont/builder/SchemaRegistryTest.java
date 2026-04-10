@@ -1,11 +1,14 @@
 package io.github.datakore.jsont.builder;
 
 import io.github.datakore.jsont.error.BuildError;
+import io.github.datakore.jsont.error.JsonTError;
 import io.github.datakore.jsont.model.*;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static io.github.datakore.jsont.model.SchemaOperation.project;
 
 class SchemaRegistryTest {
 
@@ -185,5 +188,84 @@ class SchemaRegistryTest {
     void merge_rejectsNull() {
         assertThrows(IllegalArgumentException.class,
                 () -> SchemaRegistry.empty().merge(null));
+    }
+
+    // ─── fromNamespace() — structural validation ──────────────────────────────
+
+    @Nested
+    class FromNamespaceValidation {
+
+        @Test
+        void validSchemas_pass() throws BuildError {
+            JsonTNamespace ns = JsonTNamespaceBuilder.create()
+                    .catalog(JsonTCatalogBuilder.create()
+                            .schema(orderSchema)
+                            .schema(userSchema)
+                            .build())
+                    .build();
+            assertDoesNotThrow(() -> SchemaRegistry.fromNamespace(ns));
+        }
+
+        @Test
+        void objectFieldReferencingUnknownSchema_throwsSchemaInvalid() throws BuildError {
+            // "Order" has a field referencing "Address" — but "Address" is not in the namespace
+            JsonTSchema withRef = JsonTSchemaBuilder.straight("Order")
+                    .fieldFrom(JsonTFieldBuilder.scalar("id", ScalarType.I64))
+                    .fieldFrom(JsonTFieldBuilder.object("addr", "Address"))
+                    .build();
+
+            JsonTNamespace ns = JsonTNamespaceBuilder.create()
+                    .catalog(JsonTCatalogBuilder.create().schema(withRef).build())
+                    .build();
+
+            assertThrows(JsonTError.SchemaInvalid.class, () -> SchemaRegistry.fromNamespace(ns));
+        }
+
+        @Test
+        void derivedSchemaReferencingUnknownParent_throwsSchemaInvalid() throws BuildError {
+            JsonTSchema derived = JsonTSchemaBuilder.derived("Summary", "Order")
+                    .operation(project(FieldPath.single("id")))
+                    .build();
+
+            // namespace contains only "Summary", not "Order"
+            JsonTNamespace ns = JsonTNamespaceBuilder.create()
+                    .catalog(JsonTCatalogBuilder.create().schema(derived).build())
+                    .build();
+
+            assertThrows(JsonTError.SchemaInvalid.class, () -> SchemaRegistry.fromNamespace(ns));
+        }
+
+        @Test
+        void derivedSchemaWithParentPresent_passes() throws BuildError {
+            JsonTSchema derived = JsonTSchemaBuilder.derived("Summary", "Order")
+                    .operation(project(FieldPath.single("id")))
+                    .build();
+
+            JsonTNamespace ns = JsonTNamespaceBuilder.create()
+                    .catalog(JsonTCatalogBuilder.create()
+                            .schema(orderSchema)   // "Order" is present
+                            .schema(derived)
+                            .build())
+                    .build();
+
+            assertDoesNotThrow(() -> SchemaRegistry.fromNamespace(ns));
+        }
+
+        @Test
+        void derivedSchemaOperationReferencingUnknownField_throwsSchemaInvalid() throws BuildError {
+            // project(nonExistent) should fail at fromNamespace time
+            JsonTSchema derived = JsonTSchemaBuilder.derived("Bad", "Order")
+                    .operation(project(FieldPath.single("nonExistent")))
+                    .build();
+
+            JsonTNamespace ns = JsonTNamespaceBuilder.create()
+                    .catalog(JsonTCatalogBuilder.create()
+                            .schema(orderSchema)
+                            .schema(derived)
+                            .build())
+                    .build();
+
+            assertThrows(JsonTError.SchemaInvalid.class, () -> SchemaRegistry.fromNamespace(ns));
+        }
     }
 }
