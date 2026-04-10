@@ -110,13 +110,14 @@ SchemaName: {
 **Field declaration:**
 
 ```
-scalar_type : fieldName[?] [(<constraint_pair>, ...)]
-<SchemaName>: fieldName[?]
-type[]      : fieldName[?]
+[~]scalar_type : fieldName[?] [(<constraint_pair>, ...)]
+   <SchemaName>: fieldName[?]
+   type[]      : fieldName[?]
 ```
 
 | Part | Description |
 |---|---|
+| `~` | Optional privacy marker — field value is sensitive and will be encrypted on the wire |
 | `type` | Scalar type keyword or object reference `<SchemaName>` |
 | `fieldName` | Lowercase-start identifier |
 | `?` | Optional mark — value may be `null` or absent |
@@ -131,7 +132,9 @@ d64:     price    [(minValue=0.01, maxValue=9999.99)],
 str:     code     [pattern="^[A-Z]{3}-\\d{4}$"],
 bool:    active,
 str[]:   tags?,
-<Item>[]: lineItems
+<Item>[]: lineItems,
+~str:    ssn,                     // sensitive — encrypted on the wire
+~str:    cardNumber? [(minLength=16, maxLength=19)]  // sensitive + optional + constrained
 ```
 
 ### 4.2 Field Constraints
@@ -178,6 +181,7 @@ DerivedName: FROM ParentName {
 | `project` | `project(field1, field2, ...)` | Keep only the listed fields. All others are dropped. |
 | `filter` | `filter <expression>` | Drop rows where the boolean expression is `false`. Not a hard error — callers skip the row. |
 | `transform` | `transform field = <expression>` | Replace a field's value with the result of evaluating the expression. |
+| `decrypt` | `decrypt(field1, field2, ...)` | Decrypt the named sensitive fields from ciphertext to plaintext. Requires a `CryptoConfig` at runtime. Idempotent — already-plaintext fields are left unchanged. |
 
 **Example — derived broadcast projection:**
 
@@ -188,6 +192,16 @@ MatchSummary: FROM CricketMatch {
     rename(attendanceCount as crowdSize),
     filter isDayNight || crowdSize > 30000,
     transform crowdSize = crowdSize / 1000
+  )
+}
+```
+
+**Example — decrypt sensitive fields for downstream processing:**
+
+```jsont
+PersonDecrypted: FROM Person {
+  operations: (
+    decrypt(ssn, cardNumber)
   )
 }
 ```
@@ -258,6 +272,7 @@ Enum values are uppercase identifiers of two or more characters (`[A-Z][A-Z0-9_]
 | Enum constant | `ACTIVE` | Bare all-uppercase identifier |
 | Nested row | `{v1, v2}` | Inline object (maps to an object-typed field) |
 | Array | `[v1, v2, v3]` | Inline array (maps to an array-typed field) |
+| Encrypted | `"base64:<b64>"` | Wire encoding for sensitive fields — a JSON string prefixed with `base64:` followed by Base64-encoded ciphertext bytes |
 
 ---
 
@@ -295,7 +310,92 @@ Expressions appear in validation rules, filter predicates, dataset blocks, and t
 
 ---
 
-## 11. Comments
+## 11. Privacy & Encryption
+
+JsonT provides first-class support for field-level encryption through **privacy markers** and the **`decrypt` operation**. This lets sensitive data travel encrypted through pipelines and be decrypted only where needed, with no changes to the positional row format.
+
+### 11.1 Sensitive fields (`~`)
+
+Prefix a scalar field type with `~` to mark it as privacy-sensitive:
+
+```jsont
+Person: {
+  fields: {
+    str:  name,
+    ~str: ssn,              // Social Security Number — always encrypted on wire
+    ~str: cardNumber?       // Optional — encrypted when present
+  }
+}
+```
+
+A sensitive field:
+
+- Carries the same type and constraints as its non-sensitive equivalent.
+- Is encrypted to a `base64:<b64>` wire token whenever a `CryptoConfig` is provided at write time.
+- Passes through parse → validate → transform stages as an opaque `Encrypted` value — its plaintext is never exposed unless explicitly decrypted.
+
+### 11.2 Wire format for encrypted values
+
+On the wire, an encrypted field is written as a JSON string prefixed with `base64:`:
+
+```text
+"base64:SGVsbG8gV29ybGQ="
+```
+
+The bytes after the prefix are the Base64-encoded output of `CryptoConfig.encrypt()`. When reading, a `base64:...` string at a sensitive field position is parsed directly into an `Encrypted` value without decryption.
+
+### 11.3 Decrypt operation
+
+The `decrypt(field1, field2, ...)` derived schema operation decrypts named fields inline during transform:
+
+```jsont
+PersonDecrypted: FROM Person {
+  operations: (
+    decrypt(ssn, cardNumber)
+  )
+}
+```
+
+Rules:
+
+- Only works via `transform_with_crypto` / `transformWithCrypto` — calling the non-crypto `transform` path with a `decrypt` operation returns an error.
+- **Idempotent** — if a field already holds a plaintext value, it is left unchanged.
+- Decrypted values are promoted back to their declared scalar type (e.g., `Encrypted → Plain string`).
+
+### 11.4 On-demand decryption
+
+Individual values and rows expose a decrypt API for cases where you want to decrypt a specific field without deriving a new schema:
+
+```text
+// Value level
+value.decryptStr(fieldName, crypto)      → Optional/Option<String>
+value.decryptBytes(fieldName, crypto)    → Optional/Option<byte[]>
+
+// Row level (Java)
+row.decryptField(index, fieldName, crypto)        → Optional<String>
+
+// Row level (Rust)
+row.decrypt_field_str(index, fieldName, crypto)   → Option<String>
+```
+
+These return `None` / `Optional.empty()` for non-encrypted values — making them safe to call without checking the value type first.
+
+### 11.5 CryptoConfig interface
+
+The `CryptoConfig` interface is pluggable and implementation-agnostic:
+
+```text
+interface CryptoConfig {
+    encrypt(fieldName, plaintextBytes)  → ciphertextBytes
+    decrypt(fieldName, ciphertextBytes) → plaintextBytes
+}
+```
+
+`fieldName` is passed to both sides to support key-per-field or key-per-field-type strategies. The built-in `PassthroughCryptoConfig` is an identity implementation for testing — it returns bytes unchanged.
+
+---
+
+## 12. Comments
 
 Both `//` line comments and `/* */` block comments are supported and are ignored by the parser.
 

@@ -84,6 +84,12 @@ pub fn check_field(
         return events;
     }
 
+    // Encrypted values are opaque until decrypted — skip all value constraints.
+    // The required/absent check above still applies (Encrypted counts as present).
+    if matches!(value, JsonTValue::Encrypted(_)) {
+        return events;
+    }
+
     // ── Constant mismatch (Fatal) ──────────────────────────────────────────
     if let Some(expected) = constant {
         if !values_equal(value, expected) {

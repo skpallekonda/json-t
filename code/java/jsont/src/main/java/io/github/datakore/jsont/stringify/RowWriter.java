@@ -1,5 +1,8 @@
 package io.github.datakore.jsont.stringify;
 
+import io.github.datakore.jsont.crypto.CryptoConfig;
+import io.github.datakore.jsont.crypto.CryptoError;
+import io.github.datakore.jsont.model.JsonTField;
 import io.github.datakore.jsont.model.JsonTNumber;
 import io.github.datakore.jsont.model.JsonTRow;
 import io.github.datakore.jsont.model.JsonTString;
@@ -7,6 +10,7 @@ import io.github.datakore.jsont.model.JsonTValue;
 
 import java.io.IOException;
 import java.io.Writer;
+import java.util.Base64;
 import java.util.Iterator;
 import java.util.List;
 
@@ -82,6 +86,75 @@ public final class RowWriter {
         }
     }
 
+    /**
+     * Schema-aware write: sensitive fields are encrypted before writing.
+     *
+     * <ul>
+     *   <li>Sensitive field with a non-{@code Encrypted} value → plaintext bytes
+     *       are passed to {@code crypto.encrypt} and written as
+     *       {@code "base64:<b64>"}.</li>
+     *   <li>Sensitive field already holding an {@code Encrypted} value → ciphertext
+     *       bytes are re-encoded to {@code "base64:<b64>"} (no crypto call).</li>
+     *   <li>Non-sensitive fields → written normally.</li>
+     * </ul>
+     *
+     * @param row    the row to serialise
+     * @param fields schema field descriptors in the same order as row values
+     * @param crypto the crypto implementation to use for encryption
+     * @param w      the destination writer
+     * @throws IOException  on write failure
+     * @throws CryptoError  if encryption fails for any field
+     */
+    public static void writeRow(JsonTRow row, List<JsonTField> fields,
+                                CryptoConfig crypto, Writer w)
+            throws IOException, CryptoError {
+        w.write('{');
+        List<JsonTValue> values = row.values();
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) w.write(',');
+            JsonTValue v     = values.get(i);
+            JsonTField field = fields.get(i);
+            if (field.sensitive()) {
+                byte[] ciphertext;
+                if (v instanceof JsonTValue.Encrypted enc) {
+                    // Already ciphertext — re-encode directly.
+                    ciphertext = enc.envelope();
+                } else {
+                    // Plaintext — stringify then encrypt.
+                    byte[] plaintext = valueToText(v).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    ciphertext = crypto.encrypt(field.name(), plaintext);
+                }
+                writeQuotedString("base64:" + Base64.getEncoder().encodeToString(ciphertext), w);
+            } else {
+                writeValue(v, w);
+            }
+        }
+        w.write('}');
+    }
+
+    /** Produce the plain-text wire representation of a non-encrypted value. */
+    private static String valueToText(JsonTValue v) {
+        if (v instanceof JsonTValue.Null)        return "null";
+        if (v instanceof JsonTValue.Unspecified) return "_";
+        if (v instanceof JsonTValue.Bool   b)    return Boolean.toString(b.value());
+        if (v instanceof JsonTString       s)    return s.value();
+        if (v instanceof JsonTValue.Enum   e)    return e.value();
+        if (v instanceof JsonTNumber.I16   n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.I32   n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.I64   n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.U16   n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.U32   n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.U64   n)    return Long.toUnsignedString(n.value());
+        if (v instanceof JsonTNumber.D32   n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.D64   n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.D128  n)    return n.value().toPlainString();
+        if (v instanceof JsonTNumber.Date  n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.Time  n)    return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.DateTime  n)  return String.valueOf(n.value());
+        if (v instanceof JsonTNumber.Timestamp n)  return String.valueOf(n.value());
+        return "<complex>";
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private static void writeValue(JsonTValue v, Writer w) throws IOException {
@@ -106,6 +179,10 @@ public final class RowWriter {
         if (v instanceof JsonTValue.Enum      e) { w.write(e.value()); return; }
         if (v instanceof JsonTValue.Unspecified) { w.write('_'); return; }
         if (v instanceof JsonTValue.Array     a) { writeArray(a.elements(), w); return; }
+        if (v instanceof JsonTValue.Encrypted e) {
+            writeQuotedString("base64:" + Base64.getEncoder().encodeToString(e.envelope()), w);
+            return;
+        }
         throw new IllegalArgumentException("Unknown JsonTValue: " + v);
     }
 

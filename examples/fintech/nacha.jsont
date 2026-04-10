@@ -1,0 +1,127 @@
+{
+  namespace: {
+    baseUrl: "https://jsont.io/fintech/nacha",
+    version: "1.0",
+    catalogs: [
+      {
+        schemas: [
+          // ── NACHA: Automated Clearing House (ACH) File Format ──────────────
+          
+          FileHeader_1: {
+            fields: {
+              str: recordTypeCode         [(constant="1")],
+              str: priorityCode           [(minLength=2, maxLength=2, constant="01")],
+              str: immediateDestination   [(minLength=10, maxLength=10)], // ABA Number
+              str: immediateOrigin        [(minLength=10, maxLength=10)], // Company Identification
+              date: fileCreationDate,
+              time: fileCreationTime,
+              str: fileIdModifier         [(minLength=1, maxLength=1)],
+              u32: recordSize             [(constant=94)],
+              u32: blockingFactor         [(constant=10)],
+              u32: formatCode             [(constant=1)],
+              str: destinationName        [(maxLength=23)],
+              str: originName             [(maxLength=23)],
+              str: referenceCode?         [(maxLength=8)]
+            }
+          },
+
+          BatchHeader_5: {
+            fields: {
+              str: recordTypeCode         [(constant="5")],
+              str: serviceClassCode       [(minLength=3, maxLength=3)], // 200, 220, 225
+              str: companyName            [(maxLength=16)],
+              str: companyDiscretionaryData? [(maxLength=20)],
+              str: companyId              [(minLength=10, maxLength=10)],
+              str: standardEntryClass     [(minLength=3, maxLength=3)], // PPD, CCD, CTX
+              str: companyEntryDescription [(maxLength=10)],
+              date: descriptiveDate,
+              date: effectiveEntryDate,
+              u32: settlementDate?        [(maxLength=3)],
+              u32: originatorStatusCode   [(maxLength=1)],
+              str: odfiId                 [(minLength=8, maxLength=8)],
+              u32: batchNumber            [(minValue=1)]
+            }
+          },
+
+          EntryDetail_6: {
+            fields: {
+              str: recordTypeCode         [(constant="6")],
+              str: transactionCode        [(minLength=2, maxLength=2)],
+              str: receivingDfiId         [(minLength=8, maxLength=8)],
+              str: checkDigit             [(minLength=1, maxLength=1)],
+              str: dfaAccountNumber       [(maxLength=17)],
+              d128: amount                [(minValue=0, maxPrecision=2)],
+              str: individualId?          [(maxLength=15)],
+              str: individualName         [(maxLength=22)],
+              str: discretionaryData?     [(maxLength=2)],
+              str: addendaRecordIndicator [(minLength=1, maxLength=1)],
+              u64: traceNumber            [(minLength=15, maxLength=15)]
+            }
+          },
+
+          BatchControl_8: {
+            fields: {
+              str: recordTypeCode         [(constant="8")],
+              u32: serviceClassCode       [(minLength=3, maxLength=3)],
+              u32: entryAddendaCount,
+              u64: entryHash,
+              d128: totalDebitAmount,
+              d128: totalCreditAmount,
+              str: companyId              [(minLength=10, maxLength=10)],
+              str: messageAuthentication? [(maxLength=19)],
+              str: odfiId                 [(minLength=8, maxLength=8)],
+              u32: batchNumber
+            }
+          },
+
+          FileControl_9: {
+            fields: {
+              str: recordTypeCode         [(constant="9")],
+              u32: batchCount,
+              u32: blockCount,
+              u32: entryAddendaCount,
+              u64: entryHash,
+              d128: totalDebitAmount,
+              d128: totalCreditAmount
+            }
+          },
+
+          // ── Hierarchy Wrapper ───────────────────────────────────────────
+
+          Nacha_Batch: {
+            fields: {
+              <BatchHeader_5>: header,
+              <EntryDetail_6>[]: entries,
+              <BatchControl_8>: trailer
+            },
+            validations: {
+              rules {
+                header.companyId == trailer.companyId,
+                header.batchNumber == trailer.batchNumber
+                // counts match
+                // entries.length() == trailer.entryAddendaCount
+              }
+            }
+          },
+
+          Nacha_File: {
+            fields: {
+              <FileHeader_1>: header,
+              <Nacha_Batch>[]: batches,
+              <FileControl_9>: trailer
+            },
+            validations: {
+              rules {
+                // Number of batches must match
+                // batches.length() == trailer.batchCount
+              }
+            }
+          }
+        ],
+        enums: [],
+        "data-schema": Nacha_File
+      }
+    ],
+    data-schema: Nacha_File
+  }
+}

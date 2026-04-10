@@ -26,9 +26,10 @@ concise than JSON, strictly typed, and designed for high-throughput pipelines.
      - [Straight schemas](#straight-schemas)
      - [Derived schemas](#derived-schemas)
    - [Applying transforms to rows](#applying-transforms-to-rows)
-7. [Expression building](#expression-building)
-8. [Error handling](#error-handling)
-9. [Performance notes](#performance-notes)
+7. [Privacy & Encryption](#privacy--encryption)
+8. [Expression building](#expression-building)
+9. [Error handling](#error-handling)
+10. [Performance notes](#performance-notes)
 
 ---
 
@@ -547,6 +548,113 @@ let final_row      = summary_schema.transform(after_exclude, &registry)?;
 
 ---
 
+## Privacy & Encryption
+
+JsonT supports field-level encryption through **privacy markers** (`~`) in the schema DSL and a pluggable `CryptoConfig` trait.
+
+### Marking sensitive fields
+
+In a DSL schema use `~type` for any field that must be encrypted on the wire:
+
+```jsont
+Person: {
+  fields: {
+    str:  name,
+    ~str: ssn,
+    ~str: cardNumber?
+  }
+}
+```
+
+When building programmatically, call `.sensitive()` on the field builder:
+
+```rust
+use jsont::{JsonTFieldBuilder, JsonTSchemaBuilder, ScalarType};
+
+let schema = JsonTSchemaBuilder::straight("Person")
+    .field(JsonTFieldBuilder::scalar("name", ScalarType::Str).build()?)?
+    .field(JsonTFieldBuilder::scalar("ssn",  ScalarType::Str).sensitive().build()?)?
+    .build()?;
+```
+
+### Schema-aware write (encrypt on output)
+
+Use `write_row_with_schema` instead of `write_row` when a schema is available.
+Sensitive fields that hold plain text are encrypted; already-encrypted fields are re-encoded as `base64:` without another crypto call.
+
+```rust
+use jsont::{write_row_with_schema, PassthroughCryptoConfig};
+use std::io::BufWriter;
+use std::fs::File;
+
+// schema_fields() extracts &[JsonTField] from SchemaKind::Straight { fields }
+let fields = match &schema.kind {
+    jsont::model::schema::SchemaKind::Straight { fields } => fields.as_slice(),
+    _ => panic!("expected straight schema"),
+};
+
+let mut out = BufWriter::new(File::create("output.jsont")?);
+write_row_with_schema(&row, fields, &PassthroughCryptoConfig, &mut out)?;
+// SSN column → "base64:<b64>"; name column → plain string
+```
+
+Replace `PassthroughCryptoConfig` with any type that implements `CryptoConfig`:
+
+```rust
+use jsont::crypto::{CryptoConfig, CryptoError};
+
+struct AesGcmCrypto { /* key material */ }
+
+impl CryptoConfig for AesGcmCrypto {
+    fn encrypt(&self, field: &str, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // AES-GCM encrypt
+        todo!()
+    }
+    fn decrypt(&self, field: &str, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        // AES-GCM decrypt
+        todo!()
+    }
+}
+```
+
+### Decrypt in a derived schema pipeline
+
+Add a `Decrypt` operation to a derived schema to decrypt fields as part of the transform:
+
+```rust
+use jsont::model::schema::SchemaOperation;
+
+let derived = JsonTSchemaBuilder::derived("PersonDecrypted", "Person")
+    .operation(SchemaOperation::Decrypt { fields: vec!["ssn".to_string()] })?
+    .build()?;
+
+// Use transform_with_crypto — transform() without crypto returns DecryptFailed
+let result = derived.transform_with_crypto(row, &registry, &PassthroughCryptoConfig)?;
+// result.fields[1] is now JsonTValue::Str("123-45-6789")
+```
+
+### On-demand decrypt
+
+Decrypt a single field without deriving a new schema:
+
+```rust
+use jsont::{JsonTValue, JsonTRow, PassthroughCryptoConfig};
+
+// Decrypt a value directly
+let val = JsonTValue::encrypted(b"hello".to_vec());
+let text: Option<String> = val.decrypt_str("field_name", &PassthroughCryptoConfig)?;
+let bytes: Option<Vec<u8>> = val.decrypt_bytes("field_name", &PassthroughCryptoConfig)?;
+
+// Decrypt by position in a row (returns None for out-of-range or non-encrypted)
+let row = JsonTRow::new(vec![
+    JsonTValue::str("Alice"),
+    JsonTValue::encrypted(b"123-45-6789".to_vec()),
+]);
+let ssn: Option<String> = row.decrypt_field_str(1, "ssn", &PassthroughCryptoConfig)?;
+```
+
+---
+
 ## Expression building
 
 `JsonTExpression` is used in validation rules, filter predicates, and
@@ -606,6 +714,9 @@ match err {
     JsonTError::Transform(TransformError::CyclicDerivation(chain)) => { /* A → B → A */ }
     JsonTError::Transform(TransformError::FilterFailed(eval_err))  => { /* filter eval error */ }
     JsonTError::Transform(TransformError::TransformFailed { field, source }) => { /* … */ }
+    JsonTError::Transform(TransformError::DecryptFailed { field, reason }) => {
+        // Decrypt operation failed — no CryptoConfig supplied, or crypto.decrypt() returned error
+    }
 
     JsonTError::Stringify(_) => { /* serialisation error */ }
 }

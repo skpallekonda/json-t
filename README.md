@@ -42,6 +42,7 @@ JSON-T combines the best properties of existing data formats while avoiding thei
 - **Streaming-friendly** — Records can be validated incrementally without loading the full dataset.
 - **Text-based** — Human-inspectable, diff-friendly, and tooling-friendly.
 - **Derived schemas** — A schema can be projected, filtered, and transformed from a parent schema.
+- **Field-level encryption** — Privacy markers (`~`) designate sensitive fields; encrypted values travel as `base64:` tokens through the pipeline and are only decrypted on demand.
 
 > JSON-T is not trying to replace JSON everywhere.
 > It is designed for **large, structured, validated data exchange**.
@@ -248,6 +249,74 @@ pipeline.finish();
 
 ---
 
+---
+
+## Privacy & Encryption
+
+Mark sensitive fields with `~` in the schema — they are encrypted on write and travel as opaque `base64:` tokens through the pipeline.
+
+### Schema with sensitive fields
+
+```jsont
+Person: {
+  fields: {
+    str:  name,
+    ~str: ssn,          // always encrypted on wire
+    ~str: cardNumber?   // optional, encrypted when present
+  }
+}
+```
+
+### Write encrypted, decrypt on demand
+
+**Rust:**
+```rust
+use jsont::{PassthroughCryptoConfig, write_row_with_schema};
+
+// schema-aware write: SSN is encrypted to "base64:..." automatically
+write_row_with_schema(&row, schema_fields(&schema), &PassthroughCryptoConfig, &mut out)?;
+
+// on-demand decrypt of a single field
+let plaintext: Option<String> = row.decrypt_field_str(1, "ssn", &PassthroughCryptoConfig)?;
+```
+
+**Java:**
+```java
+import io.github.datakore.jsont.crypto.*;
+import io.github.datakore.jsont.stringify.RowWriter;
+
+// schema-aware write: SSN is encrypted to "base64:..." automatically
+RowWriter.writeRow(row, schema.fields(), new PassthroughCryptoConfig(), writer);
+
+// on-demand decrypt of a single field
+Optional<String> plaintext = row.decryptField(1, "ssn", new PassthroughCryptoConfig());
+```
+
+### Decrypt in a derived schema pipeline
+
+```jsont
+PersonDecrypted: FROM Person {
+  operations: (
+    decrypt(ssn)
+  )
+}
+```
+
+**Rust:**
+
+```rust
+let result = derived_schema.transform_with_crypto(row, &registry, &PassthroughCryptoConfig)?;
+```
+
+**Java:**
+
+```java
+JsonTRow result = RowTransformer.of(derivedSchema, registry)
+    .transformWithCrypto(row, new PassthroughCryptoConfig());
+```
+
+---
+
 ## When to Use JSON-T
 
 JSON-T is a good fit for:
@@ -265,7 +334,14 @@ JSON remains better for small, ad-hoc, or human-authored payloads.
 
 ## Status
 
-Both implementations — Rust and Java — are production-ready for parsing, validation, and transformation of large datasets. Benchmarked at 10 M rows on realistic schemas with no memory growth.
+Both implementations — Rust and Java — are production-ready for:
+
+- Parsing, validation, and transformation of large datasets
+- JSON interoperability (bidirectional NDJSON / Array / Object modes)
+- Field-level encryption with pluggable `CryptoConfig`
+- On-demand decryption via the value and row APIs
+
+Benchmarked at 10 M rows on realistic schemas with no memory growth.
 
 See [Performance.md](docs/Performance.md) for benchmark details.
 

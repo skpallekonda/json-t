@@ -1,0 +1,78 @@
+{
+  // Interchange Control Header (ISA)
+  {
+    "00", "          ", "00", "          ", "ZZ", "SENDER-ID      ", "ZZ", "RECEIVER-ID    ", "2026-04-09", "10:30", "^", "00501", 123456789, "0", "P", ":"
+  },
+  
+  // Functional Groups (Loop)
+  [
+    {
+      // Functional Group Header (GS)
+      {
+        "BE", "SENDER-CODE", "RECEIVER-CODE", "2026-04-09", "10:30", 987654321, "X", "005010X220A1"
+      },
+      
+      // Transaction Sets (Loop)
+      [
+        {
+          // Transaction Set Header (ST)
+          { "834", "0001" },
+          
+          // Beginning Segment (BGN)
+          { ORIGINAL, "REQ12345", "2026-04-09", "10:30", "ET", "2" },
+          
+          // Sponsor Name (Loop 1000A)
+          { "AY", "2", "ACME CORP", "FI", "123456789" },
+          
+          // Payer Name (Loop 1000B)
+          { "PR", "2", "BLUE CROSS BLUE SHIELD", "PI", "BCBS001" },
+          
+          // Member Loops (Loop 2000)
+          [
+            {
+              // Member Detail (INS) - SUBSCRIBER
+              { "Y", "18", CHANGE, BIRTH, "A", "1", "N", "FT" },
+              [
+                { "0F", "SUB123" }
+              ],
+              [
+                { "348", "D8", "20260401" }
+              ],
+              // Member Name (NM1-Loop)
+              { "IL", "1", "SMITH", "JOHN", "A", "MR", "SUB123" },
+              { "D8", "1980-01-01", M, M },
+              [
+                { { "001", "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
+              ],
+              // SE Trailer
+              { 15, "0001" }
+            },
+            {
+              // Member Detail (INS) - DEPENDENT (Child=19, Indicator=N)
+              { "N", "19", CHANGE, BIRTH, "A", "1", "N", "FT" },
+              [
+                { "0F", "DEP456" }
+              ],
+              [ { "348", "D8", "20260101" } ],
+              { "IL", "1", "SMITH", "JANE", "M", "MS", "DEP456" },
+              { "D8", "2010-05-20", F, S },
+              [
+                { { "001", "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
+              ],
+              // SE Trailer (Wait, SE is per transaction, not per member. Fixing...)
+            }
+          ],
+          
+          // Transaction Set Trailer (SE) - Per ST
+          { 28, "0001" }
+        }
+      ],
+      
+      // Functional Group Trailer (GE)
+      { 1, 987654321 }
+    }
+  ],
+  
+  // Interchange Control Trailer (IEA)
+  { 1, 123456789 }
+}

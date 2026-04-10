@@ -1,0 +1,119 @@
+{
+  namespace: {
+    baseUrl: "https://jsont.io/fintech/iso20022",
+    version: "1.0",
+    catalogs: [
+      {
+        schemas: [
+          // ── ISO 20022: Payment Initiation (pain.001.001.03) ───────────────
+          
+          GroupHeader: {
+            fields: {
+              str: messageId              [(minLength=1, maxLength=35)],
+              datetime: creationDateTime,
+              u32: numberOfTransactions   [(minValue=1)],
+              d128: totalSettlementAmount [(minValue=0, maxPrecision=2)],
+              <Party>: initiatingParty
+            }
+          },
+
+          PaymentInformation: {
+            fields: {
+              str: paymentInfoId          [(minLength=1, maxLength=35)],
+              <PaymentMethod>: paymentMethod,
+              date: requestedExecutionDate,
+              <Party>: debtor,
+              <Account>: debtorAccount,
+              <Agent>: debtorAgent,
+              <CreditTransfer>[]: creditTransfers
+            },
+            validations: {
+              rules {
+                // Ensure execution date is not in the past (simplified check)
+                // requestedExecutionDate >= current_date()
+              }
+            }
+          },
+
+          CreditTransfer: {
+            fields: {
+              str: paymentId              [(minLength=1, maxLength=35)],
+              d128: amount                [(minValue=0.01, maxPrecision=2)],
+              str: currency               [(minLength=3, maxLength=3)], // ISO 4217
+              <Agent>: creditorAgent,
+              <Party>: creditor,
+              <Account>: creditorAccount,
+              str: remittanceInfo?        [(maxLength=140)]
+            }
+          },
+
+          // ── Common Fintech Components ─────────────────────────────────────
+
+          Party: {
+            fields: {
+              str: name                   [(minLength=1, maxLength=140)],
+              str: id?                    [(maxLength=35)],
+              <Address>: postalAddress?
+            }
+          },
+
+          Account: {
+            fields: {
+              str: iban?                  [(regex="^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$")],
+              str: bbic?                  [(minLength=8, maxLength=11)], // Bank Identifier Code
+              str: currency?              [(minLength=3, maxLength=3)]
+            },
+            validations: {
+              rules {
+                // Either IBAN or BIC must be present
+                iban != null || bbic != null
+              }
+            }
+          },
+
+          Agent: {
+            fields: {
+              str: bic                    [(minLength=8, maxLength=11)],
+              str: name?                  [(maxLength=140)]
+            }
+          },
+
+          Address: {
+            fields: {
+              str: country                [(minLength=2, maxLength=2)], // ISO 3166-1 alpha-2
+              str: addressLine1?          [(maxLength=70)],
+              str: addressLine2?          [(maxLength=70)],
+              str: postCode?              [(maxLength=16)],
+              str: townName?              [(maxLength=35)]
+            }
+          },
+
+          // ── Root: ISO 20022 Payment Initiation ───────────────────────────
+          
+          ISO20022_Pain_001: {
+            fields: {
+              <GroupHeader>: groupHeader,
+              <PaymentInformation>[]: payments
+            },
+            validations: {
+              rules {
+                // Total amount across all payments should match group header if specified
+                // sum(payments.creditTransfers.amount) == groupHeader.totalSettlementAmount
+              }
+            }
+          }
+        ],
+        enums: [
+          PaymentMethod: [
+            "TRF", // Credit Transfer
+            "CHK", // Check
+            "DD",  // Direct Debit
+            "TRA"  // Transfer Advice
+          ]
+        ],
+        "data-schema": ISO20022_Pain_001
+      }
+    ],
+    data-schema: ISO20022_Pain_001
+  }
+}

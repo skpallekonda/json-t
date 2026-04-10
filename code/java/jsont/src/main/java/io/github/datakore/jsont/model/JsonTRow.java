@@ -1,5 +1,8 @@
 package io.github.datakore.jsont.model;
 
+import io.github.datakore.jsont.crypto.CryptoConfig;
+import io.github.datakore.jsont.crypto.CryptoError;
+
 import java.util.List;
 import java.util.Objects;
 
@@ -77,6 +80,27 @@ public record JsonTRow(long index, List<JsonTValue> values) {
     /** Returns a copy of this row with different values (index unchanged). */
     public JsonTRow withValues(List<JsonTValue> newValues) {
         return new JsonTRow(index, newValues);
+    }
+
+    // ── On-demand decrypt ─────────────────────────────────────────────────────
+
+    /**
+     * Decrypt the value at position {@code index} and return the plaintext as a UTF-8 string.
+     *
+     * <p>{@code fieldName} is passed to {@code crypto.decrypt()} for key derivation and
+     * must match the name used when the value was encrypted.
+     *
+     * @param index     the 0-based position of the field in this row
+     * @param fieldName the field name for key derivation
+     * @param crypto    the crypto implementation to use for decryption
+     * @return the decrypted string, or {@link java.util.Optional#empty()} if the value
+     *         at {@code index} is not encrypted (already plaintext, null, etc.)
+     * @throws IndexOutOfBoundsException if {@code index} is out of range
+     * @throws CryptoError               if crypto or UTF-8 decoding fails
+     */
+    public java.util.Optional<String> decryptField(int index, String fieldName, CryptoConfig crypto)
+            throws CryptoError {
+        return values.get(index).decryptStr(fieldName, crypto);
     }
 
     @Override

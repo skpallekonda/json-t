@@ -8,6 +8,7 @@
 // =============================================================================
 
 pub mod builder;
+pub mod crypto;
 pub mod diagnostic;
 pub mod error;
 pub mod model;
@@ -28,7 +29,7 @@ pub mod json;
 pub use parse::rows::parse_rows;
 pub use parse::rows::parse_rows_streaming;
 pub use parse::rows::RowIter;
-pub use stringify::rows::{write_row, write_rows};
+pub use stringify::rows::{write_row, write_rows, write_row_with_schema};
 
 // Re-export everything a consumer needs at the crate root.
 pub use builder::catalog::JsonTCatalogBuilder;
@@ -43,6 +44,9 @@ pub use builder::validation::JsonTValidationBlockBuilder;
 // Diagnostic
 pub use diagnostic::sink::{ConsoleSink, FileSink, MemorySink};
 pub use diagnostic::{DiagnosticEvent, EventKind, Severity, SinkError};
+
+// Crypto
+pub use crypto::{CryptoConfig, CryptoError, PassthroughCryptoConfig};
 
 // Error
 pub use error::{EvalError, JsonTError, ParseError, StringifyError, TransformError};

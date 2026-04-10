@@ -101,7 +101,7 @@ public final class ValidationPipeline {
                                 row.values().size() + " field(s)"))
                         .atRow(idx).withSource(schemaName));
             } else {
-                row = promoteRow(row); // promote to JsonTRow with proper types
+                row = promoteRow(row, rowEvents, idx); // promote to JsonTRow with proper types
                 // Field constraints
                 for (int i = 0; i < fields.size(); i++) {
                     rowEvents.addAll(ConstraintChecker.checkField(fields.get(i), row.values().get(i), idx));
@@ -186,7 +186,7 @@ public final class ValidationPipeline {
                             row.values().size() + " field(s)"))
                     .atRow(idx).withSource(schemaName));
         } else {
-            row = promoteRow(row);
+            row = promoteRow(row, rowEvents, idx);
             for (int i = 0; i < fields.size(); i++) {
                 rowEvents.addAll(ConstraintChecker.checkField(fields.get(i), row.values().get(i), idx));
             }
@@ -312,7 +312,7 @@ public final class ValidationPipeline {
                             "(row)", fields.size() + " field(s)", row.values().size() + " field(s)"))
                     .atRow(idx).withSource(schemaName));
         } else {
-            row = promoteRow(row);
+            row = promoteRow(row, rowEvents, idx);
             for (int i = 0; i < fields.size(); i++) {
                 rowEvents.addAll(ConstraintChecker.checkField(fields.get(i), row.values().get(i), idx));
             }
@@ -360,13 +360,35 @@ public final class ValidationPipeline {
      * Called once per clean row after all constraint checks pass. Non-Text values
      * (including already-promoted variants) are passed through unchanged.
      */
-    private JsonTRow promoteRow(JsonTRow row) {
+    private JsonTRow promoteRow(JsonTRow row, List<DiagnosticEvent> events, int rowIdx) {
         List<JsonTValue> promoted = new ArrayList<>(row.values().size());
         for (int i = 0; i < row.values().size(); i++) {
             JsonTValue val = row.values().get(i);
             JsonTField field = i < fields.size() ? fields.get(i) : null;
             if (field != null && field.kind().isScalar()) {
-                val = JsonTValue.promote(val, field.scalarType());
+                // If the field is sensitive and the wire value carries a "base64:" envelope,
+                // decode it into Encrypted now that we have schema context.
+                // The row scanner emits it as a plain string; promotion is the first
+                // place the schema is known.
+                if (field.sensitive() && val instanceof JsonTString.Plain p
+                        && p.value().startsWith("base64:")) {
+                    String b64 = p.value().substring("base64:".length());
+                    try {
+                        byte[] bytes = java.util.Base64.getDecoder().decode(b64);
+                        val = JsonTValue.encrypted(bytes);
+                    } catch (IllegalArgumentException e) {
+                        // Invalid base64 — emit a fatal FormatViolation so the row
+                        // is rejected. Leave val as-is (plain string) for context.
+                        events.add(DiagnosticEvent.fatal(
+                                new DiagnosticEventKind.ConstraintViolation(
+                                        field.name(),
+                                        "base64-encoded envelope",
+                                        "invalid base64 in \"" + p.value() + "\""))
+                                .atRow(rowIdx));
+                    }
+                } else {
+                    val = JsonTValue.promote(val, field.scalarType());
+                }
             } else if (field != null && field.kind().isAnyOf()) {
                 val = promoteAnyOf(val, field.anyOfVariants());
             }

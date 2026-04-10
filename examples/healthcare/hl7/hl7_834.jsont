@@ -1,0 +1,240 @@
+{
+  namespace: {
+    baseUrl: "https://jsont.io/healthcare/hl7/834",
+    version: "1.1",
+    catalogs: [
+      {
+        schemas: [
+          // ── 0010: Interchange Control Header (ISA) ─────────────────────────
+          ISA_Segment: {
+            fields: {
+              str: authInfoQualifier      [(minLength=2, maxLength=2, constant="00")],
+              str: authInfo               [(minLength=10, maxLength=10, constant="          ")],
+              str: securityInfoQualifier  [(minLength=2, maxLength=2, constant="00")],
+              str: securityInfo           [(minLength=10, maxLength=10, constant="          ")],
+              str: senderIdQualifier     [(minLength=2, maxLength=2, constant="ZZ")],
+              str: senderId              [(minLength=15, maxLength=15, constant="SENDER_ID      ")],
+              str: receiverIdQualifier   [(minLength=2, maxLength=2, constant="ZZ")],
+              str: receiverId            [(minLength=15, maxLength=15, constant="RECEIVER_ID    ")],
+              date: interchangeDate,
+              time: interchangeTime,
+              str: repetitionSeparator    [(minLength=1, maxLength=1, constant="^")],
+              str: versionNumber          [(minLength=5, maxLength=5, constant="00501")],
+              u32: controlNumber          [(minValue=1, maxValue=999999999)],
+              str: ackRequested           [(minLength=1, maxLength=1, constant="0")],
+              str: usageIndicator         [(minLength=1, maxLength=1)], // P=Prod, T=Test
+              str: componentSeparator     [(minLength=1, maxLength=1, constant=":")]
+            }
+          },
+
+          // ── 0015: Functional Group Header (GS) ────────────────────────────
+          GS_Segment: {
+            fields: {
+              str: functionalCode         [(minLength=2, maxLength=2, constant="BE")], // BE = Enrollment
+              str: senderCode            [(minLength=2, maxLength=15, constant="SENDER_CODE")],
+              str: receiverCode          [(minLength=2, maxLength=15, constant="RECEIVER_CODE")],
+              date: groupDate,
+              time: groupTime,
+              u32: groupControlNumber     [(minValue=1, maxValue=999999999)],
+              str: agencyCode             [(minLength=1, maxLength=2, constant="X")],
+              str: versionIdCode          [(minLength=1, maxLength=12, constant="005010X220A1")]
+            }
+          },
+
+          // ── 0020: Transaction Set Header (ST) ─────────────────────────────
+          ST_Segment: {
+            fields: {
+              str: transactionSetId       [(minLength=3, maxLength=3, constant="834")],
+              str: controlNumber          [(minLength=4, maxLength=9)]
+            }
+          },
+
+          // ── 0030: Beginning Segment (BGN) ──────────────────────────────────
+          BGN_Segment: {
+            fields: {
+              <BGN_PurposeCode>: purposeCode,
+              str: referenceId            [(minLength=1, maxLength=50)],
+              date: date,
+              time: time?,
+              str: timeZoneCode?          [(minLength=2, maxLength=2)],
+              str: actionCode?           [(minLength=1, maxLength=2)]
+            }
+          },
+
+          // ── 2000: Member Level Detail ─────────────────────────────────────
+          Member_Loop: {
+            fields: {
+              <INS_Segment>: memberDetail,
+              <REF_Segment>[]: memberIdentifiers,
+              <DTP_Segment>[]: memberDates?,
+              <NM1_Loop>: memberName,
+              <DMG_Segment>: memberDemographics?,
+              <HealthCoverage_Loop>[]: healthcareCoverage?
+            },
+            validations: {
+              rules {
+                // Syntactical check: If Relationship is "18" (Self), 
+                // Indicated Member MUST be the Insured (Y).
+                // If Relationship is NOT self, Indicated Member MUST NOT be the Insured (N).
+                (memberDetail.relationshipCode == "18") == (memberDetail.memberIndicator == "Y")
+              }
+            }
+          },
+
+          // ── Item 2100A: Member Name ───────────────────────────────────────
+          NM1_Loop: {
+            fields: {
+              str: entityIdQualifier      [(constant="IL")],
+              str: entityTypeQualifier    [(constant="1")],
+              str: lastName               [(minLength=1, maxLength=60)],
+              str: firstName?             [(minLength=1, maxLength=35)],
+              str: middleName?            [(minLength=1, maxLength=25)],
+              str: prefix?                [(minLength=1, maxLength=10)],
+              id:  memberId               [(minLength=2, maxLength=80)] // mapped from NM109
+            }
+          },
+
+          // ── Member Detail (INS) ───────────────────────────────────────────
+          INS_Segment: {
+            fields: {
+              str: memberIndicator        [(minLength=1, maxLength=1)], // Y/N
+              str: relationshipCode       [(minLength=2, maxLength=2)], // 18=Self, 01=Spouse, etc.
+              <MaintenanceTypeCode>: maintenanceTypeCode,
+              <MaintenanceReasonCode>: maintenanceReasonCode?,
+              str: benefitStatusCode?     [(minLength=1, maxLength=1)],
+              str: medicareStatusCode?    [(minLength=1, maxLength=1)],
+              str: consolidatedOmnibus?  [(minLength=1, maxLength=1)],
+              str: employmentStatusCode?  [(minLength=2, maxLength=2)]
+            }
+          },
+
+          // ── Reference (REF) ──────────────────────────────────────────────
+          REF_Segment: {
+            fields: {
+              str: idQualifier            [(minLength=2, maxLength=3)],
+              str: identification         [(minLength=1, maxLength=80)]
+            }
+          },
+
+          // ── Date/Time (DTP) ──────────────────────────────────────────────
+          DTP_Segment: {
+            fields: {
+              str: dateQualifier          [(minLength=3, maxLength=3)],
+              str: formatQualifier        [(constant="D8")],
+              str: dateValue              [(minLength=8, maxLength=8)]
+            }
+          },
+
+          // ── Demographics (DMG) ───────────────────────────────────────────
+          DMG_Segment: {
+            fields: {
+              str: formatQualifier        [(constant="D8")],
+              date: dateOfBirth,
+              <GenderCode>: gender,
+              <MaritalStatusCode>: maritalStatus?
+            }
+          },
+
+          // ── 2300: Health Coverage ─────────────────────────────────────────
+          HealthCoverage_Loop: {
+            fields: {
+              <HD_Segment>: coverage,
+              <DTP_Segment>[]: coverageDates
+            }
+          },
+
+          // ── Coverage Detail (HD) ─────────────────────────────────────────
+          HD_Segment: {
+            fields: {
+              str: maintenanceTypeCode    [(minLength=3, maxLength=3)],
+              str: insuranceLineCode      [(minLength=2, maxLength=3)],
+              str: planCoverageDescription? [(minLength=1, maxLength=50)]
+            }
+          },
+
+          // ── Trailers ───────────────────────────────────────────────────────
+
+          SE_Segment: {
+            fields: {
+              u32: segmentCount,
+              str: controlNumber          [(minLength=4, maxLength=9)]
+            }
+          },
+
+          GE_Segment: {
+            fields: {
+              u32: transactionSetCount,
+              u32: groupControlNumber     [(minValue=1, maxValue=999999999)]
+            }
+          },
+
+          IEA_Segment: {
+            fields: {
+              u32: groupCount,
+              u32: controlNumber          [(minValue=1, maxValue=999999999)]
+            }
+          },
+
+          // ── Hierarchy Wrappers ───────────────────────────────────────────
+
+          TransactionSet: {
+            fields: {
+              <ST_Segment>: header,
+              <BGN_Segment>: beginning,
+              <Loop_1000A>: sponsor,
+              <Loop_1000B>: payer,
+              <Member_Loop>[]: members,
+              <SE_Segment>: trailer
+            },
+            validations: {
+              rules {
+                // Control number in trailer must match header
+                header.controlNumber == trailer.controlNumber
+                // (Future: Validate segmentCount matches actual count)
+              }
+            }
+          },
+
+          FunctionalGroup: {
+            fields: {
+              <GS_Segment>: header,
+              <TransactionSet>[]: transactions,
+              <GE_Segment>: trailer
+            },
+            validations: {
+              rules {
+                header.groupControlNumber == trailer.groupControlNumber
+              }
+            }
+          },
+
+          // ── Root: HL7 834 Document ───────────────────────────────────────
+          HL7_834: {
+            fields: {
+              <ISA_Segment>: interchangeHeader,
+              <FunctionalGroup>[]: groups,
+              <IEA_Segment>: interchangeTrailer
+            },
+            validations: {
+              rules {
+                // Functional group count must match trailer
+                // groups.length() == interchangeTrailer.groupCount
+                // Control number in trailer must match header
+                interchangeHeader.controlNumber == interchangeTrailer.controlNumber
+              }
+            }
+          }
+        ],
+        enums: [
+          BGN_PurposeCode: [ "00", "02", "04", "07", "15", "22" ],
+          MaintenanceTypeCode: [ "001", "021", "024", "025", "030" ],
+          MaintenanceReasonCode: [ "01", "02", "03", "04", "25", "32" ],
+          GenderCode: [ "M", "F", "U" ],
+          MaritalStatusCode: [ "S", "M", "D", "W" ]
+        ],
+        "data-schema": HL7_834
+      }
+    ],
+    data-schema: HL7_834
+  }
+}

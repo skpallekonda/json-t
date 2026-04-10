@@ -1,0 +1,82 @@
+{
+  namespace: {
+    baseUrl: "https://jsont.io/fintech/fix",
+    version: "4.4",
+    catalogs: [
+      {
+        schemas: [
+          // ── FIX Protocol: New Order Single (MsgType=D) ─────────────────────
+          
+          FixHeader: {
+            fields: {
+              str: beginString            [(constant="FIX.4.4")], // Tag 8
+              u32: bodyLength,                                    // Tag 9
+              str: msgType                [(constant="D")],       // Tag 35
+              str: senderCompId           [(minLength=1)],        // Tag 49
+              str: targetCompId           [(minLength=1)],        // Tag 56
+              u32: msgSeqNum              [(minValue=1)],         // Tag 34
+              datetime: sendingTime                                // Tag 52
+            }
+          },
+
+          NewOrderSingle: {
+            fields: {
+              str: clOrdId                [(minLength=1)],        // Tag 11
+              str: symbol                 [(minLength=1)],        // Tag 55
+              <SideCode>: side,                                   // Tag 54
+              d64: orderQty               [(minValue=0.000001)],  // Tag 38
+              <OrdTypeCode>: ordType,                             // Tag 40
+              d64: price?                 [(minValue=0)],         // Tag 44
+              <HandlInstCode>: handlInst,                         // Tag 21
+              datetime: transactTime                               // Tag 60
+            },
+            validations: {
+              rules {
+                // Rule: If OrdType is Limit (2), Price (44) is required
+                ordType == "2" -> required(price)
+              }
+            }
+          },
+
+          FixTrailer: {
+            fields: {
+              str: checkSum               [(minLength=3, maxLength=3)] // Tag 10
+            }
+          },
+
+          // ── Root: FIX Message ───────────────────────────────────────────
+
+          FIX_Message_D: {
+            fields: {
+              <FixHeader>: header,
+              <NewOrderSingle>: body,
+              <FixTrailer>: trailer
+            }
+          }
+        ],
+        enums: [
+          SideCode: [
+            "1", // Buy
+            "2", // Sell
+            "3", // Buy Minus
+            "4", // Sell Plus
+            "5"  // Sell Short
+          ],
+          OrdTypeCode: [
+            "1", // Market
+            "2", // Limit
+            "3", // Stop
+            "4"  // Stop Limit
+          ],
+          HandlInstCode: [
+            "1", // Automated execution order, private
+            "2", // Automated execution order, public
+            "3"  // Manual order
+          ]
+        ],
+        "data-schema": FIX_Message_D
+      }
+    ],
+    data-schema: FIX_Message_D
+  }
+}

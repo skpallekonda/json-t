@@ -1,9 +1,12 @@
 package io.github.datakore.jsont.internal.transform;
 
 import io.github.datakore.jsont.builder.SchemaRegistry;
+import io.github.datakore.jsont.crypto.CryptoConfig;
+import io.github.datakore.jsont.crypto.CryptoError;
 import io.github.datakore.jsont.error.JsonTError;
 import io.github.datakore.jsont.model.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -14,9 +17,18 @@ import java.util.stream.Collectors;
 
 public class OperationApplicator {
 
+    /**
+     * Apply one operation to the working field map.
+     *
+     * @param op      the operation to apply
+     * @param working the current (name → value) state
+     * @param crypto  required for {@link SchemaOperation.Decrypt}; pass {@code null}
+     *                for pipelines that do not use decryption
+     */
     public static LinkedHashMap<String, JsonTValue> applyOperation(
             SchemaOperation op,
-            LinkedHashMap<String, JsonTValue> working) throws JsonTError.Transform {
+            LinkedHashMap<String, JsonTValue> working,
+            CryptoConfig crypto) throws JsonTError.Transform {
 
         if (op instanceof SchemaOperation.Rename rename) {
             for (RenamePair pair : rename.pairs()) {
@@ -105,6 +117,38 @@ public class OperationApplicator {
                 throw new JsonTError.Transform(
                         "transform failed for '" + key + "': " + e.getMessage(), e);
             }
+        }
+
+        if (op instanceof SchemaOperation.Decrypt decrypt) {
+            if (crypto == null) {
+                throw new JsonTError.Transform.DecryptFailed("",
+                        "Decrypt operation requires a CryptoConfig; " +
+                        "use transformWithCrypto instead of transform");
+            }
+            for (String fieldName : decrypt.fields()) {
+                if (!working.containsKey(fieldName)) {
+                    throw new JsonTError.Transform.FieldNotFound(fieldName);
+                }
+                JsonTValue current = working.get(fieldName);
+                if (current instanceof JsonTValue.Encrypted enc) {
+                    byte[] plaintext;
+                    try {
+                        plaintext = crypto.decrypt(fieldName, enc.envelope());
+                    } catch (CryptoError e) {
+                        throw new JsonTError.Transform.DecryptFailed(fieldName, e.getMessage());
+                    }
+                    String text;
+                    try {
+                        text = new String(plaintext, StandardCharsets.UTF_8);
+                    } catch (Exception e) {
+                        throw new JsonTError.Transform.DecryptFailed(fieldName,
+                                "decrypted bytes are not valid UTF-8: " + e.getMessage());
+                    }
+                    working.put(fieldName, JsonTValue.text(text));
+                }
+                // Already plaintext — idempotent, leave unchanged.
+            }
+            return working;
         }
 
         // Unknown operation type — return unchanged

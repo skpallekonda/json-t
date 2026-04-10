@@ -12,7 +12,9 @@
 
 use std::io::{self, Write};
 
-use crate::model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTValue};
+use crate::crypto::{CryptoConfig, CryptoError};
+use crate::model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTString, JsonTValue};
+use crate::model::field::{JsonTField, JsonTFieldKind};
 
 // =============================================================================
 // Public API
@@ -46,6 +48,84 @@ pub fn write_rows<W: Write>(rows: &[JsonTRow], w: &mut W) -> io::Result<()> {
     Ok(())
 }
 
+/// Write one row with schema-aware crypto: sensitive fields with plaintext
+/// values are encrypted before writing; `Encrypted` values are written as-is.
+///
+/// - If a field is `sensitive` and its value is **not** `Encrypted`, the
+///   value's text representation is encrypted via `crypto` and written as
+///   `"base64:<b64>"`.
+/// - If a field is `sensitive` and its value **is** `Encrypted`, the stored
+///   ciphertext bytes are re-encoded as `"base64:<b64>"` (no crypto call).
+/// - Non-sensitive fields are written normally.
+///
+/// Returns `Err` on any I/O error; crypto failures are mapped to `io::Error`.
+pub fn write_row_with_schema<W: Write>(
+    row: &JsonTRow,
+    fields: &[JsonTField],
+    crypto: &dyn CryptoConfig,
+    w: &mut W,
+) -> io::Result<()> {
+    w.write_all(b"{")?;
+    for (i, (v, field)) in row.fields.iter().zip(fields.iter()).enumerate() {
+        if i > 0 {
+            w.write_all(b",")?;
+        }
+        let is_sensitive = matches!(
+            &field.kind,
+            JsonTFieldKind::Scalar { sensitive: true, .. }
+        );
+        if is_sensitive {
+            use base64::Engine as _;
+            let ciphertext: Vec<u8> = match v {
+                // Already encrypted — re-encode ciphertext as base64 wire format.
+                JsonTValue::Encrypted(ct) => ct.clone(),
+                // Plaintext — stringify value text then encrypt.
+                other => {
+                    let plaintext = value_to_text(other);
+                    crypto.encrypt(&field.name, plaintext.as_bytes())
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+                }
+            };
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&ciphertext);
+            write_quoted_str(&format!("base64:{}", b64), w)?;
+        } else {
+            write_value(v, w)?;
+        }
+    }
+    w.write_all(b"}")
+}
+
+/// Produce the wire-format text of a non-encrypted value (used before encrypting).
+fn value_to_text(v: &JsonTValue) -> String {
+    match v {
+        JsonTValue::Null        => "null".into(),
+        JsonTValue::Unspecified => "_".into(),
+        JsonTValue::Bool(b)     => b.to_string(),
+        JsonTValue::Str(s)      => s.as_raw_str().to_string(),
+        JsonTValue::Enum(e)     => e.clone(),
+        JsonTValue::Number(n)   => {
+            use crate::model::data::JsonTNumber;
+            match n {
+                JsonTNumber::I16(v)  => v.to_string(),
+                JsonTNumber::I32(v)  => v.to_string(),
+                JsonTNumber::I64(v)  => v.to_string(),
+                JsonTNumber::U16(v)  => v.to_string(),
+                JsonTNumber::U32(v)  => v.to_string(),
+                JsonTNumber::U64(v)  => v.to_string(),
+                JsonTNumber::D32(v)  => v.to_string(),
+                JsonTNumber::D64(v)  => v.to_string(),
+                JsonTNumber::D128(v) => v.to_string(),
+                JsonTNumber::Date(v)      => v.to_string(),
+                JsonTNumber::Time(v)      => v.to_string(),
+                JsonTNumber::DateTime(v)  => v.to_string(),
+                JsonTNumber::Timestamp(v) => v.to_string(),
+            }
+        }
+        // For objects/arrays, fall back to the raw JSON-T representation.
+        _ => "<complex>".into(),
+    }
+}
+
 // =============================================================================
 // Private helpers
 // =============================================================================
@@ -61,14 +141,13 @@ fn write_value<W: Write>(v: &JsonTValue, w: &mut W) -> io::Result<()> {
         JsonTValue::Number(n) => write_number(n, w),
         JsonTValue::Object(row) => write_row(row, w),
         JsonTValue::Array(arr) => write_array(arr, w),
-        // Encrypted values carry a Base64 envelope; CryptoConfig enforcement
-        // is handled in the schema-aware stringify path (Phase 7). The raw-row
-        // writer should never receive an Encrypted value without prior crypto
-        // resolution — panic here surfaces the programming error early.
-        JsonTValue::Encrypted(_) => panic!(
-            "Encrypted value cannot be written without CryptoConfig; \
-             use StringifyOptions::with_crypto() (Phase 7)"
-        ),
+        // Encrypted values hold raw ciphertext bytes. Re-encode them as the
+        // base64: wire envelope so the output is valid JsonT data.
+        JsonTValue::Encrypted(ciphertext) => {
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(ciphertext);
+            write_quoted_str(&format!("base64:{}", b64), w)
+        }
     }
 }
 

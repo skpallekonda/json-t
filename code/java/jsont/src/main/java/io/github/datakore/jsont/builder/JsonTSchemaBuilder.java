@@ -1,6 +1,7 @@
 package io.github.datakore.jsont.builder;
 
 import io.github.datakore.jsont.error.BuildError;
+import io.github.datakore.jsont.internal.transform.OperationApplicator;
 import io.github.datakore.jsont.model.JsonTField;
 import io.github.datakore.jsont.model.JsonTSchema;
 import io.github.datakore.jsont.model.JsonTValidationBlock;
@@ -8,7 +9,9 @@ import io.github.datakore.jsont.model.SchemaKind;
 import io.github.datakore.jsont.model.SchemaOperation;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Fluent builder for {@link JsonTSchema}.
@@ -166,5 +169,64 @@ public final class JsonTSchemaBuilder {
             throw new BuildError("Derived schema '" + name + "' must specify a parent schema name");
         if (derivedFrom.equals(name))
             throw new BuildError("Derived schema '" + name + "' cannot derive from itself");
+        checkOperationDataflow(operations);
+    }
+
+    /**
+     * Build-time dataflow check: detects {@code Transform} or {@code Filter} operations
+     * that reference a field appearing in a later (or absent) {@code Decrypt} operation.
+     *
+     * <p>The check is conservative: any field listed in <em>any</em> {@code Decrypt} op
+     * in the pipeline is treated as encrypted at the start.  An expression that references
+     * such a field before its {@code Decrypt} op fires is a build error.
+     *
+     * <p>This analysis is purely self-contained within the operations list — no parent
+     * schema is required.  For cross-schema validation (e.g. "decrypt field must exist in
+     * parent"), call {@link JsonTSchema#validateWithParent} once the parent is available.
+     */
+    private void checkOperationDataflow(List<SchemaOperation> ops) throws BuildError {
+        // Collect all field names appearing in any Decrypt op — presumed sensitive.
+        Set<String> knownSensitive = new HashSet<>();
+        for (SchemaOperation op : ops) {
+            if (op instanceof SchemaOperation.Decrypt d) {
+                knownSensitive.addAll(d.fields());
+            }
+        }
+        if (knownSensitive.isEmpty()) return; // No Decrypt ops — nothing to check.
+
+        Set<String> decrypted = new HashSet<>();
+
+        for (SchemaOperation op : ops) {
+            if (op instanceof SchemaOperation.Decrypt d) {
+                decrypted.addAll(d.fields());
+
+            } else if (op instanceof SchemaOperation.Transform t) {
+                // Check expression refs
+                for (String ref : OperationApplicator.collectFieldRefs(t.expr())) {
+                    if (knownSensitive.contains(ref) && !decrypted.contains(ref)) {
+                        throw new BuildError(
+                                "field '" + ref + "' is encrypted; add decrypt(" + ref
+                                        + ") before this transform");
+                    }
+                }
+                // Check the target field itself
+                String tgt = t.target().leaf();
+                if (knownSensitive.contains(tgt) && !decrypted.contains(tgt)) {
+                    throw new BuildError(
+                            "field '" + tgt + "' is encrypted; add decrypt(" + tgt
+                                    + ") before this transform");
+                }
+
+            } else if (op instanceof SchemaOperation.Filter f) {
+                for (String ref : OperationApplicator.collectFieldRefs(f.predicate())) {
+                    if (knownSensitive.contains(ref) && !decrypted.contains(ref)) {
+                        throw new BuildError(
+                                "field '" + ref + "' is encrypted; add decrypt(" + ref
+                                        + ") before this filter");
+                    }
+                }
+            }
+            // Rename/Exclude/Project operate on field identity — OK on encrypted fields.
+        }
     }
 }

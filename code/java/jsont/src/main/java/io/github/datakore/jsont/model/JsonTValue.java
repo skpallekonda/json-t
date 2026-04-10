@@ -1,5 +1,9 @@
 package io.github.datakore.jsont.model;
 
+import io.github.datakore.jsont.crypto.CryptoConfig;
+import io.github.datakore.jsont.crypto.CryptoError;
+
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -148,6 +152,40 @@ public sealed interface JsonTValue
 
     default String asText() {
         return asRawStr().orElse("");
+    }
+
+    // ── On-demand decrypt ─────────────────────────────────────────────────────
+
+    /**
+     * Decrypt this value if it is {@link Encrypted}, otherwise return {@link Optional#empty()}.
+     *
+     * <p>Returns the raw plaintext bytes on success. The caller is responsible for
+     * interpreting the bytes (e.g., converting to UTF-8 with {@link #decryptStr}).
+     *
+     * @param field  the field name passed to {@code crypto.decrypt()} for key derivation
+     * @param crypto the crypto implementation to use for decryption
+     * @return the decrypted bytes, or empty if this value is not encrypted
+     * @throws CryptoError if the crypto call fails
+     */
+    default Optional<byte[]> decryptBytes(String field, CryptoConfig crypto) throws CryptoError {
+        if (this instanceof Encrypted enc) {
+            return Optional.of(crypto.decrypt(field, enc.envelope()));
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Decrypt this value if it is {@link Encrypted} and interpret the result as UTF-8.
+     *
+     * @param field  the field name passed to {@code crypto.decrypt()} for key derivation
+     * @param crypto the crypto implementation to use for decryption
+     * @return the decrypted string, or empty if this value is not encrypted
+     * @throws CryptoError if the crypto call or UTF-8 decoding fails
+     */
+    default Optional<String> decryptStr(String field, CryptoConfig crypto) throws CryptoError {
+        Optional<byte[]> bytes = decryptBytes(field, crypto);
+        if (bytes.isEmpty()) return Optional.empty();
+        return Optional.of(new String(bytes.get(), StandardCharsets.UTF_8));
     }
 
     static JsonTValue promote(JsonTValue value, ScalarType type) {

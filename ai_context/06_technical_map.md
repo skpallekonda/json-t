@@ -133,6 +133,7 @@ pub enum SchemaOperation {
     Project(Vec<FieldPath>),
     Filter  { expr: JsonTExpression, refs: Vec<String> },    // refs pre-computed at build time
     Transform { target: FieldPath, expr: JsonTExpression, refs: Vec<String> },
+    Decrypt { fields: Vec<String> },   // privacy — decrypts named sensitive fields
 }
 
 pub struct RenamePair { pub from: FieldPath, pub to: String }
@@ -245,11 +246,13 @@ pub enum JsonTValue {
     Enum(String),
     Object(JsonTRow),
     Array(JsonTArray),
+    Encrypted(Vec<u8>),     // wire: "base64:<b64>" — raw ciphertext bytes
 }
-// Factories: null(), unspecified(), bool(), str(), enum_val(),
+// Factories: null(), unspecified(), bool(), str(), enum_val(), encrypted(Vec<u8>),
 //            i16()..d128(), nstr(), uuid(), uri(), email(), hostname(), ipv4(), ipv6(),
 //            date_int(), time_int(), datetime_int(), timestamp_int()
 // Queries:   is_null(), is_numeric(), is_string(), as_f64(), as_bool(), as_str(), type_name()
+// Decrypt:   decrypt_bytes(field, crypto), decrypt_str(field, crypto)
 
 pub enum JsonTNumber { I16(i16), I32(i32), I64(i64), U16(u16), U32(u32), U64(u64),
                        D32(f32), D64(f64), D128(Decimal), Date(u32), Time(u32), DateTime(u64), Timestamp(i64) }
@@ -280,6 +283,7 @@ JsonTSchemaBuilder::derived(name, from) -> Self
 JsonTFieldBuilder::scalar(name, ScalarType) -> Self
 JsonTFieldBuilder::object(name, schema_ref) -> Self
   .optional() .as_array() .required(bool)
+  .sensitive()                               // marks field as privacy-sensitive (DSL: ~)
   .min_value(f64) .max_value(f64) .min_precision(f64) .max_precision(f64)
   .min_length(u64) .max_length(u64) .regex(pattern)
   .array_items_count(key, u64) .allow_null_items(bool)
@@ -380,7 +384,8 @@ pub enum JsonTError {
 
 ParseError:    Pest(String), UnknownSchemaRef, UnknownFieldType, InvalidConstraint, ExpectedSchemaid, Unexpected
 EvalError:     UnboundField, TypeMismatch, DivisionByZero, UnknownFunction, ArityMismatch, InvalidExpression
-TransformError: UnknownSchema, FieldNotFound, FilterFailed, TransformFailed, CyclicDerivation, Filtered  // Filtered = row skipped, not error
+TransformError: UnknownSchema, FieldNotFound, FilterFailed, TransformFailed, CyclicDerivation, Filtered,  // Filtered = row skipped, not error
+               DecryptFailed { field: String, reason: String }
 StringifyError: UnresolvedSchemaRef, UnstringifiableValue
 BuildError:    MissingField, InvalidConstraintForType, DuplicateFieldName, DuplicateSchemaName,
                DuplicateEnumValue, NameHintMismatch, RowTypeMismatch, TooManyValues
@@ -399,6 +404,43 @@ pub struct EvalContext { pub bindings: HashMap<String, JsonTValue> }
 
 pub struct SchemaRegistry { pub schemas: HashMap<String, JsonTSchema> }
 // Methods: new(), register(schema), get(name), from_namespace(ns)
+
+// ── Crypto (module: crypto) ──────────────────────────────────────────────────
+pub trait CryptoConfig {
+    fn encrypt(&self, field: &str, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn decrypt(&self, field: &str, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError>;
+}
+
+pub struct PassthroughCryptoConfig;  // identity: encrypt/decrypt return bytes unchanged
+
+pub enum CryptoError {
+    EncryptFailed(String),
+    DecryptFailed(String),
+    InvalidUtf8(String),
+}
+
+// ── Schema-aware stringify (free function) ───────────────────────────────────
+fn write_row_with_schema<W: Write>(
+    row: &JsonTRow,
+    fields: &[JsonTField],
+    crypto: &dyn CryptoConfig,
+    w: &mut W,
+) -> io::Result<()>
+// Sensitive+plaintext fields: encrypt then emit as "base64:<b64>"; Encrypted fields: re-encode.
+// Non-sensitive fields: written plain (same as write_row).
+
+// ── Transform with crypto ─────────────────────────────────────────────────────
+// On impl JsonTSchema:
+fn transform(&self, row: JsonTRow, registry: &SchemaRegistry) -> Result<JsonTRow, JsonTError>
+fn transform_with_crypto(&self, row: JsonTRow, registry: &SchemaRegistry, crypto: &dyn CryptoConfig) -> Result<JsonTRow, JsonTError>
+
+// ── On-demand decrypt (impl JsonTValue) ──────────────────────────────────────
+fn decrypt_bytes(&self, field: &str, crypto: &dyn CryptoConfig) -> Result<Option<Vec<u8>>, CryptoError>
+fn decrypt_str(&self, field: &str, crypto: &dyn CryptoConfig) -> Result<Option<String>, CryptoError>
+
+// ── On-demand decrypt (impl JsonTRow) ────────────────────────────────────────
+fn decrypt_field_str(&self, index: usize, field_name: &str, crypto: &dyn CryptoConfig) -> Result<Option<String>, CryptoError>
+// Returns None for out-of-range index (no panic).
 ```
 
 ---
@@ -478,6 +520,7 @@ sealed interface SchemaOperation {
     record Project(List<FieldPath> paths) implements SchemaOperation {}
     record Filter(JsonTExpression predicate) implements SchemaOperation {}
     record Transform(FieldPath target, JsonTExpression expr) implements SchemaOperation {}
+    record Decrypt(List<String> fields) implements SchemaOperation {}  // privacy — decrypts named fields
 
     // Static factories
     static SchemaOperation rename(List<RenamePair> pairs)
@@ -487,6 +530,7 @@ sealed interface SchemaOperation {
     static SchemaOperation filter(JsonTExpression predicate)
     static SchemaOperation transform(FieldPath target, JsonTExpression expr)
     static SchemaOperation transform(String targetField, JsonTExpression expr)
+    static SchemaOperation decrypt(String... fields)
 }
 ```
 
@@ -593,6 +637,7 @@ sealed interface JsonTValue {
     record Bool(boolean value) implements JsonTValue {}
     record Enum(String value) implements JsonTValue {}
     record Array(List<JsonTValue> elements) implements JsonTValue {}
+    record Encrypted(byte[] envelope) implements JsonTValue {}  // wire: "base64:<b64>"
     // + JsonTNumber (14 records), JsonTString (18 records) — see below
 
     // Static factories
@@ -606,12 +651,15 @@ sealed interface JsonTValue {
                       hostname(String v), ipv4(String v), ipv6(String v)  // semantic strings
     static JsonTValue dateInt(int v), timeInt(int v), datetimeInt(long v), timestampInt(long v)
     static JsonTValue array(List<JsonTValue> elements)
+    static JsonTValue encrypted(byte[] envelope)
 
     // Default methods
-    boolean isNumeric(); boolean isNull(); boolean isUnspecified(); boolean isStringLike();
+    boolean isNumeric(); boolean isNull(); boolean isUnspecified(); boolean isStringLike(); boolean isEncrypted();
     double toDouble();
     Optional<JsonTString> asStr(); Optional<String> asRawStr();
     String asText();
+    Optional<byte[]> decryptBytes(String field, CryptoConfig crypto) throws CryptoError
+    Optional<String> decryptStr(String field, CryptoConfig crypto) throws CryptoError
     static JsonTValue promote(JsonTValue value, ScalarType type)
 }
 
@@ -653,6 +701,7 @@ record JsonTEnum(String name, List<String> values) {
 JsonTFieldBuilder.scalar(String name, ScalarType type)
 JsonTFieldBuilder.object(String name, String schemaRef)
   .optional() .asArray()
+  .sensitive()                    // marks field as privacy-sensitive (DSL: ~)
   .minValue(double) .maxValue(double)
   .minLength(int) .maxLength(int) .pattern(String)
   .minItems(int) .maxItems(int) .allowNullElements(boolean) .maxNullElements(int)
@@ -740,10 +789,34 @@ class JsonTError extends RuntimeException {
         static class FieldNotFound extends Transform {}
         static class UnknownSchema extends Transform {}
         static class CyclicDerivation extends Transform {}
+        static class DecryptFailed extends Transform {}  // Decrypt op failed (no CryptoConfig or crypto error)
     }
     static class Stringify  extends JsonTError {}
     static class SchemaInvalid extends JsonTError {}
 }
+
+// ── Crypto (package: crypto) ──────────────────────────────────────────────────
+interface CryptoConfig {
+    byte[] encrypt(String field, byte[] plaintext) throws CryptoError;
+    byte[] decrypt(String field, byte[] ciphertext) throws CryptoError;
+}
+
+class PassthroughCryptoConfig implements CryptoConfig {}  // identity
+
+class CryptoError extends Exception {}  // checked exception
+
+// ── Transform with crypto (RowTransformer) ────────────────────────────────────
+RowTransformer.of(JsonTSchema schema, SchemaRegistry registry) -> RowTransformer
+  .transform(JsonTRow row) throws JsonTError.Transform             // Decrypt → DecryptFailed
+  .transformWithCrypto(JsonTRow row, CryptoConfig crypto) throws JsonTError.Transform
+
+// ── On-demand decrypt (JsonTValue default methods) ────────────────────────────
+Optional<byte[]> decryptBytes(String field, CryptoConfig crypto) throws CryptoError
+Optional<String> decryptStr(String field, CryptoConfig crypto) throws CryptoError
+
+// ── On-demand decrypt (JsonTRow) ──────────────────────────────────────────────
+Optional<String> decryptField(int index, String fieldName, CryptoConfig crypto) throws CryptoError
+// Throws IndexOutOfBoundsException for out-of-range index.
 
 class BuildError extends RuntimeException {}
 ```
@@ -759,6 +832,7 @@ JsonTStringifier.stringify(JsonTSchema, StringifyOptions)
 JsonTStringifier.stringify(JsonTNamespace, StringifyOptions)
 JsonTStringifier.stringify(JsonTRow)
 RowWriter.writeRow(JsonTRow row, Writer w) throws IOException
+RowWriter.writeRow(JsonTRow row, List<JsonTField> fields, CryptoConfig crypto, Writer w) throws IOException  // schema-aware, encrypts sensitive plaintext
 RowWriter.writeRows(Iterable<JsonTRow> rows, Writer w) throws IOException
 
 // Parse

@@ -1,0 +1,74 @@
+{
+  namespace: {
+    baseUrl: "https://jsont.io/logistics/edi",
+    version: "4010",
+    catalogs: [
+      {
+        schemas: [
+          // ── EDI 850: Purchase Order ─────────────────────────────────────────
+          
+          BEG_Segment: {
+            fields: {
+              str: transactionSetPurpose  [(minLength=2, maxLength=2, constant="00")],
+              str: purchaseOrderTypeCode  [(minLength=2, maxLength=2, constant="NE")], // New Order
+              str: purchaseOrderNumber    [(minLength=1, maxLength=22)],
+              str: releaseNumber?         [(maxLength=30)],
+              date: purchaseOrderDate,
+              str: contractNumber?        [(maxLength=30)]
+            }
+          },
+
+          N1_Loop: {
+            fields: {
+              str: entityIdCode           [(minLength=2, maxLength=3)], // ST=ShipTo, BT=BillTo
+              str: name                   [(maxLength=60)],
+              str: idCodeQualifier?       [(minLength=1, maxLength=2)],
+              str: idCode?                [(maxLength=80)]
+            }
+          },
+
+          PO1_Segment: {
+            fields: {
+              str: assignedId             [(maxLength=20)],
+              d64: quantity               [(minValue=1)],
+              str: uom                    [(minLength=2, maxLength=2)], // EA, BX, UN
+              d64: unitPrice              [(minValue=0)],
+              str: basisOfUnitPrice?      [(minLength=2, maxLength=2)],
+              str: productQualifier1      [(minLength=2, maxLength=2)], // BP=Buyer Part, VP=Vendor Part
+              str: productId1             [(maxLength=48)],
+              str: productQualifier2?     [(minLength=2, maxLength=2)],
+              str: productId2?            [(maxLength=48)]
+            }
+          },
+
+          CTT_Segment: {
+            fields: {
+              u32: numberOfLineItems,
+              d64: hashTotal?
+            }
+          },
+
+          // ── Hierarchy ───────────────────────────────────────────────────────
+
+          PurchaseOrder: {
+            fields: {
+              <BEG_Segment>: beginning,
+              <N1_Loop>[]: parties,
+              <PO1_Segment>[]: lineItems,
+              <CTT_Segment>: totals
+            },
+            validations: {
+              rules {
+                // Number of line items must match the count in totals
+                // lineItems.length() == totals.numberOfLineItems
+              }
+            }
+          }
+        ],
+        enums: [],
+        "data-schema": PurchaseOrder
+      }
+    ],
+    data-schema: PurchaseOrder
+  }
+}

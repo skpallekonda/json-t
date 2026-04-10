@@ -39,6 +39,12 @@ public class ConstraintChecker {
             return events;
         }
 
+        // 4b. Encrypted values are opaque until decrypted — skip all value constraints.
+        // The required/absent check above still applies (Encrypted counts as present).
+        if (value instanceof JsonTValue.Encrypted) {
+            return events;
+        }
+
         // 4a. constantValue — Fatal if the row value doesn't equal the declared constant
         if (c.constantValue() != null && !value.equals(c.constantValue())) {
             events.add(DiagnosticEvent.fatal(

@@ -78,6 +78,16 @@ public class JsonTError extends RuntimeException {
                 super("Cyclic schema derivation detected: " + cycle);
             }
         }
+
+        /**
+         * A {@code decrypt(...)} operation failed — either the crypto call returned an
+         * error or the decrypted bytes were not valid UTF-8.
+         */
+        public static final class DecryptFailed extends Transform {
+            public DecryptFailed(String fieldName, String reason) {
+                super("decrypt failed for field '" + fieldName + "': " + reason);
+            }
+        }
     }
 
     // ─── Serialization ─────────────────────────────────────────────────────────

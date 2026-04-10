@@ -157,6 +157,48 @@ impl JsonTValue {
         }
     }
 
+    // ── On-demand decrypt ─────────────────────────────────────────────────
+
+    /// Decrypt this value if it is `Encrypted`, otherwise return it unchanged.
+    ///
+    /// Returns the raw plaintext bytes on success.  The caller is responsible
+    /// for interpreting the bytes (e.g., converting to UTF-8 with
+    /// [`decrypt_str`](JsonTValue::decrypt_str)).
+    ///
+    /// Returns `None` (without calling `crypto`) if the value is not `Encrypted`.
+    pub fn decrypt_bytes(
+        &self,
+        field: &str,
+        crypto: &dyn crate::crypto::CryptoConfig,
+    ) -> Result<Option<Vec<u8>>, crate::crypto::CryptoError> {
+        match self {
+            JsonTValue::Encrypted(ct) => crypto.decrypt(field, ct).map(Some),
+            _ => Ok(None),
+        }
+    }
+
+    /// Decrypt this value if it is `Encrypted` and interpret the result as UTF-8.
+    ///
+    /// Returns `Ok(Some(String))` on success, `Ok(None)` if the value is not
+    /// `Encrypted`, or `Err` if crypto or UTF-8 decoding fails.
+    pub fn decrypt_str(
+        &self,
+        field: &str,
+        crypto: &dyn crate::crypto::CryptoConfig,
+    ) -> Result<Option<String>, crate::crypto::CryptoError> {
+        match self.decrypt_bytes(field, crypto)? {
+            None => Ok(None),
+            Some(bytes) => {
+                String::from_utf8(bytes)
+                    .map(Some)
+                    .map_err(|e| crate::crypto::CryptoError::InvalidUtf8 {
+                        field: field.to_string(),
+                        reason: e.to_string(),
+                    })
+            }
+        }
+    }
+
     /// Promotes a value to a more precise variant based on the declared `ScalarType`.
     /// Performs format validation. Returns Err if the value does not conform to the type.
     pub fn promote(self, scalar_type: &ScalarType) -> Result<Self, &'static str> {
@@ -487,6 +529,27 @@ impl JsonTRow {
 
     pub fn get(&self, index: usize) -> Option<&JsonTValue> {
         self.fields.get(index)
+    }
+
+    /// Find a field by name in a named working context is not possible on positional rows.
+    ///
+    /// Decrypt the value at position `index` and return the plaintext as a UTF-8 string.
+    ///
+    /// `field_name` is passed to `crypto.decrypt()` for key derivation; it must
+    /// match the name used when the value was encrypted.
+    ///
+    /// Returns `None` if the value is not `Encrypted` (already plaintext, null, etc.)
+    /// Returns `Err` on crypto or UTF-8 failure.
+    pub fn decrypt_field_str(
+        &self,
+        index: usize,
+        field_name: &str,
+        crypto: &dyn crate::crypto::CryptoConfig,
+    ) -> Result<Option<String>, crate::crypto::CryptoError> {
+        match self.fields.get(index) {
+            Some(v) => v.decrypt_str(field_name, crypto),
+            None => Ok(None),
+        }
     }
 }
 

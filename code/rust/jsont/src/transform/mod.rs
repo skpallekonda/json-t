@@ -44,8 +44,9 @@
 use std::collections::HashSet;
 
 use crate::{EvalContext, Evaluatable, RowTransformer, SchemaRegistry};
+use crate::crypto::CryptoConfig;
 use crate::error::{EvalError, JsonTError, TransformError};
-use crate::model::data::{JsonTRow, JsonTValue};
+use crate::model::data::{JsonTRow, JsonTString, JsonTValue};
 use crate::model::field::JsonTFieldKind;
 use crate::model::schema::{FieldPath, JsonTSchema, SchemaKind, SchemaOperation};
 use crate::model::validation::{JsonTExpression, JsonTRule, JsonTValidationBlock};
@@ -95,7 +96,7 @@ impl RowTransformer for JsonTSchema {
                     .collect();
 
                 for op in operations {
-                    working = apply_operation(op, working)?;
+                    working = apply_operation(op, working, None)?;
                 }
 
                 Ok(JsonTRow::new(working.into_iter().map(|(_, v)| v).collect()))
@@ -192,6 +193,52 @@ impl JsonTSchema {
                 }
 
                 Ok(())
+            }
+        }
+    }
+
+    /// Transform one row with a `CryptoConfig` so that `Decrypt` operations can
+    /// actually decrypt their fields.
+    ///
+    /// Identical to `transform` (via the `RowTransformer` trait) except that
+    /// `Decrypt` operations call `crypto.decrypt()` instead of being a no-op.
+    pub fn transform_with_crypto(
+        &self,
+        row: JsonTRow,
+        registry: &SchemaRegistry,
+        crypto: &dyn CryptoConfig,
+    ) -> Result<JsonTRow, JsonTError> {
+        match &self.kind {
+            SchemaKind::Straight { .. } => Ok(row),
+
+            SchemaKind::Derived { from, operations } => {
+                let parent = registry
+                    .get(from)
+                    .ok_or_else(|| TransformError::UnknownSchema(from.clone()))?;
+
+                let mut chain = vec![self.name.clone()];
+                let parent_fields = resolve_effective_fields(parent, registry, &mut chain)?;
+
+                if parent_fields.len() != row.len() {
+                    return Err(TransformError::FieldNotFound(format!(
+                        "row has {} values but parent schema '{}' has {} output fields",
+                        row.len(),
+                        from,
+                        parent_fields.len()
+                    ))
+                    .into());
+                }
+
+                let mut working: Vec<(String, JsonTValue)> = parent_fields
+                    .into_iter()
+                    .zip(row.fields)
+                    .collect();
+
+                for op in operations {
+                    working = apply_operation(op, working, Some(crypto))?;
+                }
+
+                Ok(JsonTRow::new(working.into_iter().map(|(_, v)| v).collect()))
             }
         }
     }
@@ -531,9 +578,13 @@ impl SchemaOperation {
 /// Returns the updated working state, or an error.
 /// `Err(TransformError::Filtered)` from `Filter` is a row-skip signal, not
 /// a pipeline failure.
+///
+/// `crypto` is required when the operation is `Decrypt`; pass `None` for
+/// pipelines that do not use decryption (`RowTransformer::transform`).
 fn apply_operation(
     op: &SchemaOperation,
     working: Vec<(String, JsonTValue)>,
+    crypto: Option<&dyn CryptoConfig>,
 ) -> Result<Vec<(String, JsonTValue)>, JsonTError> {
     match op {
         SchemaOperation::Rename(pairs) => {
@@ -610,9 +661,42 @@ fn apply_operation(
             Ok(w)
         }
 
-        // Phase 8: CryptoConfig-based decryption will be implemented here.
-        // For now, Decrypt is a no-op pass-through at the row level.
-        SchemaOperation::Decrypt { .. } => Ok(working),
+        SchemaOperation::Decrypt { fields } => {
+            let crypto = crypto.ok_or_else(|| TransformError::DecryptFailed {
+                field: String::new(),
+                reason: "Decrypt operation requires a CryptoConfig; \
+                         use transform_with_crypto instead of transform"
+                    .into(),
+            })?;
+            let mut w = working;
+            for field_name in fields {
+                let pos = w
+                    .iter()
+                    .position(|(n, _)| n == field_name)
+                    .ok_or_else(|| TransformError::FieldNotFound(field_name.clone()))?;
+                let new_val = match &w[pos].1 {
+                    JsonTValue::Encrypted(ct) => {
+                        let plaintext = crypto
+                            .decrypt(field_name, ct)
+                            .map_err(|e| TransformError::DecryptFailed {
+                                field: field_name.clone(),
+                                reason: e.to_string(),
+                            })?;
+                        let s = String::from_utf8(plaintext).map_err(|e| {
+                            TransformError::DecryptFailed {
+                                field: field_name.clone(),
+                                reason: format!("decrypted bytes are not valid UTF-8: {e}"),
+                            }
+                        })?;
+                        JsonTValue::Str(JsonTString::Plain(s))
+                    }
+                    // Already plaintext — idempotent, leave unchanged.
+                    other => other.clone(),
+                };
+                w[pos].1 = new_val;
+            }
+            Ok(w)
+        }
     }
 }
 

@@ -30,10 +30,17 @@
 
 ## In Progress / Planned
 
-* JSON interoperability
-* Polymorphic types (anyOf)
-* Privacy markers
 * JOIN operations
+
+## Recently Completed
+
+* Privacy markers (`~` DSL suffix) — Steps 7–10 complete in both Rust and Java
+  * `Encrypted` value variant + `base64:` wire format
+  * `CryptoConfig` trait/interface + `PassthroughCryptoConfig`
+  * `write_row_with_schema` / `RowWriter.writeRow(row, fields, crypto, writer)` — schema-aware stringify
+  * `transform_with_crypto` — Decrypt pipeline operation with pluggable crypto
+  * On-demand decrypt API: `decrypt_bytes`, `decrypt_str` on values; `decrypt_field_str` / `decryptField` on rows
+  * 15 tests in `crypto_tests.rs` + `CryptoTests.java` — all passing
 
 ---
 

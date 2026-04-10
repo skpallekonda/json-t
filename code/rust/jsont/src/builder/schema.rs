@@ -2,6 +2,8 @@
 // builder/schema.rs — JsonTSchemaBuilder
 // =============================================================================
 
+use std::collections::HashSet;
+
 use crate::error::{BuildError, JsonTError};
 use crate::model::schema::{JsonTSchema, SchemaKind, SchemaOperation};
 use crate::model::field::JsonTField;
@@ -123,10 +125,376 @@ impl JsonTSchemaBuilder {
                         "derived schema must have at least one operation".into()
                     ).into());
                 }
+                // Build-time dataflow check: detect Transform/Filter on a field
+                // that appears in a Decrypt operation but before that Decrypt runs.
+                check_operation_dataflow(&operations)?;
                 SchemaKind::Derived { from, operations }
             }
         };
 
         Ok(JsonTSchema { name, kind, validation: self.validation })
+    }
+}
+
+// =============================================================================
+// Build-time dataflow analysis
+// =============================================================================
+
+/// Validates that no `Transform` or `Filter` operation references a field that
+/// is named in a `Decrypt` operation later in the sequence (or not yet reached).
+///
+/// The check is conservative: any field that appears in *any* `Decrypt` op is
+/// treated as sensitive and must be decrypted before a `Transform`/`Filter`
+/// can reference it.
+///
+/// This analysis runs entirely within the operations list — no parent schema is
+/// needed.  For cross-schema checks (e.g. "decrypt field does not exist in parent"),
+/// use `JsonTSchema::validate_with_parent` after all schemas are loaded.
+fn check_operation_dataflow(ops: &[SchemaOperation]) -> Result<(), JsonTError> {
+    use crate::transform::collect_field_refs;
+
+    // Collect all field names that appear in *any* Decrypt op in the list.
+    // These are presumed to start as encrypted in the parent schema.
+    let known_sensitive: HashSet<String> = ops
+        .iter()
+        .flat_map(|op| match op {
+            SchemaOperation::Decrypt { fields } => fields.clone(),
+            _ => vec![],
+        })
+        .collect();
+
+    if known_sensitive.is_empty() {
+        return Ok(()); // No Decrypt ops at all — nothing to check.
+    }
+
+    let mut decrypted: HashSet<String> = HashSet::new();
+
+    for op in ops {
+        match op {
+            SchemaOperation::Decrypt { fields } => {
+                for f in fields {
+                    decrypted.insert(f.clone());
+                }
+            }
+
+            SchemaOperation::Transform { target, expr, refs } => {
+                // Check expression field references.
+                let all_refs: Vec<String> = if refs.is_empty() {
+                    collect_field_refs(expr)
+                } else {
+                    refs.clone()
+                };
+                for r in &all_refs {
+                    if known_sensitive.contains(r) && !decrypted.contains(r) {
+                        return Err(BuildError::InvalidField {
+                            field: r.clone(),
+                            reason: format!(
+                                "field '{}' is encrypted; add decrypt({}) before this transform",
+                                r, r
+                            ),
+                        }
+                        .into());
+                    }
+                }
+                // Also check the target field itself.
+                let tgt = target.join();
+                if known_sensitive.contains(&tgt) && !decrypted.contains(&tgt) {
+                    return Err(BuildError::InvalidField {
+                        field: tgt.clone(),
+                        reason: format!(
+                            "field '{}' is encrypted; add decrypt({}) before this transform",
+                            tgt, tgt
+                        ),
+                    }
+                    .into());
+                }
+            }
+
+            SchemaOperation::Filter { expr, refs } => {
+                let all_refs: Vec<String> = if refs.is_empty() {
+                    collect_field_refs(expr)
+                } else {
+                    refs.clone()
+                };
+                for r in &all_refs {
+                    if known_sensitive.contains(r) && !decrypted.contains(r) {
+                        return Err(BuildError::InvalidField {
+                            field: r.clone(),
+                            reason: format!(
+                                "field '{}' is encrypted; add decrypt({}) before this filter",
+                                r, r
+                            ),
+                        }
+                        .into());
+                    }
+                }
+            }
+
+            // Rename/Exclude/Project operate on field identity, not values — OK on encrypted.
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+impl JsonTSchema {
+    /// Simulate the full operation pipeline against a resolved parent schema,
+    /// detecting field-level errors at build time rather than at row-evaluation time.
+    ///
+    /// Tracked invariants across every operation:
+    /// - **Existence**: a field removed by `Exclude` or `Project` cannot be referenced
+    ///   by any later operation.
+    /// - **Identity**: after a `Rename`, only the new name is in scope; the old name
+    ///   is gone.
+    /// - **Encryption state**: a field marked `sensitive (~)` in the parent starts
+    ///   encrypted; it must pass through a `Decrypt` op before a `Transform` or
+    ///   `Filter` expression may reference it.
+    ///
+    /// Errors detected:
+    /// - `Decrypt`  on a nonexistent or non-sensitive field.
+    /// - `Project`  referencing a field not in scope.
+    /// - `Exclude`  referencing a field not in scope.
+    /// - `Rename`   from a field not in scope, or to a name already in scope.
+    /// - `Transform`/`Filter` expression references a field not in scope.
+    /// - `Transform`/`Filter` expression references an encrypted field (not yet decrypted).
+    /// - `Transform` target field not in scope or still encrypted.
+    ///
+    /// Nested field paths (e.g. `address.city`) are skipped for now — only
+    /// top-level single-segment paths are checked.
+    ///
+    /// Returns `Ok(())` for straight schemas (no-op) or when all checks pass.
+    pub fn validate_with_parent(&self, parent: &JsonTSchema) -> Result<(), JsonTError> {
+        use crate::model::field::JsonTFieldKind;
+        use crate::transform::collect_field_refs;
+
+        let SchemaKind::Derived { operations, .. } = &self.kind else {
+            return Ok(()); // straight schemas have no operations to validate
+        };
+
+        let parent_fields = match &parent.kind {
+            SchemaKind::Straight { fields } => fields,
+            SchemaKind::Derived { .. } => return Ok(()), // nested derived: skip for now
+        };
+
+        // ── Initial field state from parent ────────────────────────────────
+        // Each entry: (name, is_encrypted).
+        // Fields marked sensitive (~) start encrypted; all others start plain.
+        let mut scope: Vec<(String, bool)> = parent_fields
+            .iter()
+            .map(|f| {
+                let encrypted =
+                    matches!(&f.kind, JsonTFieldKind::Scalar { sensitive: true, .. });
+                (f.name.clone(), encrypted)
+            })
+            .collect();
+
+        // ── Helper closures ────────────────────────────────────────────────
+        let find = |scope: &Vec<(String, bool)>, name: &str| -> Option<bool> {
+            scope.iter().find(|(n, _)| n == name).map(|(_, enc)| *enc)
+        };
+
+        // ── Walk operations, updating scope at each step ───────────────────
+        for op in operations {
+            match op {
+                // ── Decrypt ───────────────────────────────────────────────
+                SchemaOperation::Decrypt { fields } => {
+                    for fname in fields {
+                        match find(&scope, fname) {
+                            None => {
+                                return Err(BuildError::InvalidField {
+                                    field: fname.clone(),
+                                    reason: format!(
+                                        "decrypt references field '{}' which is not in scope at this point",
+                                        fname
+                                    ),
+                                }.into());
+                            }
+                            Some(false) => {
+                                return Err(BuildError::InvalidField {
+                                    field: fname.clone(),
+                                    reason: format!(
+                                        "decrypt references field '{}' which is not marked sensitive (~) in parent '{}'",
+                                        fname, parent.name
+                                    ),
+                                }.into());
+                            }
+                            Some(true) => {
+                                // Mark as decrypted in scope.
+                                if let Some(entry) = scope.iter_mut().find(|(n, _)| n == fname) {
+                                    entry.1 = false;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Project ───────────────────────────────────────────────
+                SchemaOperation::Project(paths) => {
+                    for path in paths.iter() {
+                        let name = path.join();
+                        if name.contains('.') { continue; } // nested: skip
+                        if find(&scope, &name).is_none() {
+                            return Err(BuildError::InvalidField {
+                                field: name.clone(),
+                                reason: format!(
+                                    "project references field '{}' which is not in scope at this point",
+                                    name
+                                ),
+                            }.into());
+                        }
+                    }
+                    let keep: HashSet<String> = paths.iter()
+                        .map(|p| p.join())
+                        .filter(|n| !n.contains('.'))
+                        .collect();
+                    scope.retain(|(n, _)| keep.contains(n));
+                }
+
+                // ── Exclude ───────────────────────────────────────────────
+                SchemaOperation::Exclude(paths) => {
+                    for path in paths.iter() {
+                        let name = path.join();
+                        if name.contains('.') { continue; }
+                        if find(&scope, &name).is_none() {
+                            return Err(BuildError::InvalidField {
+                                field: name.clone(),
+                                reason: format!(
+                                    "exclude references field '{}' which is not in scope at this point",
+                                    name
+                                ),
+                            }.into());
+                        }
+                        scope.retain(|(n, _)| n != &name);
+                    }
+                }
+
+                // ── Rename ────────────────────────────────────────────────
+                SchemaOperation::Rename(pairs) => {
+                    for pair in pairs.iter() {
+                        let from = pair.from.join();
+                        if from.contains('.') { continue; }
+                        let to = pair.to.clone();
+                        match find(&scope, &from) {
+                            None => {
+                                return Err(BuildError::InvalidField {
+                                    field: from.clone(),
+                                    reason: format!(
+                                        "rename references field '{}' which is not in scope at this point",
+                                        from
+                                    ),
+                                }.into());
+                            }
+                            Some(encrypted) => {
+                                if find(&scope, &to).is_some() {
+                                    return Err(BuildError::InvalidField {
+                                        field: to.clone(),
+                                        reason: format!(
+                                            "rename to '{}' conflicts with an existing field in scope",
+                                            to
+                                        ),
+                                    }.into());
+                                }
+                                // Replace old name with new name, preserving encrypted state.
+                                if let Some(entry) = scope.iter_mut().find(|(n, _)| n == &from) {
+                                    entry.0 = to;
+                                    entry.1 = encrypted;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Transform ─────────────────────────────────────────────
+                SchemaOperation::Transform { target, expr, refs } => {
+                    let all_refs: Vec<String> = if refs.is_empty() {
+                        collect_field_refs(expr)
+                    } else {
+                        refs.clone()
+                    };
+                    for r in &all_refs {
+                        match find(&scope, r) {
+                            None => {
+                                return Err(BuildError::InvalidField {
+                                    field: r.clone(),
+                                    reason: format!(
+                                        "transform expression references field '{}' which is not in scope at this point",
+                                        r
+                                    ),
+                                }.into());
+                            }
+                            Some(true) => {
+                                return Err(BuildError::InvalidField {
+                                    field: r.clone(),
+                                    reason: format!(
+                                        "transform expression references encrypted field '{}'; add decrypt({}) first",
+                                        r, r
+                                    ),
+                                }.into());
+                            }
+                            Some(false) => {}
+                        }
+                    }
+                    let tgt = target.join();
+                    if !tgt.contains('.') {
+                        match find(&scope, &tgt) {
+                            None => {
+                                return Err(BuildError::InvalidField {
+                                    field: tgt.clone(),
+                                    reason: format!(
+                                        "transform target '{}' is not in scope at this point",
+                                        tgt
+                                    ),
+                                }.into());
+                            }
+                            Some(true) => {
+                                return Err(BuildError::InvalidField {
+                                    field: tgt.clone(),
+                                    reason: format!(
+                                        "transform target '{}' is encrypted; add decrypt({}) first",
+                                        tgt, tgt
+                                    ),
+                                }.into());
+                            }
+                            Some(false) => {}
+                        }
+                    }
+                }
+
+                // ── Filter ────────────────────────────────────────────────
+                SchemaOperation::Filter { expr, refs } => {
+                    let all_refs: Vec<String> = if refs.is_empty() {
+                        collect_field_refs(expr)
+                    } else {
+                        refs.clone()
+                    };
+                    for r in &all_refs {
+                        match find(&scope, r) {
+                            None => {
+                                return Err(BuildError::InvalidField {
+                                    field: r.clone(),
+                                    reason: format!(
+                                        "filter expression references field '{}' which is not in scope at this point",
+                                        r
+                                    ),
+                                }.into());
+                            }
+                            Some(true) => {
+                                return Err(BuildError::InvalidField {
+                                    field: r.clone(),
+                                    reason: format!(
+                                        "filter expression references encrypted field '{}'; add decrypt({}) first",
+                                        r, r
+                                    ),
+                                }.into());
+                            }
+                            Some(false) => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }

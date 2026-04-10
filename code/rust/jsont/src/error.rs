@@ -127,6 +127,11 @@ pub enum TransformError {
     /// processing the rest of the stream.
     #[error("row filtered out by predicate")]
     Filtered,
+
+    /// A `decrypt(...)` operation failed — either the crypto call returned an
+    /// error or the decrypted bytes were not valid UTF-8.
+    #[error("decrypt failed for field '{field}': {reason}")]
+    DecryptFailed { field: String, reason: String },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

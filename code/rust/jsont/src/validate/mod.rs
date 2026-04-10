@@ -524,7 +524,35 @@ fn try_promote_row(
         .zip(fields.iter())
         .map(|(val, field)| {
             match &field.kind {
-                JsonTFieldKind::Scalar { field_type, .. } => {
+                JsonTFieldKind::Scalar { field_type, sensitive, .. } => {
+                    // If the field is sensitive and the wire value carries a
+                    // "base64:" envelope, decode it into Encrypted now that we
+                    // have schema context.  The row scanner emits it as a plain
+                    // Str — promotion is the first place the schema is known.
+                    if *sensitive {
+                        if let JsonTValue::Str(ref js) = val {
+                            if let crate::model::data::JsonTString::Plain(ref s) = *js {
+                                if let Some(b64) = s.strip_prefix("base64:") {
+                                    use base64::Engine as _;
+                                    match base64::engine::general_purpose::STANDARD.decode(b64) {
+                                        Ok(bytes) => return JsonTValue::encrypted(bytes),
+                                        Err(_) => {
+                                            events.push(
+                                                DiagnosticEvent::fatal(EventKind::FormatViolation {
+                                                    field:    field.name.clone(),
+                                                    expected: "base64-encoded envelope".to_string(),
+                                                    actual:   format!("invalid base64 in \"base64:{}\"", b64),
+                                                })
+                                                .at_row(row_idx),
+                                            );
+                                            return val;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let original = val.clone();
                     match val.promote(&field_type.scalar) {
                         Ok(v) => v,

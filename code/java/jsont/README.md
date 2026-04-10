@@ -22,9 +22,10 @@ JsonT separates field declarations (defined once in a schema) from data (encoded
    - [Parallel mode](#parallel-mode)
    - [Custom sinks](#custom-sinks)
 6. [Derived schemas and transforms](#derived-schemas-and-transforms)
-7. [Expression building](#expression-building)
-8. [Error handling](#error-handling)
-9. [Performance notes](#performance-notes)
+7. [Privacy & Encryption](#privacy--encryption)
+8. [Expression building](#expression-building)
+9. [Error handling](#error-handling)
+10. [Performance notes](#performance-notes)
 
 ---
 
@@ -407,6 +408,117 @@ JsonTSchema view = JsonTSchemaBuilder.derived("OrderView", "Order")
 
 ---
 
+## Privacy & Encryption
+
+JsonT supports field-level encryption through **privacy markers** (`~`) in the schema DSL and a pluggable `CryptoConfig` interface.
+
+### Marking sensitive fields
+
+In a DSL schema, prefix the type with `~` for any field that must be encrypted on the wire:
+
+```jsont
+Person: {
+  fields: {
+    str:  name,
+    ~str: ssn,
+    ~str: cardNumber?
+  }
+}
+```
+
+When building programmatically, call `.sensitive()` on the field builder:
+
+```java
+import io.github.datakore.jsont.builder.*;
+import io.github.datakore.jsont.model.*;
+
+JsonTSchema schema = JsonTSchemaBuilder.straight("Person")
+    .fieldFrom(JsonTFieldBuilder.scalar("name", ScalarType.STR))
+    .fieldFrom(JsonTFieldBuilder.scalar("ssn",  ScalarType.STR).sensitive())
+    .build();
+```
+
+### Schema-aware write (encrypt on output)
+
+Use `RowWriter.writeRow(row, fields, crypto, writer)` instead of the plain `writeRow` overload when a schema is available. Sensitive fields holding plain text are encrypted; already-encrypted fields are re-encoded as `base64:` without another crypto call.
+
+```java
+import io.github.datakore.jsont.crypto.*;
+import io.github.datakore.jsont.stringify.RowWriter;
+import java.io.StringWriter;
+
+CryptoConfig crypto = new PassthroughCryptoConfig();   // replace with real implementation
+StringWriter out = new StringWriter();
+RowWriter.writeRow(row, schema.fields(), crypto, out);
+// SSN column → "base64:<b64>"; name column → plain string
+```
+
+Implement `CryptoConfig` for your key-management strategy:
+
+```java
+import io.github.datakore.jsont.crypto.*;
+
+class AesGcmCrypto implements CryptoConfig {
+    @Override
+    public byte[] encrypt(String field, byte[] plaintext) throws CryptoError {
+        // AES-GCM encrypt using field name for key selection
+        throw new UnsupportedOperationException("implement me");
+    }
+
+    @Override
+    public byte[] decrypt(String field, byte[] ciphertext) throws CryptoError {
+        throw new UnsupportedOperationException("implement me");
+    }
+}
+```
+
+### Decrypt in a derived schema pipeline
+
+Add a `Decrypt` operation to a derived schema to decrypt fields as part of the transform:
+
+```java
+import io.github.datakore.jsont.model.SchemaOperation;
+import io.github.datakore.jsont.transform.RowTransformer;
+
+JsonTSchema derived = JsonTSchemaBuilder.derived("PersonDecrypted", "Person")
+    .operation(SchemaOperation.decrypt("ssn"))
+    .build();
+
+SchemaRegistry registry = SchemaRegistry.empty()
+    .register(personSchema)
+    .register(derived);
+
+// Use transformWithCrypto — transform() without crypto throws DecryptFailed
+JsonTRow result = RowTransformer.of(derived, registry)
+    .transformWithCrypto(row, new PassthroughCryptoConfig());
+// result.get(1) is now JsonTValue.text("123-45-6789")
+```
+
+### On-demand decrypt
+
+Decrypt a single field without deriving a new schema:
+
+```java
+import io.github.datakore.jsont.crypto.*;
+import io.github.datakore.jsont.model.*;
+
+CryptoConfig crypto = new PassthroughCryptoConfig();
+
+// Decrypt a value directly
+JsonTValue val = JsonTValue.encrypted("hello".getBytes());
+Optional<String>  text  = val.decryptStr("field_name", crypto);
+Optional<byte[]>  bytes = val.decryptBytes("field_name", crypto);
+
+// Decrypt by position in a row (throws IndexOutOfBoundsException for out-of-range)
+JsonTRow row = JsonTRow.of(
+    JsonTValue.text("Alice"),
+    JsonTValue.encrypted("123-45-6789".getBytes())
+);
+Optional<String> ssn = row.decryptField(1, "ssn", crypto);
+```
+
+---
+
 ## Expression building
 
 `JsonTExpression` is used in validation rules, filter predicates, and transform expressions.
@@ -452,6 +564,20 @@ try {
         .build();
 } catch (BuildError e) {
     System.err.println("Build error: " + e.getMessage());
+}
+
+// Crypto errors — checked exception thrown by CryptoConfig.encrypt/decrypt
+try {
+    Optional<String> plain = row.decryptField(1, "ssn", crypto);
+} catch (CryptoError e) {
+    System.err.println("Decryption failed: " + e.getMessage());
+}
+
+// Decrypt operation without CryptoConfig — unchecked Transform error
+try {
+    JsonTRow result = RowTransformer.of(derivedSchema, registry).transform(row);
+} catch (JsonTError.Transform.DecryptFailed e) {
+    System.err.println("Decrypt op requires CryptoConfig: " + e.getMessage());
 }
 ```
 
