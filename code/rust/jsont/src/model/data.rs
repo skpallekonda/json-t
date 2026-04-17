@@ -155,15 +155,35 @@ impl JsonTValue {
 
     // ── On-demand decrypt ─────────────────────────────────────────────────
 
-    /// Decrypts the value if it's Encrypted, returning raw bytes. If not 
-    /// encrypted, it returns None without calling the crypto logic.
+    /// Decrypt this value if it is `Encrypted`, returning raw plaintext bytes.
+    ///
+    /// The `Encrypted` payload carries `[len_iv][len_digest][iv][digest][enc_content]`.
+    /// The DEK is unwrapped once from `ctx.enc_dek`, used to decrypt the field, then
+    /// the SHA-256 digest is verified before returning.
+    ///
+    /// Returns `Ok(None)` if the value is not `Encrypted`.
     pub fn decrypt_bytes(
         &self,
         field: &str,
+        ctx: &crate::crypto::CryptoContext,
         crypto: &dyn crate::crypto::CryptoConfig,
     ) -> Result<Option<Vec<u8>>, crate::crypto::CryptoError> {
+        use sha2::{Digest, Sha256};
         match self {
-            JsonTValue::Encrypted(ct) => crypto.decrypt(field, ct).map(Some),
+            JsonTValue::Encrypted(payload) => {
+                let (iv, stored_digest, enc_content) =
+                    crate::crypto::parse_field_payload(payload, field)?;
+                let dek = crypto.unwrap_dek(ctx.version, &ctx.enc_dek)?;
+                let plaintext = crypto.decrypt_field(&dek, iv, enc_content)?;
+                // Verify SHA-256 integrity.
+                let computed = Sha256::digest(&plaintext);
+                if computed.as_slice() != stored_digest {
+                    return Err(crate::crypto::CryptoError::DigestMismatch {
+                        field: field.to_string(),
+                    });
+                }
+                Ok(Some(plaintext))
+            }
             _ => Ok(None),
         }
     }
@@ -171,20 +191,21 @@ impl JsonTValue {
     /// Decrypt this value if it is `Encrypted` and interpret the result as UTF-8.
     ///
     /// Returns `Ok(Some(String))` on success, `Ok(None)` if the value is not
-    /// `Encrypted`, or `Err` if crypto or UTF-8 decoding fails.
+    /// `Encrypted`, or `Err` if crypto, digest verification, or UTF-8 decoding fails.
     pub fn decrypt_str(
         &self,
         field: &str,
+        ctx: &crate::crypto::CryptoContext,
         crypto: &dyn crate::crypto::CryptoConfig,
     ) -> Result<Option<String>, crate::crypto::CryptoError> {
-        match self.decrypt_bytes(field, crypto)? {
+        match self.decrypt_bytes(field, ctx, crypto)? {
             None => Ok(None),
             Some(bytes) => {
                 String::from_utf8(bytes)
                     .map(Some)
-                    .map_err(|e| crate::crypto::CryptoError::InvalidUtf8 {
-                        field: field.to_string(),
-                        reason: e.to_string(),
+                    .map_err(|e| crate::crypto::CryptoError::DecryptFailed {
+                        field:  field.to_string(),
+                        reason: format!("decrypted bytes are not valid UTF-8: {e}"),
                     })
             }
         }
@@ -522,16 +543,21 @@ impl JsonTRow {
         self.fields.get(index)
     }
 
-    /// Decrypts a specific field by index and returns it as a UTF-8 string. 
-    /// Requires the original field name for decryption. Returns Err on failure.
+    /// Decrypt a specific field by index and return it as a UTF-8 string.
+    ///
+    /// Uses the stream-level `CryptoContext` (from the EncryptHeader) together
+    /// with the caller-supplied `CryptoConfig` to unwrap the DEK and decrypt.
+    ///
+    /// Returns `Ok(None)` if the index is out of range or the value is not `Encrypted`.
     pub fn decrypt_field_str(
         &self,
         index: usize,
         field_name: &str,
+        ctx: &crate::crypto::CryptoContext,
         crypto: &dyn crate::crypto::CryptoConfig,
     ) -> Result<Option<String>, crate::crypto::CryptoError> {
         match self.fields.get(index) {
-            Some(v) => v.decrypt_str(field_name, crypto),
+            Some(v) => v.decrypt_str(field_name, ctx, crypto),
             None => Ok(None),
         }
     }

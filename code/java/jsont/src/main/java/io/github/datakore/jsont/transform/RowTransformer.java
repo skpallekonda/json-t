@@ -2,6 +2,7 @@ package io.github.datakore.jsont.transform;
 
 import io.github.datakore.jsont.builder.SchemaRegistry;
 import io.github.datakore.jsont.crypto.CryptoConfig;
+import io.github.datakore.jsont.crypto.CryptoContext;
 import io.github.datakore.jsont.error.JsonTError;
 import io.github.datakore.jsont.internal.transform.OperationApplicator;
 import io.github.datakore.jsont.internal.validate.SchemaValidator;
@@ -54,27 +55,28 @@ public final class RowTransformer {
             working.put(parentFields.get(i), row.values().get(i));
         }
 
-        // Apply operations (no CryptoConfig — Decrypt ops will throw if present)
+        // Apply operations (no crypto — Decrypt ops will throw if present)
         for (SchemaOperation op : schema.operations()) {
-            working = OperationApplicator.applyOperation(op, working, null);
+            working = OperationApplicator.applyOperation(op, working, null, null);
         }
 
         return JsonTRow.at(row.index(), new ArrayList<>(working.values()));
     }
 
     /**
-     * Transform one row with a {@link CryptoConfig} so that {@code decrypt(...)}
-     * operations can actually decrypt their fields.
+     * Transform one row with a {@link CryptoContext} + {@link CryptoConfig} so that
+     * {@code Decrypt} operations can actually decrypt their fields.
      *
-     * <p>Identical to {@link #transform(JsonTRow)} except that {@code Decrypt}
-     * operations call {@code crypto.decrypt()} rather than throwing.
+     * <p>The DEK is unwrapped once from {@code ctx} for each {@code Decrypt} operation.
      *
      * @param row    the row to transform (must match parent schema layout)
+     * @param ctx    the {@link CryptoContext} produced from the stream's EncryptHeader
      * @param crypto the crypto implementation to use for decryption
      * @return the transformed row
      * @throws JsonTError.Transform on any structural or crypto failure
      */
-    public JsonTRow transformWithCrypto(JsonTRow row, CryptoConfig crypto) throws JsonTError.Transform {
+    public JsonTRow transformWithCrypto(JsonTRow row, CryptoContext ctx, CryptoConfig crypto)
+            throws JsonTError.Transform {
         if (schema.kind() == SchemaKind.STRAIGHT) {
             return row;
         }
@@ -98,7 +100,7 @@ public final class RowTransformer {
         }
 
         for (SchemaOperation op : schema.operations()) {
-            working = OperationApplicator.applyOperation(op, working, crypto);
+            working = OperationApplicator.applyOperation(op, working, ctx, crypto);
         }
 
         return JsonTRow.at(row.index(), new ArrayList<>(working.values()));

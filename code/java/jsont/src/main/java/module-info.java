@@ -39,5 +39,6 @@ module io.github.datakore.jsont {
 
     // ── io.github.datakore.jsont.internal  is NOT exported ──────────────────
 
+    requires transitive io.github.datakore.jsont.crypto;
     requires org.antlr.antlr4.runtime;
 }

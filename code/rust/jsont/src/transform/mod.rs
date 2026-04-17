@@ -96,7 +96,7 @@ impl RowTransformer for JsonTSchema {
                     .collect();
 
                 for op in operations {
-                    working = apply_operation(op, working, None)?;
+                    working = apply_operation(op, working, None::<(&crate::crypto::CryptoContext, &dyn CryptoConfig)>)?;
                 }
 
                 Ok(JsonTRow::new(working.into_iter().map(|(_, v)| v).collect()))
@@ -197,15 +197,18 @@ impl JsonTSchema {
         }
     }
 
-    /// Transform one row with a `CryptoConfig` so that `Decrypt` operations can
-    /// actually decrypt their fields.
+    /// Transform one row with a `CryptoContext` + `CryptoConfig` so that `Decrypt`
+    /// operations can actually decrypt their fields.
     ///
     /// Identical to `transform` (via the `RowTransformer` trait) except that
-    /// `Decrypt` operations call `crypto.decrypt()` instead of being a no-op.
+    /// `Decrypt` operations unwrap the DEK from `ctx` and decrypt each field.
+    ///
+    /// `ctx` is the `CryptoContext` produced by parsing the stream's `EncryptHeader`.
     pub fn transform_with_crypto(
         &self,
         row: JsonTRow,
         registry: &SchemaRegistry,
+        ctx: &crate::crypto::CryptoContext,
         crypto: &dyn CryptoConfig,
     ) -> Result<JsonTRow, JsonTError> {
         match &self.kind {
@@ -235,7 +238,7 @@ impl JsonTSchema {
                     .collect();
 
                 for op in operations {
-                    working = apply_operation(op, working, Some(crypto))?;
+                    working = apply_operation(op, working, Some((ctx, crypto)))?;
                 }
 
                 Ok(JsonTRow::new(working.into_iter().map(|(_, v)| v).collect()))
@@ -579,12 +582,12 @@ impl SchemaOperation {
 /// `Err(TransformError::Filtered)` from `Filter` is a row-skip signal, not
 /// a pipeline failure.
 ///
-/// `crypto` is required when the operation is `Decrypt`; pass `None` for
+/// `crypto_ctx` is required when the operation is `Decrypt`; pass `None` for
 /// pipelines that do not use decryption (`RowTransformer::transform`).
 fn apply_operation(
     op: &SchemaOperation,
     working: Vec<(String, JsonTValue)>,
-    crypto: Option<&dyn CryptoConfig>,
+    crypto_ctx: Option<(&crate::crypto::CryptoContext, &dyn CryptoConfig)>,
 ) -> Result<Vec<(String, JsonTValue)>, JsonTError> {
     match op {
         SchemaOperation::Rename(pairs) => {
@@ -662,9 +665,9 @@ fn apply_operation(
         }
 
         SchemaOperation::Decrypt { fields } => {
-            let crypto = crypto.ok_or_else(|| TransformError::DecryptFailed {
+            let (ctx, crypto) = crypto_ctx.ok_or_else(|| TransformError::DecryptFailed {
                 field: String::new(),
-                reason: "Decrypt operation requires a CryptoConfig; \
+                reason: "Decrypt operation requires a CryptoContext + CryptoConfig; \
                          use transform_with_crypto instead of transform"
                     .into(),
             })?;
@@ -675,13 +678,15 @@ fn apply_operation(
                     .position(|(n, _)| n == field_name)
                     .ok_or_else(|| TransformError::FieldNotFound(field_name.clone()))?;
                 let new_val = match &w[pos].1 {
-                    JsonTValue::Encrypted(ct) => {
-                        let plaintext = crypto
-                            .decrypt(field_name, ct)
+                    JsonTValue::Encrypted(_) => {
+                        let plaintext = w[pos]
+                            .1
+                            .decrypt_bytes(field_name, ctx, crypto)
                             .map_err(|e| TransformError::DecryptFailed {
                                 field: field_name.clone(),
                                 reason: e.to_string(),
-                            })?;
+                            })?
+                            .unwrap(); // safe: we matched Encrypted
                         let s = String::from_utf8(plaintext).map_err(|e| {
                             TransformError::DecryptFailed {
                                 field: field_name.clone(),

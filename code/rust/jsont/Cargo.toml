@@ -15,12 +15,15 @@ categories = ["parser-implementations", "data-structures", "encoding"]
 exclude = ["tests/benchmark_tests.rs", "tests/cross_compat_tests.rs"]
 
 [dependencies]
-pest = "2"
-pest_derive = "2"
-regex = "1"
+pest         = "2"
+pest_derive  = "2"
+regex        = "1"
 rust_decimal = { version = "1", features = ["serde"] }
-thiserror = "1"
-base64 = "0.22"
+thiserror    = "1"
+base64       = "0.22"
+sha2         = "0.10"
+rand         = { version = "0.8", features = ["std", "std_rng"] }
+jsont-crypto = { path = "../jsont-crypto" }
 
 [features]
 # Enable the performance benchmark suite (excluded from `cargo test` by default).

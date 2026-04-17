@@ -2,6 +2,7 @@ package io.github.datakore.jsont.internal.transform;
 
 import io.github.datakore.jsont.builder.SchemaResolver;
 import io.github.datakore.jsont.crypto.CryptoConfig;
+import io.github.datakore.jsont.crypto.CryptoContext;
 import io.github.datakore.jsont.crypto.CryptoError;
 import io.github.datakore.jsont.error.JsonTError;
 import io.github.datakore.jsont.model.*;
@@ -22,12 +23,15 @@ public class OperationApplicator {
      *
      * @param op      the operation to apply
      * @param working the current (name → value) state
-     * @param crypto  required for {@link SchemaOperation.Decrypt}; pass {@code null}
-     *                for pipelines that do not use decryption
+     * @param ctx     the stream-level {@link CryptoContext} — required for
+     *                {@link SchemaOperation.Decrypt}; pass {@code null} otherwise
+     * @param crypto  the crypto implementation — required for
+     *                {@link SchemaOperation.Decrypt}; pass {@code null} otherwise
      */
     public static LinkedHashMap<String, JsonTValue> applyOperation(
             SchemaOperation op,
             LinkedHashMap<String, JsonTValue> working,
+            CryptoContext ctx,
             CryptoConfig crypto) throws JsonTError.Transform {
 
         if (op instanceof SchemaOperation.Rename rename) {
@@ -77,12 +81,12 @@ public class OperationApplicator {
         if (op instanceof SchemaOperation.Filter filter) {
             // Bind only the fields referenced by the predicate expression.
             Set<String> needed = new HashSet<>(collectFieldRefs(filter.predicate()));
-            EvalContext ctx = EvalContext.create();
+            EvalContext evalCtx = EvalContext.create();
             for (Map.Entry<String, JsonTValue> entry : working.entrySet()) {
-                if (needed.contains(entry.getKey())) ctx.bind(entry.getKey(), entry.getValue());
+                if (needed.contains(entry.getKey())) evalCtx.bind(entry.getKey(), entry.getValue());
             }
             try {
-                JsonTValue result = filter.predicate().evaluate(ctx);
+                JsonTValue result = filter.predicate().evaluate(evalCtx);
                 if (result instanceof JsonTValue.Bool b) {
                     if (b.value()) {
                         return working;
@@ -105,12 +109,12 @@ public class OperationApplicator {
             }
             // Bind only the fields referenced by the transform expression.
             Set<String> needed = new HashSet<>(collectFieldRefs(transform.expr()));
-            EvalContext ctx = EvalContext.create();
+            EvalContext evalCtx = EvalContext.create();
             for (Map.Entry<String, JsonTValue> entry : working.entrySet()) {
-                if (needed.contains(entry.getKey())) ctx.bind(entry.getKey(), entry.getValue());
+                if (needed.contains(entry.getKey())) evalCtx.bind(entry.getKey(), entry.getValue());
             }
             try {
-                JsonTValue newVal = transform.expr().evaluate(ctx);
+                JsonTValue newVal = transform.expr().evaluate(evalCtx);
                 working.put(key, newVal);
                 return working;
             } catch (JsonTError.Eval e) {
@@ -120,9 +124,9 @@ public class OperationApplicator {
         }
 
         if (op instanceof SchemaOperation.Decrypt decrypt) {
-            if (crypto == null) {
+            if (ctx == null || crypto == null) {
                 throw new JsonTError.Transform.DecryptFailed("",
-                        "Decrypt operation requires a CryptoConfig; " +
+                        "Decrypt operation requires a CryptoContext + CryptoConfig; " +
                         "use transformWithCrypto instead of transform");
             }
             for (String fieldName : decrypt.fields()) {
@@ -130,19 +134,15 @@ public class OperationApplicator {
                     throw new JsonTError.Transform.FieldNotFound(fieldName);
                 }
                 JsonTValue current = working.get(fieldName);
-                if (current instanceof JsonTValue.Encrypted enc) {
-                    byte[] plaintext;
-                    try {
-                        plaintext = crypto.decrypt(fieldName, enc.envelope());
-                    } catch (CryptoError e) {
-                        throw new JsonTError.Transform.DecryptFailed(fieldName, e.getMessage());
-                    }
+                if (current instanceof JsonTValue.Encrypted) {
                     String text;
                     try {
-                        text = new String(plaintext, StandardCharsets.UTF_8);
-                    } catch (Exception e) {
-                        throw new JsonTError.Transform.DecryptFailed(fieldName,
-                                "decrypted bytes are not valid UTF-8: " + e.getMessage());
+                        var opt = current.decryptStr(fieldName, ctx, crypto);
+                        text = opt.orElseThrow(() ->
+                                new JsonTError.Transform.DecryptFailed(fieldName,
+                                        "unexpected: Encrypted value returned empty from decryptStr"));
+                    } catch (CryptoError e) {
+                        throw new JsonTError.Transform.DecryptFailed(fieldName, e.getMessage());
                     }
                     working.put(fieldName, JsonTValue.text(text));
                 }

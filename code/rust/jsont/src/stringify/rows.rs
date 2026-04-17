@@ -12,17 +12,24 @@
 
 use std::io::{self, Write};
 
-use crate::crypto::{CryptoConfig, CryptoError};
+use sha2::{Digest, Sha256};
+use rand::RngCore;
+
+use crate::crypto::{
+    assemble_field_payload, build_encrypt_header_row,
+    CryptoConfig, CryptoContext, CryptoError,
+};
 use crate::model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTString, JsonTValue};
 use crate::model::field::{JsonTField, JsonTFieldKind};
 
+const DEK_LEN: usize = 32; // AES-256 key size in bytes
+
 // =============================================================================
-// Public API
+// Public API — schema-free writers
 // =============================================================================
 
-/// Write one data row to `w` in compact JsonT format.
+/// Write one data row to `w` in compact JsonT format: `{v1,v2,...}`.
 ///
-/// Output: `{v1,v2,...}` with no surrounding whitespace.
 /// No intermediate `String` is allocated.
 pub fn write_row<W: Write>(row: &JsonTRow, w: &mut W) -> io::Result<()> {
     w.write_all(b"{")?;
@@ -48,20 +55,73 @@ pub fn write_rows<W: Write>(rows: &[JsonTRow], w: &mut W) -> io::Result<()> {
     Ok(())
 }
 
-/// Write one row with schema-aware crypto: sensitive fields with plaintext
-/// values are encrypted before writing; `Encrypted` values are written as-is.
+// =============================================================================
+// Public API — stream-level encrypted writers (Step 5)
+// =============================================================================
+
+/// Write a complete encrypted JsonT stream:
 ///
-/// - If a field is `sensitive` and its value is **not** `Encrypted`, the
-///   value's text representation is encrypted via `crypto` and written as
-///   plain base64 (no prefix).
-/// - If a field is `sensitive` and its value **is** `Encrypted`, the stored
-///   ciphertext bytes are re-encoded as plain base64 (no crypto call).
-/// - Non-sensitive fields are written normally.
+/// 1. Generate a random 256-bit DEK.
+/// 2. Wrap the DEK via `crypto.wrap_dek(version, &dek)` → write EncryptHeader row.
+/// 3. For each data row: write with schema-aware encryption using the shared DEK.
+///    Each sensitive field gets a fresh IV; the per-field payload carries
+///    `[len_iv][len_digest][iv][SHA-256(plaintext)][enc_content]`.
+/// 4. Zero the DEK before returning.
 ///
-/// Returns `Err` on any I/O error; crypto failures are mapped to `io::Error`.
-pub fn write_row_with_schema<W: Write>(
+/// Rows are separated by `,\n` (header + first data row, then between data rows).
+pub fn write_encrypted_stream<W: Write>(
+    rows: &[JsonTRow],
+    fields: &[JsonTField],
+    crypto: &dyn CryptoConfig,
+    version: u16,
+    w: &mut W,
+) -> io::Result<()> {
+    // Generate raw DEK.
+    let mut dek = [0u8; DEK_LEN];
+    rand::thread_rng().fill_bytes(&mut dek);
+
+    let result = write_encrypted_stream_with_dek(rows, fields, &dek, crypto, version, w);
+
+    // Zero the DEK regardless of outcome.
+    dek.fill(0);
+    result
+}
+
+fn write_encrypted_stream_with_dek<W: Write>(
+    rows: &[JsonTRow],
+    fields: &[JsonTField],
+    dek: &[u8],
+    crypto: &dyn CryptoConfig,
+    version: u16,
+    w: &mut W,
+) -> io::Result<()> {
+    // Wrap DEK and write EncryptHeader.
+    let enc_dek = crypto
+        .wrap_dek(version, dek)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+    let ctx = CryptoContext::new(version, enc_dek);
+    let header = build_encrypt_header_row(&ctx);
+    write_row(&header, w)?;
+
+    // Write data rows.
+    for row in rows {
+        w.write_all(b",\n")?;
+        write_row_with_dek(row, fields, dek, crypto, w)?;
+    }
+    Ok(())
+}
+
+/// Write one data row with schema-aware encryption using a plaintext DEK.
+///
+/// - Sensitive fields with a **plaintext** value: encrypt via `crypto.encrypt_field`,
+///   compute SHA-256(plaintext), assemble per-field payload, base64-encode.
+/// - Sensitive fields already holding an `Encrypted` value: re-encode the stored
+///   payload bytes as base64 (no crypto call — payload already assembled).
+/// - Non-sensitive fields: written normally.
+pub fn write_row_with_dek<W: Write>(
     row: &JsonTRow,
     fields: &[JsonTField],
+    dek: &[u8],
     crypto: &dyn CryptoConfig,
     w: &mut W,
 ) -> io::Result<()> {
@@ -76,17 +136,20 @@ pub fn write_row_with_schema<W: Write>(
         );
         if is_sensitive {
             use base64::Engine as _;
-            let ciphertext: Vec<u8> = match v {
-                // Already encrypted — re-encode ciphertext as base64 wire format.
-                JsonTValue::Encrypted(ct) => ct.clone(),
-                // Plaintext — stringify value text then encrypt.
+            let payload: Vec<u8> = match v {
+                // Already a fully-assembled payload — re-encode as-is.
+                JsonTValue::Encrypted(payload_bytes) => payload_bytes.clone(),
+                // Plaintext — encrypt and assemble payload.
                 other => {
-                    let plaintext = value_to_text(other);
-                    crypto.encrypt(&field.name, plaintext.as_bytes())
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+                    let plaintext = value_to_text(other).into_bytes();
+                    let digest = Sha256::digest(&plaintext).to_vec();
+                    let (iv, enc_content) = crypto
+                        .encrypt_field(dek, &plaintext)
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                    assemble_field_payload(&iv, &digest, &enc_content)
                 }
             };
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&ciphertext);
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&payload);
             write_quoted_str(&b64, w)?;
         } else {
             write_value(v, w)?;
@@ -94,6 +157,10 @@ pub fn write_row_with_schema<W: Write>(
     }
     w.write_all(b"}")
 }
+
+// =============================================================================
+// Private helpers
+// =============================================================================
 
 /// Produce the wire-format text of a non-encrypted value (used before encrypting).
 fn value_to_text(v: &JsonTValue) -> String {
@@ -104,7 +171,6 @@ fn value_to_text(v: &JsonTValue) -> String {
         JsonTValue::Str(s)      => s.as_raw_str().to_string(),
         JsonTValue::Enum(e)     => e.clone(),
         JsonTValue::Number(n)   => {
-            use crate::model::data::JsonTNumber;
             match n {
                 JsonTNumber::I16(v)  => v.to_string(),
                 JsonTNumber::I32(v)  => v.to_string(),
@@ -121,14 +187,9 @@ fn value_to_text(v: &JsonTValue) -> String {
                 JsonTNumber::Timestamp(v) => v.to_string(),
             }
         }
-        // For objects/arrays, fall back to the raw JSON-T representation.
         _ => "<complex>".into(),
     }
 }
-
-// =============================================================================
-// Private helpers
-// =============================================================================
 
 fn write_value<W: Write>(v: &JsonTValue, w: &mut W) -> io::Result<()> {
     match v {
@@ -141,19 +202,16 @@ fn write_value<W: Write>(v: &JsonTValue, w: &mut W) -> io::Result<()> {
         JsonTValue::Number(n) => write_number(n, w),
         JsonTValue::Object(row) => write_row(row, w),
         JsonTValue::Array(arr) => write_array(arr, w),
-        // Encrypted values hold raw ciphertext bytes. Re-encode them as plain
-        // base64 so the output is valid JsonT data.
-        JsonTValue::Encrypted(ciphertext) => {
+        // Encrypted values hold raw payload bytes. Re-encode as plain base64.
+        JsonTValue::Encrypted(payload) => {
             use base64::Engine as _;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(ciphertext);
+            let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
             write_quoted_str(&b64, w)
         }
     }
 }
 
 /// Write a string surrounded by double-quotes, escaping `"` and `\`.
-/// Uses a single-pass scan: flushes unescaped slices in bulk, only
-/// emitting a `\` prefix for characters that need it.
 fn write_quoted_str<W: Write>(s: &str, w: &mut W) -> io::Result<()> {
     w.write_all(b"\"")?;
     let bytes = s.as_bytes();
