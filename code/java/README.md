@@ -11,21 +11,14 @@ JsonT separates field declarations (defined once in a schema) from data (encoded
 1. [Core concepts](#core-concepts)
 2. [Building schemas](#building-schemas)
 3. [Parsing](#parsing)
-   - [Parse a namespace DSL document](#parse-a-namespace-dsl-document)
-   - [Parse data rows — in-memory string](#parse-data-rows--in-memory-string)
-   - [Parse data rows — streaming from a file](#parse-data-rows--streaming-from-a-file)
-   - [Lazy row iterator](#lazy-row-iterator)
 4. [Stringification](#stringification)
 5. [Validation](#validation)
-   - [Streaming mode](#streaming-mode-o1-memory)
-   - [Buffered mode](#buffered-mode)
-   - [Parallel mode](#parallel-mode)
-   - [Custom sinks](#custom-sinks)
 6. [Derived schemas and transforms](#derived-schemas-and-transforms)
-7. [Privacy & Encryption](#privacy--encryption)
-8. [Expression building](#expression-building)
-9. [Error handling](#error-handling)
-10. [Performance notes](#performance-notes)
+7. [Polymorphic fields (anyOf)](#polymorphic-fields-anyof)
+8. [Privacy & Encryption](#privacy--encryption)
+9. [Expression building](#expression-building)
+10. [Error handling](#error-handling)
+11. [Performance notes](#performance-notes)
 
 ---
 
@@ -37,6 +30,7 @@ JsonT separates field declarations (defined once in a schema) from data (encoded
 | `JsonTRow` | One data record — an ordered list of `JsonTValue` whose positions map to schema fields. |
 | `JsonTNamespace` | Top-level container: one or more `JsonTCatalog`s, each holding schemas and enums. |
 | `ValidationPipeline` | Validates rows against a schema's field constraints and rules; routes diagnostics to sinks. |
+| `RowWriter` | Schema-bound writer; handles plain and encrypted streams transparently. |
 | `JsonT` | Static entry point for parse, stringify, and write operations. |
 
 A `JsonTRow` is positional, not named. Field 0 corresponds to schema field 0, field 1 to schema field 1, and so on. Names exist only in the schema.
@@ -44,8 +38,6 @@ A `JsonTRow` is positional, not named. Field 0 corresponds to schema field 0, fi
 ---
 
 ## Building schemas
-
-Use the fluent builders to construct schemas programmatically.
 
 ```java
 import io.github.datakore.jsont.builder.JsonTFieldBuilder;
@@ -62,7 +54,7 @@ JsonTSchema orderSchema = JsonTSchemaBuilder.straight("Order")
     .fieldFrom(JsonTFieldBuilder.scalar("price",    ScalarType.D64).minValue(0.01))
     .validationFrom(
         JsonTValidationBlockBuilder.create()
-            .unique("id")           // id must be unique across rows
+            .unique("id")
             .rule(/* expression */)
     )
     .build();
@@ -96,18 +88,18 @@ ScalarType.TIMESTAMP  ScalarType.TSZ  ScalarType.DURATION  ScalarType.INST
 ScalarType.BASE64  ScalarType.OID  ScalarType.HEX
 ```
 
-Object and array fields:
+Object, array, and polymorphic fields:
 
 ```java
 // Scalar array field
 JsonTFieldBuilder.scalar("tags", ScalarType.STR)
-    .asArray()
-    .optional()
-    .minItems(1)
-    .maxItems(10);
+    .asArray().optional().minItems(1).maxItems(10);
 
 // Object field (references another schema by name)
 JsonTFieldBuilder.object("address", "Address");
+
+// Polymorphic field (anyOf — resolved by discriminator at parse/validate time)
+JsonTFieldBuilder.anyOf("payload", List.of("OrderPayload", "ReturnPayload"));
 ```
 
 ---
@@ -115,8 +107,6 @@ JsonTFieldBuilder.object("address", "Address");
 ## Parsing
 
 ### Parse a namespace DSL document
-
-Parse a complete JsonT source file (namespace block) using ANTLR4.
 
 ```java
 import io.github.datakore.jsont.JsonT;
@@ -147,55 +137,30 @@ String source = """
     """;
 
 JsonTNamespace ns = JsonT.parseNamespace(source);
-// Throws JsonTError.Parse on invalid input
 ```
 
 ### Parse data rows — in-memory string
 
-`JsonT.parseRows` uses a hand-written `RowScanner` state machine. It calls a `RowConsumer` for each completed `JsonTRow` without building an intermediate parse tree, making memory use O(1) in the number of rows.
-
 ```java
-import io.github.datakore.jsont.JsonT;
-import io.github.datakore.jsont.model.JsonTRow;
-import java.util.ArrayList;
-import java.util.List;
-
 String data = "{1,\"Widget A\",10,9.99},{2,\"Widget B\",5,24.50}";
 
 List<JsonTRow> rows = new ArrayList<>();
 int count = JsonT.parseRows(data, rows::add);
-System.out.printf("parsed %d rows%n", count);
-
-// Or process inline without collecting:
-JsonT.parseRows(data, row -> System.out.printf("row has %d fields%n", row.size()));
 ```
 
 ### Parse data rows — streaming from a file
 
-`JsonT.parseRowsStreaming` accepts any `Reader`. It uses a 64 KB bulk buffer internally. Peak memory stays at O(1) regardless of file size — a 5 GB file parses with the same overhead as a 5 KB file.
-
 ```java
-import io.github.datakore.jsont.JsonT;
-import java.io.*;
-
 try (var reader = new BufferedReader(new FileReader("orders.jsont"))) {
     int count = JsonT.parseRowsStreaming(reader, row -> {
-        // each row is processed and discarded — no accumulation
         System.out.printf("row has %d fields%n", row.size());
     });
-    System.out.printf("parsed %d rows%n", count);
 }
 ```
 
 ### Lazy row iterator
 
-`JsonT.rowIter` returns a `RowIter` that implements both `Iterator<JsonTRow>` and `AutoCloseable`. Rows are produced on demand — suitable for use with `for`-each loops or APIs that accept `Iterable`.
-
 ```java
-import io.github.datakore.jsont.JsonT;
-import io.github.datakore.jsont.parse.RowIter;
-import java.io.*;
-
 try (RowIter iter = JsonT.rowIter(new BufferedReader(new FileReader("orders.jsont")))) {
     for (JsonTRow row : iter) {
         System.out.println(row);
@@ -203,64 +168,35 @@ try (RowIter iter = JsonT.rowIter(new BufferedReader(new FileReader("orders.json
 }
 ```
 
-**Direct parse + validate in one streaming pass (O(1) memory):**
-
-```java
-import io.github.datakore.jsont.JsonT;
-import io.github.datakore.jsont.validate.ValidationPipeline;
-import io.github.datakore.jsont.validate.ValidationPipelineBuilder;
-import java.io.*;
-
-ValidationPipeline pipeline = new ValidationPipelineBuilder(orderSchema)
-    .withoutConsole()
-    .build();
-
-try (var iter = JsonT.rowIter(new BufferedReader(new FileReader("orders.jsont")))) {
-    pipeline.validateEach(iter, cleanRow -> { /* emit clean rows */ });
-}
-pipeline.finish();
-```
-
 ---
 
 ## Stringification
-
-Convert model types back to JsonT source text.
 
 ```java
 import io.github.datakore.jsont.JsonT;
 import io.github.datakore.jsont.stringify.StringifyOptions;
 
-// Compact (single-line)
 String compact = JsonT.stringify(schema);
-
-// Pretty-printed
 String pretty  = JsonT.stringify(schema, StringifyOptions.pretty());
-
-// Compact namespace
 String nsText  = JsonT.stringify(namespace);
-
-// Serialize a row
 String wire    = JsonT.stringifyRow(row);   // "{1,\"Widget A\",10,9.99}"
 ```
 
 ### Zero-allocation row writers
 
-For high-throughput output, write rows directly to any `java.io.Writer` without intermediate `String` allocation.
-
 ```java
 import io.github.datakore.jsont.JsonT;
 import java.io.*;
 
-// Write a single row
+// Schema-free (plain rows only)
 try (var sw = new StringWriter()) {
     JsonT.writeRow(row, sw);
-    System.out.println(sw);     // {1,"Widget A",10,9.99}
 }
 
-// Write many rows to a file, separated by ",\n"
-try (var writer = new BufferedWriter(new FileWriter("output.jsont"))) {
-    JsonT.writeRows(rows, writer);
+// Schema-bound (handles encryption transparently — see Privacy section)
+try (CryptoContext ctx = CryptoContext.forEncrypt(AlgoVersion.AES_GCM, KekMode.PUBLIC_KEY, cfg);
+     RowWriter writer = new RowWriter(schema, ctx, registry)) {
+    writer.writeStream(rows, out);
 }
 ```
 
@@ -268,13 +204,9 @@ try (var writer = new BufferedWriter(new FileWriter("output.jsont"))) {
 
 ## Validation
 
-`ValidationPipeline` validates `JsonTRow` values against:
+`ValidationPipeline` validates `JsonTRow` values against field-level constraints, row-level rules, and cross-row uniqueness constraints.
 
-- Field-level constraints (required, value bounds, length, pattern, …)
-- Row-level rules from the schema's `validations` block
-- Cross-row uniqueness constraints
-
-Diagnostics are routed to registered sinks. The default sink prints to the console.
+If the schema contains sensitive (`~`) fields, a `CryptoContext` must be supplied at build time — the builder throws `IllegalStateException` otherwise.
 
 ### Streaming mode (O(1) memory)
 
@@ -288,91 +220,34 @@ ValidationPipeline pipeline = new ValidationPipelineBuilder(orderSchema)
     .withSink(sink)
     .build();
 
-// validateEach emits each clean row immediately — no buffering of clean rows.
-pipeline.validateEach(parsedRows, cleanRow -> {
-    // write to output, feed into next stage, etc.
-});
-
+pipeline.validateEach(parsedRows, cleanRow -> { /* emit */ });
 pipeline.finish();
-
-// Inspect collected diagnostics
-sink.events().forEach(System.out::println);
 ```
 
 ### Buffered mode
 
 ```java
-// Collect all clean rows into a List — O(clean-rows) memory.
 List<JsonTRow> clean = pipeline.validateRows(parsedRows);
 pipeline.finish();
 ```
 
 ### Parallel mode
 
-For large files, `validateStream` distributes work across multiple worker threads backed by a bounded queue.
-
 ```java
-import io.github.datakore.jsont.validate.*;
-import java.util.stream.Stream;
-
 ValidationPipeline pipeline = new ValidationPipelineBuilder(orderSchema)
     .withoutConsole()
     .workers(Runtime.getRuntime().availableProcessors())
     .bufferCapacity(256)
     .build();
 
-// validateStream accepts a java.util.stream.Stream<JsonTRow>
 Stream<JsonTRow> cleanStream = pipeline.validateStream(rowStream);
-cleanStream.forEach(row -> { /* consume clean rows */ });
-
-pipeline.finish();
 ```
-
-### Custom sinks
-
-Implement `DiagnosticSink` to route events anywhere — a database, a log aggregator, a file, etc.
-
-```java
-import io.github.datakore.jsont.diagnostic.DiagnosticSink;
-import io.github.datakore.jsont.diagnostic.DiagnosticEvent;
-import java.io.*;
-
-class JsonlSink implements DiagnosticSink {
-    private final PrintWriter writer;
-
-    JsonlSink(Path file) throws IOException {
-        this.writer = new PrintWriter(new BufferedWriter(new FileWriter(file.toFile())));
-    }
-
-    @Override
-    public void emit(DiagnosticEvent event) {
-        writer.println(event.toString());
-    }
-
-    @Override
-    public void flush() {
-        writer.flush();
-    }
-
-    @Override
-    public void close() {
-        writer.close();
-    }
-}
-
-ValidationPipeline pipeline = new ValidationPipelineBuilder(orderSchema)
-    .withoutConsole()
-    .withSink(new JsonlSink(Path.of("errors.jsonl")))
-    .build();
-```
-
-Built-in sinks: `ConsoleSink` (default), `MemorySink`.
 
 ---
 
 ## Derived schemas and transforms
 
-A derived schema inherits its parent's field set and applies an ordered list of operations. Operations run left-to-right per row.
+A derived schema inherits its parent's field set and applies an ordered list of operations.
 
 ```
 Order (Straight)      id, product, quantity, price
@@ -389,11 +264,9 @@ Order (Straight)      id, product, quantity, price
 | `SchemaOperation.Project` | `SchemaOperation.project(paths...)` | Keep only listed fields |
 | `SchemaOperation.Filter` | `SchemaOperation.filter(predicate)` | Drop rows where predicate is false |
 | `SchemaOperation.Transform` | `SchemaOperation.transform(field, expr)` | Replace a field's value |
+| `SchemaOperation.Decrypt` | `SchemaOperation.decrypt(fields...)` | Decrypt named sensitive fields in-place |
 
 ```java
-import io.github.datakore.jsont.model.*;
-
-// Exclude quantity, rename price → amount, filter rows where amount > 0
 JsonTSchema view = JsonTSchemaBuilder.derived("OrderView", "Order")
     .operation(SchemaOperation.exclude(FieldPath.single("quantity")))
     .operation(SchemaOperation.rename(RenamePair.of("price", "amount")))
@@ -404,7 +277,35 @@ JsonTSchema view = JsonTSchemaBuilder.derived("OrderView", "Order")
     .build();
 ```
 
-`SchemaOperation.Filter` is a **row-skip signal**, not a hard failure. When a row is filtered out, callers should skip it and continue.
+`SchemaOperation.Filter` raises `JsonTError.Transform.Filtered` as a row-skip signal — not a hard failure.
+
+---
+
+## Polymorphic fields (anyOf)
+
+A field declared as `anyOf` accepts values from any of a listed set of schema variants. The correct variant is resolved by a discriminator field at parse/validate time.
+
+### DSL syntax
+
+```jsont
+Event: {
+  fields: {
+    str: type,
+    anyOf(OrderEvent, ReturnEvent): payload
+  }
+}
+```
+
+### Programmatic
+
+```java
+JsonTSchema eventSchema = JsonTSchemaBuilder.straight("Event")
+    .fieldFrom(JsonTFieldBuilder.scalar("type", ScalarType.STR))
+    .fieldFrom(JsonTFieldBuilder.anyOf("payload", List.of("OrderEvent", "ReturnEvent")))
+    .build();
+```
+
+At validate time the pipeline resolves which variant the `payload` field carries, validates it against that variant's schema, and stores the result as a typed `JsonTValue`.
 
 ---
 
@@ -413,8 +314,6 @@ JsonTSchema view = JsonTSchemaBuilder.derived("OrderView", "Order")
 JsonT supports field-level encryption through **privacy markers** (`~`) in the schema DSL and a pluggable `CryptoConfig` interface.
 
 ### Marking sensitive fields
-
-In a DSL schema, prefix the type with `~` for any field that must be encrypted on the wire:
 
 ```jsont
 Person: {
@@ -426,102 +325,117 @@ Person: {
 }
 ```
 
-When building programmatically, call `.sensitive()` on the field builder:
-
 ```java
-import io.github.datakore.jsont.builder.*;
-import io.github.datakore.jsont.model.*;
-
 JsonTSchema schema = JsonTSchemaBuilder.straight("Person")
     .fieldFrom(JsonTFieldBuilder.scalar("name", ScalarType.STR))
     .fieldFrom(JsonTFieldBuilder.scalar("ssn",  ScalarType.STR).sensitive())
     .build();
 ```
 
-### Schema-aware write (encrypt on output)
+### Schema-bound write (encrypt on output)
 
-Use `RowWriter.writeRow(row, fields, crypto, writer)` instead of the plain `writeRow` overload when a schema is available. Sensitive fields holding plain text are encrypted; already-encrypted fields are re-encoded as `base64:` without another crypto call.
+`RowWriter` is schema-bound. If any field in the schema is sensitive, a `CryptoContext` is required — the constructor throws `IllegalArgumentException` otherwise. The same `writeStream` call handles both plain and encrypted schemas.
 
 ```java
 import io.github.datakore.jsont.crypto.*;
 import io.github.datakore.jsont.stringify.RowWriter;
-import java.io.StringWriter;
 
-CryptoConfig crypto = new PassthroughCryptoConfig();   // replace with real implementation
-StringWriter out = new StringWriter();
-RowWriter.writeRow(row, schema.fields(), crypto, out);
-// SSN column → "base64:<b64>"; name column → plain string
+// RSA-OAEP key wrapping
+CryptoConfig cfg = new PublicKeyCryptoConfig("JSONT_PUBLIC_KEY", "JSONT_PRIVATE_KEY");
+
+// Or supply keys directly (useful in tests)
+CryptoConfig cfg = PublicKeyCryptoConfig.ofKeys(publicKeyPem, privateKeyPem);
+
+// ECDH-derived KEK (peer's DER public key + host's env-var private key)
+CryptoConfig cfg = new EcdhCryptoConfig(peerPublicKeyDer, "JSONT_HOST_PRIV");
+
+// Or supply the private key directly
+CryptoConfig cfg = EcdhCryptoConfig.ofKeys(peerPublicKeyDer, hostPrivKeyPem);
+
+try (CryptoContext ctx = CryptoContext.forEncrypt(AlgoVersion.AES_GCM, KekMode.PUBLIC_KEY, cfg);
+     RowWriter writer = new RowWriter(schema, ctx)) {
+    writer.writeStream(rows, out);
+}
 ```
 
-Implement `CryptoConfig` for your key-management strategy:
+### Supported algorithms
+
+| `AlgoVersion` | `KekMode` | Field cipher | DEK wrapping |
+|---|---|---|---|
+| `AES_GCM` | `PUBLIC_KEY` | AES-256-GCM | RSA-OAEP-SHA256 |
+| `AES_GCM` | `ECDH` | AES-256-GCM | ECDH+HKDF-SHA256 |
+| `CHACHA20_POLY1305` | `PUBLIC_KEY` | ChaCha20-Poly1305 | RSA-OAEP-SHA256 |
+| `CHACHA20_POLY1305` | `ECDH` | ChaCha20-Poly1305 | ECDH+HKDF-SHA256 |
+| `ASCON` | `PUBLIC_KEY` | ASCON-128a | RSA-OAEP-SHA256 |
+| `ASCON` | `ECDH` | ASCON-128a | ECDH+HKDF-SHA256 |
+
+### CryptoConfig implementations
+
+| Class | Description |
+|---|---|
+| `PublicKeyCryptoConfig` | RSA-OAEP-SHA256 DEK wrap/unwrap via env-var keys or `ofKeys(pubPem, privPem)` |
+| `EcdhCryptoConfig` | ECDH P-256 + HKDF-SHA256 via `new EcdhCryptoConfig(peerDer, envVar)` or `ofKeys(peerDer, privPem)` |
+| `PassthroughCryptoConfig` | Identity (tests only — no real crypto) |
+
+### Reading (decrypt on input)
 
 ```java
-import io.github.datakore.jsont.crypto.*;
+CryptoConfig cfg = PublicKeyCryptoConfig.ofKeys(publicKeyPem, privateKeyPem);
 
-class AesGcmCrypto implements CryptoConfig {
-    @Override
-    public byte[] encrypt(String field, byte[] plaintext) throws CryptoError {
-        // AES-GCM encrypt using field name for key selection
-        throw new UnsupportedOperationException("implement me");
-    }
+// forDecrypt unwraps the DEK from the EncryptHeader row immediately (fail-fast)
+try (CryptoContext ctx = CryptoContext.forDecrypt(versionFromWire, encDekFromWire, cfg)) {
+    // Use transformWithContext to decrypt inside a derived schema pipeline
+    JsonTRow result = RowTransformer.of(derivedSchema, registry)
+            .transformWithContext(row, ctx);
 
-    @Override
-    public byte[] decrypt(String field, byte[] ciphertext) throws CryptoError {
-        throw new UnsupportedOperationException("implement me");
-    }
+    // Or decrypt a single field on-demand
+    Optional<String> ssn = row.decryptField(1, "ssn", ctx);
 }
 ```
 
 ### Decrypt in a derived schema pipeline
 
-Add a `Decrypt` operation to a derived schema to decrypt fields as part of the transform:
-
 ```java
-import io.github.datakore.jsont.model.SchemaOperation;
-import io.github.datakore.jsont.transform.RowTransformer;
-
 JsonTSchema derived = JsonTSchemaBuilder.derived("PersonDecrypted", "Person")
     .operation(SchemaOperation.decrypt("ssn"))
     .build();
 
-SchemaRegistry registry = SchemaRegistry.empty()
-    .register(personSchema)
-    .register(derived);
-
-// Use transformWithCrypto — transform() without crypto throws DecryptFailed
 JsonTRow result = RowTransformer.of(derived, registry)
-    .transformWithCrypto(row, new PassthroughCryptoConfig());
+        .transformWithContext(row, ctx);
 // result.get(1) is now JsonTValue.text("123-45-6789")
 ```
 
 ### On-demand decrypt
 
-Decrypt a single field without deriving a new schema:
+```java
+// Decrypt a value directly
+JsonTValue val = JsonTValue.encrypted(envelope);
+Optional<String>  text  = val.decryptStr("field_name", ctx);
+Optional<byte[]>  bytes = val.decryptBytes("field_name", ctx);
+
+// Decrypt by position in a row
+Optional<String> ssn = row.decryptField(1, "ssn", ctx);
+```
+
+### ValidationPipeline with encryption
+
+If the schema has sensitive fields, supply a `CryptoContext` before calling `build()`:
 
 ```java
-import io.github.datakore.jsont.crypto.*;
-import io.github.datakore.jsont.model.*;
+try (CryptoContext ctx = CryptoContext.forDecrypt(version, encDek, cfg)) {
+    ValidationPipeline pipeline = new ValidationPipelineBuilder(schema)
+        .withoutConsole()
+        .withCryptoContext(ctx)
+        .build();
 
-CryptoConfig crypto = new PassthroughCryptoConfig();
-
-// Decrypt a value directly
-JsonTValue val = JsonTValue.encrypted("hello".getBytes());
-Optional<String>  text  = val.decryptStr("field_name", crypto);
-Optional<byte[]>  bytes = val.decryptBytes("field_name", crypto);
-
-// Decrypt by position in a row (throws IndexOutOfBoundsException for out-of-range)
-JsonTRow row = JsonTRow.of(
-    JsonTValue.text("Alice"),
-    JsonTValue.encrypted("123-45-6789".getBytes())
-);
-Optional<String> ssn = row.decryptField(1, "ssn", crypto);
+    pipeline.validateEach(rows, cleanRow -> { /* emit */ });
+    pipeline.finish();
+}
 ```
 
 ---
 
 ## Expression building
-
-`JsonTExpression` is used in validation rules, filter predicates, and transform expressions.
 
 ```java
 import io.github.datakore.jsont.model.*;
@@ -532,11 +446,11 @@ JsonTExpression adult = JsonTExpression.binary(
     JsonTExpression.fieldName("age"),
     JsonTExpression.literal(JsonTValue.i32(18)));
 
-// !(active) — logical NOT
+// !(active)
 JsonTExpression inactive = JsonTExpression.not(
     JsonTExpression.fieldName("active"));
 
-// price * quantity  (used in a Transform)
+// price * quantity (used in a Transform)
 JsonTExpression total = JsonTExpression.binary(
     BinaryOp.MUL,
     JsonTExpression.fieldName("price"),
@@ -547,38 +461,39 @@ JsonTExpression total = JsonTExpression.binary(
 
 ## Error handling
 
-Parse errors throw `JsonTError.Parse`. Build errors throw `BuildError`.
-
 ```java
 import io.github.datakore.jsont.error.*;
+import io.github.datakore.jsont.crypto.CryptoError;
 
+// Parse errors
 try {
     JsonTNamespace ns = JsonT.parseNamespace(badInput);
-} catch (JsonTError.Parse e) {
-    System.err.println("Parse error: " + e.getMessage());
-}
+} catch (JsonTError.Parse e) { ... }
 
+// Build errors
 try {
-    JsonTSchema schema = JsonTSchemaBuilder.straight("Order")
-        // missing fields — will throw
-        .build();
-} catch (BuildError e) {
-    System.err.println("Build error: " + e.getMessage());
-}
+    JsonTSchema schema = JsonTSchemaBuilder.straight("Order").build(); // missing fields
+} catch (BuildError e) { ... }
 
-// Crypto errors — checked exception thrown by CryptoConfig.encrypt/decrypt
+// RowWriter construction guard — thrown immediately, not at write time
 try {
-    Optional<String> plain = row.decryptField(1, "ssn", crypto);
-} catch (CryptoError e) {
-    System.err.println("Decryption failed: " + e.getMessage());
-}
+    new RowWriter(sensitiveSchema);           // throws — no CryptoContext
+} catch (IllegalArgumentException e) { ... }
 
-// Decrypt operation without CryptoConfig — unchecked Transform error
+// ValidationPipelineBuilder guard — thrown at build(), not at validate time
 try {
-    JsonTRow result = RowTransformer.of(derivedSchema, registry).transform(row);
-} catch (JsonTError.Transform.DecryptFailed e) {
-    System.err.println("Decrypt op requires CryptoConfig: " + e.getMessage());
-}
+    new ValidationPipelineBuilder(sensitiveSchema).build(); // throws — no CryptoContext
+} catch (IllegalStateException e) { ... }
+
+// Crypto errors
+try {
+    Optional<String> plain = row.decryptField(1, "ssn", ctx);
+} catch (CryptoError e) { ... }
+
+// Decrypt operation without CryptoContext
+try {
+    RowTransformer.of(derivedSchema, registry).transform(row);
+} catch (JsonTError.Transform.DecryptFailed e) { ... }
 ```
 
 ---
@@ -588,19 +503,12 @@ try {
 | Scenario | Memory | Notes |
 |---|---|---|
 | Parse rows from string (`parseRows`) | O(1) rows | `RowScanner` state machine; no parse tree |
-| Parse rows from file (`parseRowsStreaming` / `rowIter`) | O(64 KB buf + 1 row) | Bulk character buffer; file size irrelevant |
+| Parse rows from file (`parseRowsStreaming` / `rowIter`) | O(64 KB buf + 1 row) | Bulk character buffer |
 | Streaming validation (`validateEach`) | O(1) | Per-row evaluation |
 | Streaming validation with uniqueness | O(unique-keys) | Only key strings accumulate |
 | Parallel validation (`validateStream`) | O(channel_cap) | Bounded queue; N worker threads |
 | Buffered validation (`validateRows`) | O(clean-rows) | Output List allocation |
-| Streaming write (`writeRow` / `writeRows`) | O(1) per row | Writes directly to `Writer` |
-
-For large datasets, prefer:
-
-1. `parseRowsStreaming` (or `rowIter`) over `parseRows` when reading from a file — constant 64 KB overhead vs O(file size)
-2. `pipeline.validateEach(rowIter(...), ...)` for single-threaded O(1) end-to-end
-3. `pipeline.validateStream(stream)` with multiple workers for multi-core throughput on 1 M+ rows
-4. `writeRow` / `writeRows` with a `BufferedWriter` in a streaming loop for O(1) serialization
+| Streaming write (`writeStream`) | O(1) per row | Writes directly to `Writer` |
 
 ### Measured throughput (complex marketplace schema, 40 fields, validation rules)
 
@@ -609,5 +517,4 @@ For large datasets, prefer:
 | 1 M | 131 rows/ms | 84 rows/ms | 32 rows/ms |
 | 10 M | 131 rows/ms | 78 rows/ms | 33 rows/ms |
 
-At 10 M rows the pipeline operates without memory growth.
 See [Performance.md](../../docs/Performance.md) for full benchmark details.

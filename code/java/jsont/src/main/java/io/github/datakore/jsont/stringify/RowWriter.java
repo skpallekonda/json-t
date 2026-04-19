@@ -1,13 +1,15 @@
 package io.github.datakore.jsont.stringify;
 
-import io.github.datakore.jsont.crypto.CryptoConfig;
+import io.github.datakore.jsont.builder.SchemaResolver;
 import io.github.datakore.jsont.crypto.CryptoContext;
 import io.github.datakore.jsont.crypto.CryptoError;
+import io.github.datakore.jsont.crypto.EncryptedField;
 import io.github.datakore.jsont.internal.crypto.EncryptHeaderParser;
 import io.github.datakore.jsont.internal.crypto.FieldPayload;
 import io.github.datakore.jsont.model.JsonTField;
 import io.github.datakore.jsont.model.JsonTNumber;
 import io.github.datakore.jsont.model.JsonTRow;
+import io.github.datakore.jsont.model.JsonTSchema;
 import io.github.datakore.jsont.model.JsonTString;
 import io.github.datakore.jsont.model.JsonTValue;
 
@@ -15,11 +17,10 @@ import java.io.IOException;
 import java.io.Writer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Direct-write API for serialising {@link JsonTRow} data to any {@link Writer}.
@@ -27,23 +28,71 @@ import java.util.List;
  * <p>Unlike {@link JsonTStringifier}, no intermediate {@code String} is allocated per
  * row — characters are written directly to the underlying writer.
  *
- * <h2>Encrypted stream (Step 5)</h2>
- * <p>Use {@link #writeEncryptedStream} to write a complete encrypted stream:
+ * <h2>Schema-bound writer (encrypted or plain)</h2>
+ * <p>Construct with a {@link JsonTSchema}. If the schema hierarchy contains sensitive
+ * fields, a {@link CryptoContext} is required — the constructor throws
+ * {@link IllegalArgumentException} if one is missing. Encryption is handled
+ * transparently; callers do not need separate code paths for plain vs encrypted schemas.
  * <pre>{@code
- *   CryptoConfig crypto = new EnvCryptoConfig("JSONT_PUB", "JSONT_PRIV");
- *   try (BufferedWriter bw = Files.newBufferedWriter(path)) {
- *       RowWriter.writeEncryptedStream(rows, schema.fields(), crypto,
- *                                      CryptoContext.VERSION_AES_PUBKEY, bw);
+ *   CryptoConfig cfg = new PublicKeyCryptoConfig("JSONT_PUB", "JSONT_PRIV");
+ *   try (CryptoContext ctx = CryptoContext.forEncrypt(AlgoVersion.AES_GCM, KekMode.PUBLIC_KEY, cfg)) {
+ *       new RowWriter(schema, ctx, registry).writeStream(rows, out);
  *   }
  * }</pre>
+ *
+ * <h2>Schema-free (plain only)</h2>
+ * <p>Use the static helpers {@link #writeRow(JsonTRow, Writer)} and
+ * {@link #writeRows(Iterable, Writer)} directly — no instance needed.
  */
-public final class RowWriter {
+public final class RowWriter implements AutoCloseable {
 
-    private static final int DEK_LEN = 32; // AES-256 key size in bytes
+    private final List<JsonTField> fields;
+    private final CryptoContext context;    // null when schema has no sensitive fields
+    private final SchemaResolver registry;  // null if no nested object support needed
 
-    private RowWriter() {}
+    /**
+     * Schema-bound writer without crypto or registry support.
+     * Throws if the schema contains sensitive fields (a {@link CryptoContext} is then required).
+     */
+    public RowWriter(JsonTSchema schema) {
+        this(schema, null, null);
+    }
 
-    // ── Schema-free writers ───────────────────────────────────────────────────
+    /**
+     * Schema-bound writer with a {@link CryptoContext} but no nested-schema registry.
+     * Throws if the schema has sensitive fields and {@code context} is {@code null}.
+     */
+    public RowWriter(JsonTSchema schema, CryptoContext context) {
+        this(schema, context, null);
+    }
+
+    /**
+     * Schema-bound writer with full control over crypto and nested-schema resolution.
+     *
+     * <p>If the schema hierarchy (including nested schemas reachable via {@code registry})
+     * contains sensitive fields, {@code context} must not be {@code null}.
+     *
+     * @param schema   data schema; determines field order and sensitivity
+     * @param context  crypto context for encryption; {@code null} only if no sensitive fields exist
+     * @param registry resolver for nested object schemas; may be {@code null}
+     * @throws IllegalArgumentException if sensitive fields exist but {@code context} is {@code null}
+     */
+    public RowWriter(JsonTSchema schema, CryptoContext context, SchemaResolver registry) {
+        Objects.requireNonNull(schema, "schema must not be null");
+        this.fields   = schema.fields();
+        this.context  = context;
+        this.registry = registry;
+        if (hasSensitiveField(this.fields, registry) && context == null) {
+            throw new IllegalArgumentException(
+                "Schema '" + schema.name() + "' contains sensitive fields — supply a CryptoContext");
+        }
+    }
+
+    /** Closes this writer. Does not close the underlying {@link CryptoContext}. */
+    @Override
+    public void close() { /* context ownership stays with caller */ }
+
+    // ── Schema-free static writers ────────────────────────────────────────────
 
     /**
      * Writes one data row in compact JsonT format: {@code {v1,v2,...}}.
@@ -81,104 +130,80 @@ public final class RowWriter {
         }
     }
 
-    // ── Encrypted stream writer (Step 5) ─────────────────────────────────────
+    // ── Schema-bound instance methods ─────────────────────────────────────────
 
     /**
-     * Write a complete encrypted JsonT stream:
+     * Write a complete stream using this writer's schema.
      *
-     * <ol>
-     *   <li>Generate a random 256-bit DEK.</li>
-     *   <li>Wrap the DEK via {@code crypto.wrapDek(version, dek)} and write the
-     *       {@code EncryptHeader} row.</li>
-     *   <li>For each data row, write it with schema-aware encryption using the
-     *       shared DEK. Each sensitive field gets a fresh IV; the per-field payload
-     *       carries {@code [len_iv][len_digest][iv][SHA-256(plaintext)][enc_content]}.</li>
-     *   <li>Zero the DEK before returning.</li>
-     * </ol>
+     * <p>If sensitive fields exist, emits the {@code EncryptHeader} row first,
+     * then each data row separated by {@code ,\n}, with sensitive fields encrypted.
+     * Plain schemas write rows directly without a header — both paths use the same call.
      *
-     * <p>The header row and data rows are separated by {@code ,\n}.
-     *
-     * @param rows    the data rows to write
-     * @param fields  schema field descriptors (same order as row values)
-     * @param crypto  the crypto implementation
-     * @param version the {@code EncryptHeader} version field (e.g. {@link CryptoContext#VERSION_AES_PUBKEY})
-     * @param w       the destination writer
-     * @throws IOException  on write failure
-     * @throws CryptoError  if DEK wrapping or field encryption fails
-     */
-    public static void writeEncryptedStream(
-            Iterable<JsonTRow> rows,
-            List<JsonTField> fields,
-            CryptoConfig crypto,
-            int version,
-            Writer w) throws IOException, CryptoError {
-
-        byte[] dek = new byte[DEK_LEN];
-        new SecureRandom().nextBytes(dek);
-        try {
-            byte[] encDek = crypto.wrapDek(version, dek);
-            CryptoContext ctx = new CryptoContext(version, encDek);
-            writeRow(EncryptHeaderParser.buildRow(ctx), w);
-
-            for (JsonTRow row : rows) {
-                w.write(",\n");
-                writeRowWithDek(row, fields, dek, crypto, w);
-            }
-        } finally {
-            Arrays.fill(dek, (byte) 0);
-        }
-    }
-
-    /**
-     * Write one data row using a pre-unwrapped DEK for field encryption.
-     *
-     * <ul>
-     *   <li>Sensitive field with a non-{@link io.github.datakore.jsont.model.JsonTValue.Encrypted Encrypted}
-     *       value — encrypt via {@code crypto.encryptField}, compute SHA-256(plaintext),
-     *       assemble the per-field payload, write as plain base64.</li>
-     *   <li>Sensitive field already holding an {@code Encrypted} value — the stored
-     *       payload bytes are re-encoded as plain base64 (no crypto call).</li>
-     *   <li>Non-sensitive fields — written normally.</li>
-     * </ul>
-     *
-     * @param row    the row to serialise
-     * @param fields schema field descriptors
-     * @param dek    the raw plaintext DEK
-     * @param crypto the crypto implementation (for {@code encryptField})
-     * @param w      the destination writer
+     * @param rows the data rows to write
+     * @param w    the destination writer
      * @throws IOException  on write failure
      * @throws CryptoError  if field encryption fails
      */
-    public static void writeRowWithDek(
-            JsonTRow row,
-            List<JsonTField> fields,
-            byte[] dek,
-            CryptoConfig crypto,
-            Writer w) throws IOException, CryptoError {
+    public void writeStream(Iterable<JsonTRow> rows, Writer w) throws IOException, CryptoError {
+        if (context != null && hasSensitiveField(fields, registry)) {
+            RowWriter.writeRow(EncryptHeaderParser.buildRow(context), w);
+            for (JsonTRow row : rows) {
+                w.write(",\n");
+                writeOneRow(row, w);
+            }
+        } else {
+            writeRows(rows, w);
+        }
+    }
+
+    private void writeOneRow(JsonTRow row, Writer w) throws IOException, CryptoError {
         w.write('{');
-        List<JsonTValue> values = row.values();
+        writeEncryptedValues(row.values(), fields, w);
+        w.write('}');
+    }
+
+    /** Returns {@code true} if any field — or any field in a recursively referenced schema — is sensitive. */
+    static boolean hasSensitiveField(List<JsonTField> fields, SchemaResolver registry) {
+        for (JsonTField f : fields) {
+            if (f.sensitive()) return true;
+            if (f.kind().isObject() && registry != null) {
+                JsonTSchema nested = registry.resolve(f.objectRef()).orElse(null);
+                if (nested != null && hasSensitiveField(nested.fields(), registry)) return true;
+            }
+        }
+        return false;
+    }
+
+    private void writeEncryptedValues(List<JsonTValue> values, List<JsonTField> fields, Writer w)
+            throws IOException, CryptoError {
         for (int i = 0; i < values.size(); i++) {
             if (i > 0) w.write(',');
             JsonTValue v     = values.get(i);
             JsonTField field = fields.get(i);
-            if (field.sensitive()) {
+            if (context != null && field.sensitive()) {
                 byte[] payload;
                 if (v instanceof JsonTValue.Encrypted enc) {
-                    // Already a fully-assembled payload — re-encode as-is.
                     payload = enc.envelope();
                 } else {
-                    // Plaintext — encrypt and assemble payload.
                     byte[] plaintext = valueToText(v).getBytes(java.nio.charset.StandardCharsets.UTF_8);
                     byte[] digest    = sha256(plaintext);
-                    CryptoConfig.EncryptedField ef = crypto.encryptField(dek, plaintext);
+                    EncryptedField ef = context.encryptField(plaintext);
                     payload = FieldPayload.assemble(ef.iv(), digest, ef.encContent());
                 }
                 writeQuotedString(Base64.getEncoder().encodeToString(payload), w);
+            } else if (field.kind().isObject() && v instanceof JsonTValue.Array arr && registry != null) {
+                JsonTSchema nested = registry.resolve(field.objectRef()).orElse(null);
+                if (nested != null) {
+                    w.write('{');
+                    writeEncryptedValues(arr.elements(), nested.fields(), w);
+                    w.write('}');
+                } else {
+                    writeValue(v, w);
+                }
             } else {
                 writeValue(v, w);
             }
         }
-        w.write('}');
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -2,61 +2,51 @@
 
 ## P0 — Adoption Critical
 
-1. ~~JSON interoperability~~ ✅ Complete — `JsonReader` / `JsonWriter` with `JsonInputMode`,
-   `JsonOutputMode`, `MissingFieldPolicy`, `UnknownFieldPolicy` implemented in both Rust and Java.
+1. ~~JSON interoperability~~ ✅ Complete
 
 ---
 
-## P1 — Security
+## P1 — Security / Rust Parity
 
-1. **jsont-crypto implementation** (design complete — `ai_context/07_crypto_design.md`)
+1. **Rust implementation: apply Java's design changes** (next session)
 
-   Implement in both Rust (`jsont-crypto` crate) and Java (Maven module) in lockstep so
-   wire compatibility is verified as each step lands.
+   The Java implementation was refactored for SOLID principles. The Rust implementation needs
+   the same treatment before the two diverge further.
 
-   ### Step 1 — Module scaffold
+   ### Step 1 — Command pattern for operation applicator
 
-   * Create `code/rust/jsont-crypto/` crate and `code/java/jsont-crypto/` Maven module
-   * Add dependencies: RustCrypto family (Rust); Bouncy Castle (Java)
-   * `jsont` core: change `CryptoConfig` / `CryptoError` import to point at `jsont-crypto`
+   * Current: large `match` / `if-let` chain in the operation applicator
+   * Target: one handler type per `SchemaOperation` variant — a trait `RowOperationHandler`
+     with `supports` + `apply`, and a `FieldResolutionHandler` trait for field-name shape changes
+   * Registry: `OperationApplicator` holds a `Vec<Box<dyn RowOperationHandler>>` and dispatches
 
-   ### Step 2 — CryptoError
+   ### Step 2 — Scope validators for derived-schema validation
 
-   * Define all variants: `KeyNotFound`, `InvalidKey`, `UnsupportedAlgorithm`,
-     `UnsupportedKekMode`, `DekWrapFailed`, `DekUnwrapFailed`, `EncryptFailed`,
-     `DecryptFailed`, `DigestMismatch`, `MalformedPayload`
+   * Current: inline `match` in `validateWithParent` / equivalent Rust function
+   * Target: `OperationScopeValidator` trait, one struct per operation type, orchestrated by `ScopeValidation::validate`
 
-   ### Step 3 — EnvCryptoConfig
+   ### Step 3 — ASCON-128a field cipher + ECDH DEK wrapping (Rust)
 
-   * Implement `CryptoConfig` that reads key material from env vars at call time
-   * Auto-detect full PEM (`-----BEGIN`) vs stripped Base64-DER
-   * Support both KEK modes: receiver public key (mode 0) and ECDH pre-established (mode 1)
+   * Java: implemented via BouncyCastle `AsconEngine`
+   * Rust: use `ascon-aead` crate (RustCrypto family) for ASCON-128a
+   * Key: first 16 bytes of the 32-byte DEK; nonce: 16 bytes; tag: 16 bytes
+   * ECDH DEK wrapping: add ASCON branch alongside AES-GCM and ChaCha20
 
-   ### Step 4 — EncryptHeader in jsont core
+   ### Step 4 — EcdhCryptoConfig `ofKeys` equivalent (Rust)
 
-   * Add built-in `EncryptHeader` schema (hardcoded, not user-definable)
-   * Parser peeks at first row: if `type == "ENCRYPTED_HEADER"` → parse into `CryptoContext`
-   * `CryptoContext { version: u16, enc_dek: Vec<u8> }` exposed to caller after parse
+   * Add a constructor/builder variant that accepts key bytes directly (no env-var requirement)
+   * Enables in-process testing without environment setup
 
-   ### Step 5 — Per-field payload encoding / decoding
+   ### Step 5 — Wire compatibility tests
 
-   * Writer: assemble `len_iv + len_digest + iv + digest + enc_content` binary payload per sensitive field
-   * Reader (promoteRow): decode base64 → store raw payload bytes as `Encrypted(bytes)` (unchanged from current; bytes now carry the full payload structure)
+   * Encrypt in Rust, decrypt in Java (and vice versa) for all 3 algorithms
+   * Verify `EncryptHeader` round-trip, per-field payload structure, and digest verification
 
-   ### Step 6 — On-demand decrypt with CryptoContext
+   ### Important: apply SOLID principles throughout
 
-   * Update `decrypt_field` / `decryptField` / `decryptBytes` / `decryptStr` signatures to accept `CryptoContext` alongside `CryptoConfig`
-   * Parse payload bytes: extract `iv`, `digest`, `enc_content`
-   * `CryptoConfig.unwrap_dek(version, enc_dek)` → raw DEK (ephemeral)
-   * Decrypt, verify SHA-256 digest, return plaintext or `DigestMismatch`
-
-   ### Step 7 — Tests
-
-   * Wire compatibility test: encrypt in Rust, decrypt in Java (and vice versa)
-   * Round-trip tests per algorithm version (AES-GCM, ChaCha20, ASCON)
-   * CryptoError variant coverage
-   * `EnvCryptoConfig` key format tests (full PEM, stripped Base64)
-   * `CryptoContext` persistence round-trip (serialize, restore, decrypt)
+   The user confirmed that SOLID principles and appropriate design patterns are the standard
+   for this codebase. When touching Rust code, apply the same command/strategy patterns
+   as the Java refactor. Do not use large match blocks as the sole structure for extensible logic.
 
 ---
 
@@ -78,3 +68,6 @@
 * Prioritize adoption over new abstractions
 * Avoid moving to runtime before core adoption stabilizes
 * jsont-crypto wire format is frozen by design — changes require a new `format_ver` bit
+* ECDH host public key: the current ECDH implementation is mathematically correct — the host
+  public key is implicit in the private key. Including peer public key bytes in HKDF info
+  is a future security enhancement for stronger key binding, not a correctness fix.

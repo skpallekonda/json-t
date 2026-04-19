@@ -1,6 +1,9 @@
 package io.github.datakore.jsont;
 
 import io.github.datakore.jsont.builder.JsonTSchemaBuilder;
+import io.github.datakore.jsont.builder.SchemaResolver;
+import io.github.datakore.jsont.crypto.CryptoContext;
+import io.github.datakore.jsont.crypto.CryptoError;
 import io.github.datakore.jsont.json.JsonReader;
 import io.github.datakore.jsont.json.JsonReaderBuilder;
 import io.github.datakore.jsont.json.JsonWriter;
@@ -64,11 +67,34 @@ public final class JsonT {
 
     /**
      * Writes all rows to {@code w}, separated by {@code ,\n}.
+     * Schema-free: no field metadata or encryption. Use {@link #writeStream} for schema-driven output.
      *
      * @throws IOException on write failure
      */
     public static void writeRows(Iterable<JsonTRow> rows, Writer w) throws IOException {
         RowWriter.writeRows(rows, w);
+    }
+
+    /**
+     * Schema-driven stream writer. Automatically emits an {@code EncryptHeader} and encrypts
+     * sensitive fields when the schema requires it; writes plain rows otherwise.
+     * The {@code context} must not be {@code null} if any field in the schema hierarchy is sensitive.
+     *
+     * @param rows     data rows to write
+     * @param schema   schema describing field order and sensitivity
+     * @param context  crypto context — required when sensitive fields exist, {@code null} otherwise
+     * @param registry nested-schema resolver; may be {@code null}
+     * @param w        destination writer
+     * @throws IOException  on write failure
+     * @throws CryptoError  if field encryption fails
+     * @throws IllegalArgumentException if the schema has sensitive fields and {@code context} is {@code null}
+     */
+    public static void writeStream(Iterable<JsonTRow> rows, JsonTSchema schema,
+                                   CryptoContext context, SchemaResolver registry, Writer w)
+            throws IOException, CryptoError {
+        try (RowWriter writer = new RowWriter(schema, context, registry)) {
+            writer.writeStream(rows, w);
+        }
     }
 
     // ── Parse convenience ─────────────────────────────────────────────────────

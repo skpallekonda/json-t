@@ -1,6 +1,5 @@
 package io.github.datakore.jsont.model;
 
-import io.github.datakore.jsont.crypto.CryptoConfig;
 import io.github.datakore.jsont.crypto.CryptoContext;
 import io.github.datakore.jsont.crypto.CryptoError;
 
@@ -88,22 +87,21 @@ public record JsonTRow(long index, List<JsonTValue> values) {
     /**
      * Decrypt the value at position {@code index} and return the plaintext as a UTF-8 string.
      *
-     * <p>Uses the stream-level {@link CryptoContext} (from the EncryptHeader) together
-     * with the caller-supplied {@link CryptoConfig} to unwrap the DEK and decrypt.
+     * <p>Uses the stream-level {@link CryptoContext} (from the EncryptHeader) to unwrap
+     * the DEK and decrypt.
      *
      * @param index     the 0-based position of the field in this row
      * @param fieldName the field name (used in error messages)
      * @param ctx       the {@link CryptoContext} produced from the stream's EncryptHeader
-     * @param crypto    the crypto implementation to use for decryption
      * @return the decrypted string, or {@link java.util.Optional#empty()} if the value
      *         at {@code index} is not encrypted (already plaintext, null, etc.)
      * @throws IndexOutOfBoundsException if {@code index} is out of range
      * @throws CryptoError               if crypto, digest verification, or UTF-8 decoding fails
      */
     public java.util.Optional<String> decryptField(
-            int index, String fieldName, CryptoContext ctx, CryptoConfig crypto)
+            int index, String fieldName, CryptoContext ctx)
             throws CryptoError {
-        return values.get(index).decryptStr(fieldName, ctx, crypto);
+        return values.get(index).decryptStr(fieldName, ctx);
     }
 
     @Override

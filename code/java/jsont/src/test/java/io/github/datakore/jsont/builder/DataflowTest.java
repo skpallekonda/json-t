@@ -33,6 +33,10 @@ package io.github.datakore.jsont.builder;
 //   • Null on required sensitive field         → RequiredFieldMissing (absent check still fires)
 // =============================================================================
 
+import io.github.datakore.jsont.crypto.AlgoVersion;
+import io.github.datakore.jsont.crypto.CryptoContext;
+import io.github.datakore.jsont.crypto.KekMode;
+import io.github.datakore.jsont.crypto.PassthroughCryptoConfig;
 import io.github.datakore.jsont.diagnostic.DiagnosticEvent;
 import io.github.datakore.jsont.diagnostic.DiagnosticEventKind;
 import io.github.datakore.jsont.error.BuildError;
@@ -73,18 +77,30 @@ class DataflowTest {
 
     // ── run helpers ───────────────────────────────────────────────────────────
 
-    static List<JsonTRow> runSilent(JsonTSchema schema, List<JsonTRow> rows) {
-        var pipeline = ValidationPipeline.builder(schema).withoutConsole().build();
-        return pipeline.validateRows(rows);
+    private static final PassthroughCryptoConfig PASSTHROUGH = new PassthroughCryptoConfig();
+
+    static CryptoContext decCtx() throws Exception {
+        try (CryptoContext enc = CryptoContext.forEncrypt(AlgoVersion.AES_GCM, KekMode.PUBLIC_KEY, PASSTHROUGH)) {
+            return CryptoContext.forDecrypt(enc.version(), enc.encDek(), PASSTHROUGH);
+        }
+    }
+
+    static List<JsonTRow> runSilent(JsonTSchema schema, List<JsonTRow> rows) throws Exception {
+        try (CryptoContext ctx = decCtx()) {
+            var pipeline = ValidationPipeline.builder(schema).withoutConsole().withCryptoContext(ctx).build();
+            return pipeline.validateRows(rows);
+        }
     }
 
     record RunResult(List<JsonTRow> clean, List<DiagnosticEvent> events) {}
 
-    static RunResult runWithEvents(JsonTSchema schema, List<JsonTRow> rows) {
+    static RunResult runWithEvents(JsonTSchema schema, List<JsonTRow> rows) throws Exception {
         var sink = new MemorySink();
-        var pipeline = ValidationPipeline.builder(schema).withoutConsole().withSink(sink).build();
-        List<JsonTRow> clean = pipeline.validateRows(rows);
-        return new RunResult(clean, sink.events());
+        try (CryptoContext ctx = decCtx()) {
+            var pipeline = ValidationPipeline.builder(schema).withoutConsole().withSink(sink).withCryptoContext(ctx).build();
+            List<JsonTRow> clean = pipeline.validateRows(rows);
+            return new RunResult(clean, sink.events());
+        }
     }
 
     // =========================================================================
@@ -341,7 +357,7 @@ class DataflowTest {
     // =========================================================================
 
     @Test
-    void encrypted_value_skips_min_value_constraint() throws BuildError {
+    void encrypted_value_skips_min_value_constraint() throws Exception {
         // salary has minValue=50000 — Encrypted value must skip this check
         JsonTSchema schema = JsonTSchemaBuilder.straight("Employee")
                 .fieldFrom(JsonTFieldBuilder.scalar("salary", ScalarType.D64)
@@ -361,7 +377,7 @@ class DataflowTest {
     }
 
     @Test
-    void encrypted_value_skips_max_length_constraint() throws BuildError {
+    void encrypted_value_skips_max_length_constraint() throws Exception {
         JsonTSchema schema = JsonTSchemaBuilder.straight("Person")
                 .fieldFrom(JsonTFieldBuilder.scalar("ssn", ScalarType.STR)
                         .sensitive().maxLength(3)) // artificially small
@@ -380,7 +396,7 @@ class DataflowTest {
     }
 
     @Test
-    void encrypted_value_skips_constant_check() throws BuildError {
+    void encrypted_value_skips_constant_check() throws Exception {
         // Constant check would fire Fatal for any non-matching value — must be skipped for Encrypted
         JsonTSchema schema = JsonTSchemaBuilder.straight("Config")
                 .fieldFrom(JsonTFieldBuilder.scalar("secret", ScalarType.STR)

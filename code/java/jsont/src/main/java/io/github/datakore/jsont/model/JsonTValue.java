@@ -1,8 +1,8 @@
 package io.github.datakore.jsont.model;
 
-import io.github.datakore.jsont.crypto.CryptoConfig;
 import io.github.datakore.jsont.crypto.CryptoContext;
 import io.github.datakore.jsont.crypto.CryptoError;
+import io.github.datakore.jsont.crypto.EncryptedField;
 import io.github.datakore.jsont.internal.crypto.FieldPayload;
 
 import java.nio.charset.StandardCharsets;
@@ -168,16 +168,14 @@ public sealed interface JsonTValue
      *
      * @param field  the field name (used in error messages)
      * @param ctx    the {@link CryptoContext} produced from the stream's EncryptHeader
-     * @param crypto the crypto implementation to use for DEK unwrapping and decryption
      * @return the decrypted bytes, or empty if this value is not encrypted
      * @throws CryptoError if DEK unwrapping, decryption, or digest verification fails
      */
-    default Optional<byte[]> decryptBytes(String field, CryptoContext ctx, CryptoConfig crypto)
+    default Optional<byte[]> decryptBytes(String field, CryptoContext ctx)
             throws CryptoError {
         if (this instanceof Encrypted enc) {
             FieldPayload.Parsed p = FieldPayload.parse(enc.envelope(), field);
-            byte[] dek = crypto.unwrapDek(ctx.version(), ctx.encDek());
-            byte[] plaintext = crypto.decryptField(dek, p.iv(), p.encContent());
+            byte[] plaintext = ctx.decryptField(new EncryptedField(p.iv(), p.encContent()));
             // Verify SHA-256 digest.
             byte[] computed;
             try {
@@ -200,13 +198,12 @@ public sealed interface JsonTValue
      *
      * @param field  the field name (used in error messages)
      * @param ctx    the {@link CryptoContext} produced from the stream's EncryptHeader
-     * @param crypto the crypto implementation
      * @return the decrypted string, or empty if this value is not encrypted
      * @throws CryptoError if decryption, digest verification, or UTF-8 decoding fails
      */
-    default Optional<String> decryptStr(String field, CryptoContext ctx, CryptoConfig crypto)
+    default Optional<String> decryptStr(String field, CryptoContext ctx)
             throws CryptoError {
-        Optional<byte[]> bytes = decryptBytes(field, ctx, crypto);
+        Optional<byte[]> bytes = decryptBytes(field, ctx);
         if (bytes.isEmpty()) return Optional.empty();
         return Optional.of(new String(bytes.get(), StandardCharsets.UTF_8));
     }

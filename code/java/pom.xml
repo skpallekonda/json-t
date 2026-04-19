@@ -134,6 +134,12 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
                 <version>3.6.3</version>
+                <configuration>
+                    <!-- Suppress missing-tag warnings (@param/@return/@throws) which are
+                         impractical to add to every Java record component and accessor.
+                         Keeps reference, syntax, html, and accessibility checks active. -->
+                    <doclint>all,-missing</doclint>
+                </configuration>
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>

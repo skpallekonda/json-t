@@ -19,6 +19,7 @@ public sealed class CryptoError extends Exception
                 CryptoError.UnsupportedKekMode,
                 CryptoError.DekWrapFailed,
                 CryptoError.DekUnwrapFailed,
+                CryptoError.DekMismatch,
                 CryptoError.EncryptFailed,
                 CryptoError.DecryptFailed,
                 CryptoError.DigestMismatch,
@@ -118,7 +119,23 @@ public sealed class CryptoError extends Exception
 
     // -------------------------------------------------------------------------
 
-    /** AES-GCM encryption of a field value failed. */
+    /**
+     * ECDH DEK verification failed: the AEAD authentication tag on the wrapped DEK
+     * did not pass, indicating the enc_dek was tampered with or the wrong key was used.
+     */
+    public static final class DekMismatch extends CryptoError {
+        public DekMismatch(String reason) {
+            super("DEK mismatch: " + reason);
+        }
+
+        public DekMismatch(String reason, Throwable cause) {
+            super("DEK mismatch: " + reason, cause);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+
+    /** Encryption of a field value failed. */
     public static final class EncryptFailed extends CryptoError {
         private final String field;
 

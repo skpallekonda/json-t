@@ -1,17 +1,15 @@
 package io.github.datakore.jsont.model;
 
 import io.github.datakore.jsont.error.BuildError;
+import io.github.datakore.jsont.internal.validate.scope.ScopeValidation;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
  * Immutable schema definition, either straight or derived. 
- * Please use {@link JsonTSchemaBuilder.build()} for creating instances.
+ * Please use {@link io.github.datakore.jsont.builder.JsonTSchemaBuilder} for creating instances.
  */
 public final class JsonTSchema {
 
@@ -84,132 +82,7 @@ public final class JsonTSchema {
     public void validateWithParent(JsonTSchema parent) throws BuildError {
         if (kind != SchemaKind.DERIVED) return;
         if (parent.kind != SchemaKind.STRAIGHT) return; // nested derived: skip for now
-
-        // ── Initial scope: (fieldName → isEncrypted) in parent declaration order ──
-        // LinkedHashMap preserves insertion order (mirrors field declaration order).
-        Map<String, Boolean> scope = new LinkedHashMap<>();
-        for (JsonTField f : parent.fields()) {
-            scope.put(f.name(), f.sensitive());
-        }
-
-        for (SchemaOperation op : operations) {
-
-            // ── Decrypt ──────────────────────────────────────────────────────────
-            if (op instanceof SchemaOperation.Decrypt d) {
-                for (String fname : d.fields()) {
-                    if (!scope.containsKey(fname)) {
-                        throw new BuildError("decrypt references field '" + fname
-                                + "' which is not in scope at this point");
-                    }
-                    if (!scope.get(fname)) {
-                        throw new BuildError("decrypt references field '" + fname
-                                + "' which is not marked sensitive (~) in parent '" + parent.name() + "'");
-                    }
-                    scope.put(fname, false); // mark as decrypted (plain)
-                }
-
-            // ── Project ──────────────────────────────────────────────────────────
-            } else if (op instanceof SchemaOperation.Project p) {
-                for (FieldPath path : p.paths()) {
-                    String name = path.dotJoined();
-                    if (name.contains(".")) continue; // nested: skip
-                    if (!scope.containsKey(name)) {
-                        throw new BuildError("project references field '" + name
-                                + "' which is not in scope at this point");
-                    }
-                }
-                // Retain only the projected fields (in their original scope order).
-                scope.keySet().retainAll(
-                        p.paths().stream()
-                                .map(FieldPath::dotJoined)
-                                .filter(n -> !n.contains("."))
-                                .toList());
-
-            // ── Exclude ──────────────────────────────────────────────────────────
-            } else if (op instanceof SchemaOperation.Exclude e) {
-                for (FieldPath path : e.paths()) {
-                    String name = path.dotJoined();
-                    if (name.contains(".")) continue;
-                    if (!scope.containsKey(name)) {
-                        throw new BuildError("exclude references field '" + name
-                                + "' which is not in scope at this point");
-                    }
-                    scope.remove(name);
-                }
-
-            // ── Rename ───────────────────────────────────────────────────────────
-            } else if (op instanceof SchemaOperation.Rename r) {
-                for (RenamePair pair : r.pairs()) {
-                    String from = pair.from().dotJoined();
-                    if (from.contains(".")) continue;
-                    String to = pair.to();
-                    if (!scope.containsKey(from)) {
-                        throw new BuildError("rename references field '" + from
-                                + "' which is not in scope at this point");
-                    }
-                    if (scope.containsKey(to)) {
-                        throw new BuildError("rename to '" + to
-                                + "' conflicts with an existing field in scope");
-                    }
-                    boolean wasEncrypted = scope.remove(from);
-                    scope.put(to, wasEncrypted);
-                }
-
-            // ── Transform ────────────────────────────────────────────────────────
-            } else if (op instanceof SchemaOperation.Transform t) {
-                for (String ref : collectFieldRefs(t.expr())) {
-                    if (!scope.containsKey(ref)) {
-                        throw new BuildError("transform expression references field '" + ref
-                                + "' which is not in scope at this point");
-                    }
-                    if (scope.get(ref)) {
-                        throw new BuildError("transform expression references encrypted field '" + ref
-                                + "'; add decrypt(" + ref + ") first");
-                    }
-                }
-                String tgt = t.target().leaf();
-                if (!scope.containsKey(tgt)) {
-                    throw new BuildError("transform target '" + tgt
-                            + "' is not in scope at this point");
-                }
-                if (scope.get(tgt)) {
-                    throw new BuildError("transform target '" + tgt
-                            + "' is encrypted; add decrypt(" + tgt + ") first");
-                }
-
-            // ── Filter ───────────────────────────────────────────────────────────
-            } else if (op instanceof SchemaOperation.Filter f) {
-                for (String ref : collectFieldRefs(f.predicate())) {
-                    if (!scope.containsKey(ref)) {
-                        throw new BuildError("filter expression references field '" + ref
-                                + "' which is not in scope at this point");
-                    }
-                    if (scope.get(ref)) {
-                        throw new BuildError("filter expression references encrypted field '" + ref
-                                + "'; add decrypt(" + ref + ") first");
-                    }
-                }
-            }
-        }
-    }
-
-    /** Collect all top-level field names referenced by an expression tree. */
-    private static List<String> collectFieldRefs(JsonTExpression expr) {
-        List<String> refs = new ArrayList<>();
-        collectFieldRefsInto(expr, refs);
-        return refs;
-    }
-
-    private static void collectFieldRefsInto(JsonTExpression expr, List<String> refs) {
-        if (expr instanceof JsonTExpression.FieldRef ref) {
-            refs.add(ref.path().leaf());
-        } else if (expr instanceof JsonTExpression.Binary bin) {
-            collectFieldRefsInto(bin.lhs(), refs);
-            collectFieldRefsInto(bin.rhs(), refs);
-        } else if (expr instanceof JsonTExpression.Unary un) {
-            collectFieldRefsInto(un.operand(), refs);
-        }
-        // Literal: no refs
+        ScopeValidation.validate(operations, parent.fields(), parent.name());
     }
 
     @Override

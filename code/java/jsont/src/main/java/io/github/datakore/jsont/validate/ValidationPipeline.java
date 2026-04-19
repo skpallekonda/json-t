@@ -1,5 +1,6 @@
 package io.github.datakore.jsont.validate;
 
+import io.github.datakore.jsont.builder.SchemaResolver;
 import io.github.datakore.jsont.diagnostic.DiagnosticEvent;
 import io.github.datakore.jsont.diagnostic.DiagnosticEventKind;
 import io.github.datakore.jsont.diagnostic.DiagnosticSink;
@@ -49,20 +50,31 @@ public final class ValidationPipeline {
     private final List<DiagnosticSink> sinks;
     private final int workers;
     private final int bufferCapacity;
+    /** Optional crypto context — enables Decrypt operations during row processing. */
+    private final io.github.datakore.jsont.crypto.CryptoContext cryptoContext;
+    /** Registry for resolving nested object schema references during promotion. */
+    private final SchemaResolver registry;
 
     ValidationPipeline(List<JsonTField> fields,
             JsonTValidationBlock validation,
             String schemaName,
             List<DiagnosticSink> sinks,
             int workers,
-            int bufferCapacity) {
+            int bufferCapacity,
+            io.github.datakore.jsont.crypto.CryptoContext cryptoContext,
+            SchemaResolver registry) {
         this.fields = List.copyOf(fields);
         this.validation = validation;
         this.schemaName = schemaName;
         this.sinks = List.copyOf(sinks);
         this.workers = workers;
         this.bufferCapacity = bufferCapacity;
+        this.cryptoContext = cryptoContext;
+        this.registry = registry;
     }
+
+    /** Returns the {@link io.github.datakore.jsont.crypto.CryptoContext} if configured, or {@code null}. */
+    public io.github.datakore.jsont.crypto.CryptoContext cryptoContext() { return cryptoContext; }
 
     public static ValidationPipelineBuilder builder(JsonTSchema schema) {
         return new ValidationPipelineBuilder(schema);
@@ -361,10 +373,15 @@ public final class ValidationPipeline {
      * (including already-promoted variants) are passed through unchanged.
      */
     private JsonTRow promoteRow(JsonTRow row, List<DiagnosticEvent> events, int rowIdx) {
-        List<JsonTValue> promoted = new ArrayList<>(row.values().size());
-        for (int i = 0; i < row.values().size(); i++) {
-            JsonTValue val = row.values().get(i);
-            JsonTField field = i < fields.size() ? fields.get(i) : null;
+        return row.withValues(promoteValues(row.values(), fields, events, rowIdx));
+    }
+
+    private List<JsonTValue> promoteValues(List<JsonTValue> values, List<JsonTField> fieldDefs,
+                                           List<DiagnosticEvent> events, int rowIdx) {
+        List<JsonTValue> promoted = new ArrayList<>(values.size());
+        for (int i = 0; i < values.size(); i++) {
+            JsonTValue val = values.get(i);
+            JsonTField field = i < fieldDefs.size() ? fieldDefs.get(i) : null;
             if (field != null && field.kind().isScalar()) {
                 // Sensitive fields use plain base64 on the wire — the ~
                 // schema marker is the authority, not a string prefix.
@@ -375,8 +392,6 @@ public final class ValidationPipeline {
                         byte[] bytes = java.util.Base64.getDecoder().decode(p.value());
                         val = JsonTValue.encrypted(bytes);
                     } catch (IllegalArgumentException e) {
-                        // Not valid base64 — emit a fatal FormatViolation so the
-                        // row is rejected. Leave val as-is (plain string) for context.
                         events.add(DiagnosticEvent.fatal(
                                 new DiagnosticEventKind.ConstraintViolation(
                                         field.name(),
@@ -389,10 +404,17 @@ public final class ValidationPipeline {
                 }
             } else if (field != null && field.kind().isAnyOf()) {
                 val = promoteAnyOf(val, field.anyOfVariants());
+            } else if (field != null && field.kind().isObject() && val instanceof JsonTValue.Array arr) {
+                // Recurse into nested object values using the referenced schema's field list.
+                if (registry != null) {
+                    registry.resolve(field.objectRef()).ifPresent(nested ->
+                            promoted.add(JsonTValue.array(promoteValues(arr.elements(), nested.fields(), events, rowIdx))));
+                    continue;
+                }
             }
             promoted.add(val);
         }
-        return row.withValues(promoted);
+        return promoted;
     }
 
     /**

@@ -27,13 +27,30 @@ public final class EncryptHeaderParser {
     private EncryptHeaderParser() {}
 
     /**
-     * If {@code row} is a valid {@code EncryptHeader} row, returns the derived
-     * {@link CryptoContext}; otherwise returns {@link Optional#empty()}.
+     * Raw wire data extracted from an {@code EncryptHeader} row.
+     * The caller supplies a {@link io.github.datakore.jsont.crypto.CryptoConfig}
+     * and calls {@link CryptoContext#forDecrypt} to complete context construction.
+     *
+     * @param version the packed version field (u16)
+     * @param encDek  the wrapped DEK bytes as read from the wire
+     */
+    public record ParsedHeader(int version, byte[] encDek) {
+        public ParsedHeader {
+            encDek = encDek.clone();
+        }
+    }
+
+    /**
+     * If {@code row} is a valid {@code EncryptHeader} row, returns the parsed
+     * header wire data; otherwise returns {@link Optional#empty()}.
+     *
+     * <p>The caller is responsible for constructing a {@link CryptoContext} via
+     * {@link CryptoContext#forDecrypt(int, byte[], io.github.datakore.jsont.crypto.CryptoConfig)}.
      *
      * @param row the candidate row (typically the first row of a stream)
-     * @return a {@code CryptoContext} if the row matches, or empty
+     * @return the parsed header data if the row matches, or empty
      */
-    public static Optional<CryptoContext> tryParse(JsonTRow row) {
+    public static Optional<ParsedHeader> tryParse(JsonTRow row) {
         if (row.size() != 4) return Optional.empty();
 
         // Field 0: type constant "ENCRYPTED_HEADER"
@@ -61,7 +78,7 @@ public final class EncryptHeaderParser {
 
         if (encDek.length != expectedLen) return Optional.empty();
 
-        return Optional.of(new CryptoContext(version, encDek));
+        return Optional.of(new ParsedHeader(version, encDek));
     }
 
     /**

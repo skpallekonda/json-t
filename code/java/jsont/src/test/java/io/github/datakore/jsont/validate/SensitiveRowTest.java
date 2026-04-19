@@ -25,6 +25,10 @@ package io.github.datakore.jsont.validate;
 
 import io.github.datakore.jsont.builder.JsonTFieldBuilder;
 import io.github.datakore.jsont.builder.JsonTSchemaBuilder;
+import io.github.datakore.jsont.crypto.AlgoVersion;
+import io.github.datakore.jsont.crypto.CryptoContext;
+import io.github.datakore.jsont.crypto.KekMode;
+import io.github.datakore.jsont.crypto.PassthroughCryptoConfig;
 import io.github.datakore.jsont.diagnostic.DiagnosticEvent;
 import io.github.datakore.jsont.internal.diagnostic.MemorySink;
 import io.github.datakore.jsont.model.JsonTRow;
@@ -71,18 +75,31 @@ class SensitiveRowTest {
         return b64Wire(plaintext.getBytes());
     }
 
+    private static final PassthroughCryptoConfig PASSTHROUGH = new PassthroughCryptoConfig();
+
+    /** Minimal decrypt context backed by passthrough key wrapping — satisfies the sensitive-field guard. */
+    static CryptoContext decCtx() throws Exception {
+        try (CryptoContext enc = CryptoContext.forEncrypt(AlgoVersion.AES_GCM, KekMode.PUBLIC_KEY, PASSTHROUGH)) {
+            return CryptoContext.forDecrypt(enc.version(), enc.encDek(), PASSTHROUGH);
+        }
+    }
+
     /** Run rows silently, return only clean rows. */
-    static List<JsonTRow> runSilent(JsonTSchema schema, List<JsonTRow> rows) {
-        var pipeline = ValidationPipeline.builder(schema).withoutConsole().build();
-        return pipeline.validateRows(rows);
+    static List<JsonTRow> runSilent(JsonTSchema schema, List<JsonTRow> rows) throws Exception {
+        try (CryptoContext ctx = decCtx()) {
+            var pipeline = ValidationPipeline.builder(schema).withoutConsole().withCryptoContext(ctx).build();
+            return pipeline.validateRows(rows);
+        }
     }
 
     /** Run rows capturing all diagnostic events. */
-    static RunResult runWithEvents(JsonTSchema schema, List<JsonTRow> rows) {
+    static RunResult runWithEvents(JsonTSchema schema, List<JsonTRow> rows) throws Exception {
         var sink = new MemorySink();
-        var pipeline = ValidationPipeline.builder(schema).withoutConsole().withSink(sink).build();
-        List<JsonTRow> clean = pipeline.validateRows(rows);
-        return new RunResult(clean, sink.events());
+        try (CryptoContext ctx = decCtx()) {
+            var pipeline = ValidationPipeline.builder(schema).withoutConsole().withSink(sink).withCryptoContext(ctx).build();
+            List<JsonTRow> clean = pipeline.validateRows(rows);
+            return new RunResult(clean, sink.events());
+        }
     }
 
     record RunResult(List<JsonTRow> clean, List<DiagnosticEvent> events) {}
