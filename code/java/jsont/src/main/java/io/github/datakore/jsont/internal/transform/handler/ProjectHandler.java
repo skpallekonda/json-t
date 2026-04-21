@@ -30,12 +30,12 @@ public final class ProjectHandler implements RowOperationHandler, FieldResolutio
             CryptoContext ctx) throws JsonTError.Transform {
         SchemaOperation.Project project = (SchemaOperation.Project) op;
         for (FieldPath path : project.paths()) {
-            if (!working.containsKey(path.leaf()))
-                throw new JsonTError.Transform.FieldNotFound(path.leaf());
+            if (!working.containsKey(path.dotJoined()))
+                throw new JsonTError.Transform.FieldNotFound(path.dotJoined());
         }
         LinkedHashMap<String, JsonTValue> projected = new LinkedHashMap<>();
         for (FieldPath path : project.paths()) {
-            projected.put(path.leaf(), working.get(path.leaf()));
+            projected.put(path.dotJoined(), working.get(path.dotJoined()));
         }
         return projected;
     }
@@ -44,7 +44,7 @@ public final class ProjectHandler implements RowOperationHandler, FieldResolutio
     public List<String> apply(SchemaOperation op, List<String> fieldNames) {
         SchemaOperation.Project project = (SchemaOperation.Project) op;
         return project.paths().stream()
-                .map(FieldPath::leaf)
+                .map(FieldPath::dotJoined)
                 .collect(Collectors.toCollection(ArrayList::new));
     }
 }

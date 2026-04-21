@@ -159,6 +159,7 @@ impl SchemaInferrer {
             name:       self.schema_name.clone(),
             kind:       SchemaKind::Straight { fields },
             validation: None,
+            resolved:   None,
         })
     }
 }

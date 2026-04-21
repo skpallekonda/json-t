@@ -94,7 +94,7 @@ class StreamingParserTest {
         // Nested {inner} split across chunks
         List<JsonTRow> rows = collect("{1,{2,3}}", 2);
         assertEquals(1, rows.size());
-        assertInstanceOf(JsonTValue.Array.class, rows.get(0).get(1));
+        assertInstanceOf(JsonTValue.Object.class, rows.get(0).get(1));
     }
 
     // ── Three-byte chunk boundary ─────────────────────────────────────────────

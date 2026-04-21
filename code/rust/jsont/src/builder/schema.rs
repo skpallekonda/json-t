@@ -132,7 +132,7 @@ impl JsonTSchemaBuilder {
             }
         };
 
-        Ok(JsonTSchema { name, kind, validation: self.validation })
+        Ok(JsonTSchema { name, kind, validation: self.validation, resolved: None })
     }
 }
 

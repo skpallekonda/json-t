@@ -18,7 +18,7 @@ public sealed interface JsonTValue
                 JsonTValue.Bool,
                 JsonTNumber,
                 JsonTString,
-                JsonTValue.Enum, JsonTValue.Array, JsonTValue.Encrypted {
+                JsonTValue.Enum, JsonTValue.Array, JsonTValue.Object, JsonTValue.Encrypted {
 
     // ─── Nested record implementations ────────────────────────────────────────
 
@@ -42,6 +42,19 @@ public sealed interface JsonTValue
     record Array(List<JsonTValue> elements) implements JsonTValue {
         public Array { elements = List.copyOf(elements); }
         @Override public String toString() { return elements.toString(); }
+    }
+
+    /**
+     * A nested object value — positional fields matching a referenced schema.
+     *
+     * <p>Parsed from {@code { ... }} object literals in data rows.
+     * The inner {@link JsonTRow} carries the schema name (when known) so that
+     * downstream operations can resolve field metadata without re-walking the
+     * derivation chain.
+     */
+    record Object(JsonTRow row) implements JsonTValue {
+        public Object { Objects.requireNonNull(row, "row must not be null"); }
+        @Override public String toString() { return row.toString(); }
     }
 
     /**
@@ -77,6 +90,7 @@ public sealed interface JsonTValue
     static JsonTValue d128(java.math.BigDecimal v) { return new JsonTNumber.D128(v); }
     static JsonTValue text(String v) { return new JsonTString.Plain(v); }
     static JsonTValue array(List<JsonTValue> elements) { return new Array(elements); }
+    static JsonTValue object(JsonTRow row) { return new Object(row); }
     static JsonTValue encrypted(byte[] envelope) { return new Encrypted(envelope); }
 
     // ── Semantic string factories ──────────────────────────────────────────────

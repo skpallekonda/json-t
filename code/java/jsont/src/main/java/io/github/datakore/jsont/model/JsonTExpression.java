@@ -54,7 +54,7 @@ public sealed interface JsonTExpression
 
         @Override
         public JsonTValue evaluate(EvalContext ctx) {
-            return ctx.lookup(path.leaf())
+            return ctx.lookup(path.dotJoined())
                     .orElseThrow(() -> new JsonTError.Eval("Unbound field: " + path));
         }
     }

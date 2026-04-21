@@ -76,6 +76,7 @@ pub fn build_encrypt_header_row(ctx: &CryptoContext) -> JsonTRow {
             JsonTValue::Number(JsonTNumber::U32(ctx.enc_dek.len() as u32)),
             JsonTValue::Str(JsonTString::Plain(enc_dek_b64)),
         ],
+        schema: None,
     }
 }
 

@@ -5,4 +5,5 @@ pub mod constraint;
 pub mod validation;
 pub mod enumdef;
 pub mod data;
+pub mod resolved;
 pub(crate) mod format;

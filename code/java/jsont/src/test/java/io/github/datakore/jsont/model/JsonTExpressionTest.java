@@ -34,9 +34,9 @@ class JsonTExpressionTest {
     }
 
     @Test
-    void field_resolvesLeafSegment() {
+    void field_resolvesDotJoinedPath() {
         var expr = field(FieldPath.of("address", "city"));
-        var ctx  = EvalContext.create().bind("city", text("Rome"));
+        var ctx  = EvalContext.create().bind("address.city", text("Rome"));
         assertEquals(text("Rome"), expr.evaluate(ctx));
     }
 

@@ -124,7 +124,7 @@ public final class SchemaValidator {
         for (SchemaOperation op : schema.operations()) {
             if (op instanceof SchemaOperation.Rename rename) {
                 for (RenamePair pair : rename.pairs()) {
-                    String oldName = pair.from().leaf();
+                    String oldName = pair.from().dotJoined();
                     if (!currentFields.contains(oldName)) {
                         throw new JsonTError.SchemaInvalid(
                                 "Rename references unknown field: " + oldName);
@@ -134,7 +134,7 @@ public final class SchemaValidator {
                 }
             } else if (op instanceof SchemaOperation.Exclude exclude) {
                 for (FieldPath path : exclude.paths()) {
-                    String name = path.leaf();
+                    String name = path.dotJoined();
                     if (!currentFields.contains(name)) {
                         throw new JsonTError.SchemaInvalid(
                                 "Exclude references unknown field: " + name);
@@ -143,14 +143,14 @@ public final class SchemaValidator {
                 }
             } else if (op instanceof SchemaOperation.Project project) {
                 for (FieldPath path : project.paths()) {
-                    if (!currentFields.contains(path.leaf())) {
+                    if (!currentFields.contains(path.dotJoined())) {
                         throw new JsonTError.SchemaInvalid(
-                                "Project references unknown field: " + path.leaf());
+                                "Project references unknown field: " + path.dotJoined());
                     }
                 }
                 List<String> projected = new ArrayList<>();
                 for (FieldPath path : project.paths()) {
-                    projected.add(path.leaf());
+                    projected.add(path.dotJoined());
                 }
                 currentFields = projected;
             } else if (op instanceof SchemaOperation.Filter filter) {
@@ -161,7 +161,7 @@ public final class SchemaValidator {
                     }
                 }
             } else if (op instanceof SchemaOperation.Transform transform) {
-                String target = transform.target().leaf();
+                String target = transform.target().dotJoined();
                 if (!currentFields.contains(target)) {
                     throw new JsonTError.SchemaInvalid(
                             "Transform references unknown field: " + target);
@@ -204,10 +204,10 @@ public final class SchemaValidator {
         }
         for (List<FieldPath> group : vb.uniqueKeys()) {
             for (FieldPath path : group) {
-                if (!fieldNames.contains(path.leaf())) {
+                if (!fieldNames.contains(path.dotJoined())) {
                     throw new JsonTError.SchemaInvalid(
                             "[" + schemaName + "] UniqueKey references unknown field: "
-                                    + path.leaf());
+                                    + path.dotJoined());
                 }
             }
         }

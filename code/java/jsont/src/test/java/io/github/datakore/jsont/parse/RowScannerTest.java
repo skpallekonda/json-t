@@ -110,11 +110,11 @@ class RowScannerTest {
         assertEquals(3, ((JsonTValue.Array) v).elements().size());
     }
 
-    @Test void parseRows_nestedObject_asArray() {
+    @Test void parseRows_nestedObject_asObject() {
         List<JsonTRow> rows = collectRows("{1,{2,\"inner\"}}");
         JsonTValue v = rows.get(0).get(1);
-        assertInstanceOf(JsonTValue.Array.class, v); // nested {} becomes Array
-        List<JsonTValue> inner = ((JsonTValue.Array) v).elements();
+        assertInstanceOf(JsonTValue.Object.class, v);
+        JsonTRow inner = ((JsonTValue.Object) v).row();
         assertEquals(2, inner.size());
         assertEquals(d64(2.0), inner.get(0));
         assertEquals(text("inner"), inner.get(1));

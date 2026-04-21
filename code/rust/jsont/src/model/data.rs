@@ -513,18 +513,28 @@ impl JsonTNumber {
 }
 
 /// A single data row — an ordered sequence of values forming one data row.
+///
+/// `schema` is stamped with the schema name after transformation, allowing
+/// downstream code to identify which schema this row conforms to without
+/// re-walking the derivation chain.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonTRow {
     pub fields: Vec<JsonTValue>,
+    /// The name of the schema this row conforms to, if known.
+    pub schema: Option<String>,
 }
 
 impl JsonTRow {
     pub fn new(fields: Vec<JsonTValue>) -> Self {
-        Self { fields }
+        Self { fields, schema: None }
+    }
+
+    pub fn new_with_schema(fields: Vec<JsonTValue>, schema: impl Into<String>) -> Self {
+        Self { fields, schema: Some(schema.into()) }
     }
 
     pub fn empty() -> Self {
-        Self { fields: Vec::new() }
+        Self { fields: Vec::new(), schema: None }
     }
 
     pub fn len(&self) -> usize {

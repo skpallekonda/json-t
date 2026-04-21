@@ -21,6 +21,8 @@
 //   See OperationScopeValidator for the operation-by-operation checks.
 // =============================================================================
 
+pub(crate) mod resolve;
+
 use std::collections::HashSet;
 
 use crate::crypto::CipherSession;
@@ -28,8 +30,190 @@ use crate::{EvalContext, Evaluatable, RowTransformer, SchemaRegistry};
 use crate::error::{EvalError, JsonTError, TransformError};
 use crate::model::data::{JsonTRow, JsonTString, JsonTValue};
 use crate::model::field::JsonTFieldKind;
+use crate::model::resolved::{PrecomputedBinding, ResolvedSchema, ResolvedStep};
 use crate::model::schema::{FieldPath, JsonTSchema, SchemaKind, SchemaOperation};
 use crate::model::validation::{JsonTExpression, JsonTRule, JsonTValidationBlock};
+
+// =============================================================================
+// WorkingEntry — per-row mutable working state for derived-schema transforms
+// =============================================================================
+
+/// One field slot in the mutable working state during `apply_resolved`.
+///
+/// `name` reflects the current effective field name (may differ from the
+/// original if a Rename step ran before this point).
+pub(crate) struct WorkingEntry {
+    pub name:  String,
+    pub value: JsonTValue,
+}
+
+
+// =============================================================================
+// Resolved-path per-row transform
+// =============================================================================
+
+fn apply_resolved_inner(
+    schema_name: &str,
+    resolved: &ResolvedSchema,
+    operations: &[SchemaOperation],
+    row: JsonTRow,
+    session: Option<&CipherSession>,
+) -> Result<JsonTRow, JsonTError> {
+    let effective_fields = resolved.effective_fields.as_deref()
+        .ok_or_else(|| JsonTError::from(TransformError::UnknownSchema(
+            format!("schema '{schema_name}': resolved effective_fields missing")
+        )))?;
+
+    if effective_fields.len() != row.len() {
+        return Err(TransformError::FieldNotFound(format!(
+            "row has {} values but schema '{}' has {} effective fields",
+            row.len(), schema_name, effective_fields.len()
+        )).into());
+    }
+
+    let mut working: Vec<WorkingEntry> = effective_fields
+        .iter()
+        .zip(row.fields)
+        .map(|(f, v)| WorkingEntry { name: f.name.clone(), value: v })
+        .collect();
+
+    // Pair each ResolvedStep with its SchemaOperation to access the expression.
+    for (step, op) in resolved.steps.iter().zip(operations.iter()) {
+        apply_resolved_step(step, op, &mut working, session)?;
+    }
+
+    let fields: Vec<JsonTValue> = working.into_iter().map(|e| e.value).collect();
+    Ok(JsonTRow::new_with_schema(fields, schema_name))
+}
+
+fn apply_resolved_step(
+    step: &ResolvedStep,
+    op: &SchemaOperation,
+    working: &mut Vec<WorkingEntry>,
+    session: Option<&CipherSession>,
+) -> Result<(), JsonTError> {
+    match (step, op) {
+        (ResolvedStep::Rename { renames }, _) => {
+            for (pos, new_name) in renames {
+                if let Some(entry) = working.get_mut(*pos) {
+                    entry.name = new_name.clone();
+                }
+            }
+        }
+
+        (ResolvedStep::Reshape { keep }, _) => {
+            // Gather kept entries by original position.
+            let mut old: Vec<Option<WorkingEntry>> =
+                working.drain(..).map(Some).collect();
+            for &i in keep {
+                if let Some(entry) = old.get_mut(i).and_then(Option::take) {
+                    working.push(entry);
+                }
+            }
+        }
+
+        (ResolvedStep::Filter { bindings }, SchemaOperation::Filter { expr, .. }) => {
+            let ctx = build_eval_ctx_from_bindings(working, bindings);
+            let result = expr.evaluate(&ctx).map_err(|e| match e {
+                JsonTError::Eval(eval_err) =>
+                    JsonTError::from(TransformError::FilterFailed(eval_err)),
+                other => other,
+            })?;
+            match result {
+                JsonTValue::Bool(true)  => {}
+                JsonTValue::Bool(false) => return Err(TransformError::Filtered.into()),
+                other => return Err(TransformError::FilterFailed(EvalError::InvalidExpression(
+                    format!("filter must return bool, got {}", other.type_name()),
+                )).into()),
+            }
+        }
+
+        (ResolvedStep::Transform { target_pos, bindings },
+         SchemaOperation::Transform { expr, .. }) => {
+            let ctx = build_eval_ctx_from_bindings(working, bindings);
+            let field_name = working
+                .get(*target_pos)
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            let new_val = expr.evaluate(&ctx).map_err(|e| match e {
+                JsonTError::Eval(eval_err) => JsonTError::from(TransformError::TransformFailed {
+                    field:  field_name.clone(),
+                    source: eval_err,
+                }),
+                other => other,
+            })?;
+            if let Some(entry) = working.get_mut(*target_pos) {
+                entry.value = new_val;
+            }
+        }
+
+        (ResolvedStep::Decrypt { positions }, _) => {
+            let session = match session {
+                Some(s) => s,
+                None => return Err(TransformError::DecryptFailed {
+                    field:  String::new(),
+                    reason: "Decrypt step requires a CipherSession; \
+                             use transform_with_session instead of transform".into(),
+                }.into()),
+            };
+            for (pos, field_name) in positions {
+                let entry = match working.get_mut(*pos) {
+                    Some(e) => e,
+                    None    => continue,
+                };
+                let new_val = match &entry.value {
+                    JsonTValue::Encrypted(_) => {
+                        let plaintext = entry.value.decrypt_bytes(field_name, session)
+                            .map_err(|e| TransformError::DecryptFailed {
+                                field: field_name.clone(), reason: e.to_string(),
+                            })?
+                            .expect("Encrypted variant yielded None");
+                        String::from_utf8(plaintext)
+                            .map(|s| JsonTValue::Str(JsonTString::Plain(s)))
+                            .map_err(|e| TransformError::DecryptFailed {
+                                field:  field_name.clone(),
+                                reason: format!("decrypted bytes are not valid UTF-8: {e}"),
+                            })?
+                    }
+                    other => other.clone(),
+                };
+                entry.value = new_val;
+            }
+        }
+
+        // Mismatched step/op pair — should never happen if resolution is correct.
+        _ => {}
+    }
+    Ok(())
+}
+
+fn build_eval_ctx_from_bindings(
+    working: &[WorkingEntry],
+    bindings: &[PrecomputedBinding],
+) -> EvalContext {
+    bindings.iter().fold(EvalContext::new(), |ctx, b| {
+        let value = resolve_binding_path(&b.path, working);
+        ctx.bind(b.key.clone(), value.cloned().unwrap_or(JsonTValue::Null))
+    })
+}
+
+fn resolve_binding_path<'a>(
+    path: &[usize],
+    working: &'a [WorkingEntry],
+) -> Option<&'a JsonTValue> {
+    if path.is_empty() { return None; }
+    let top = working.get(path[0])?;
+    if path.len() == 1 { return Some(&top.value); }
+    // Nested Object descent for multi-segment paths.
+    let mut current = &top.value;
+    for &sub_idx in &path[1..] {
+        match current {
+            JsonTValue::Object(row) => { current = row.fields.get(sub_idx)?; }
+            _ => return None,
+        }
+    }
+    Some(current)
+}
 
 // =============================================================================
 // Command pattern — RowOperationHandler
@@ -431,6 +615,15 @@ impl JsonTSchema {
             SchemaKind::Straight { .. } => Ok(row),
 
             SchemaKind::Derived { from, operations } => {
+                // Fast path: use pre-computed resolution (populated by from_namespace).
+                if let Some(resolved) = &self.resolved {
+                    return apply_resolved_inner(
+                        &self.name, resolved, operations, row, session,
+                    );
+                }
+
+                // Fallback: per-row chain walk for manually built registries
+                // that have not been resolved via SchemaRegistry::from_namespace.
                 let parent = registry
                     .get(from)
                     .ok_or_else(|| TransformError::UnknownSchema(from.clone()))?;

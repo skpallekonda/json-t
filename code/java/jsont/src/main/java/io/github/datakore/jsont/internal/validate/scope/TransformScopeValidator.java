@@ -31,7 +31,7 @@ public final class TransformScopeValidator implements OperationScopeValidator {
                 throw new BuildError("transform expression references encrypted field '" + ref
                         + "'; add decrypt(" + ref + ") first");
         }
-        String tgt = t.target().leaf();
+        String tgt = t.target().dotJoined();
         if (!scope.containsKey(tgt))
             throw new BuildError("transform target '" + tgt + "' is not in scope");
         if (scope.get(tgt))

@@ -29,7 +29,7 @@ public final class TransformHandler implements RowOperationHandler {
             LinkedHashMap<String, JsonTValue> working,
             CryptoContext ctx) throws JsonTError.Transform {
         SchemaOperation.Transform transform = (SchemaOperation.Transform) op;
-        String key = transform.target().leaf();
+        String key = transform.target().dotJoined();
         if (!working.containsKey(key)) throw new JsonTError.Transform.FieldNotFound(key);
         Set<String> needed = new HashSet<>(FieldRefCollector.collect(transform.expr()));
         EvalContext evalCtx = EvalContext.create();

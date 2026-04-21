@@ -18,7 +18,7 @@ public final class FieldRefCollector {
 
     private static void collectInto(JsonTExpression expr, List<String> refs) {
         if (expr instanceof JsonTExpression.FieldRef ref) {
-            refs.add(ref.path().leaf());
+            refs.add(ref.path().dotJoined());
         } else if (expr instanceof JsonTExpression.Binary bin) {
             collectInto(bin.lhs(), refs);
             collectInto(bin.rhs(), refs);

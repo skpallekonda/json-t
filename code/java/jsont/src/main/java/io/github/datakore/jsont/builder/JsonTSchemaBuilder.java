@@ -182,7 +182,7 @@ public final class JsonTSchemaBuilder {
                     }
                 }
                 // Check the target field itself
-                String tgt = t.target().leaf();
+                String tgt = t.target().dotJoined();
                 if (knownSensitive.contains(tgt) && !decrypted.contains(tgt)) {
                     throw new BuildError(
                             "field '" + tgt + "' is encrypted; add decrypt(" + tgt

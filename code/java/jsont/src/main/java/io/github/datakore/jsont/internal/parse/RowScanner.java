@@ -410,7 +410,7 @@ public final class RowScanner {
 
         JsonTValue parseNestedObject() {
             JsonTRow inner = parseRow();
-            return JsonTValue.array(inner.values());
+            return JsonTValue.object(inner);
         }
 
         JsonTValue parseEnumConstant() {

@@ -38,7 +38,7 @@ public class RuleChecker {
             } else if (rule instanceof JsonTRule.ConditionalRequirement cr) {
                 needed.addAll(collectFieldRefs(cr.condition()));
                 // required_fields are looked up via ctx so they must be bound too.
-                for (FieldPath fp : cr.requiredFields()) needed.add(fp.leaf());
+                for (FieldPath fp : cr.requiredFields()) needed.add(fp.dotJoined());
             }
         }
         EvalContext ctx = EvalContext.create();
@@ -82,7 +82,7 @@ public class RuleChecker {
                     if (condResult instanceof JsonTValue.Bool b && b.value()) {
                         List<String> missing = new ArrayList<>();
                         for (FieldPath fp : cr.requiredFields()) {
-                            String name = fp.leaf();
+                            String name = fp.dotJoined();
                             JsonTValue val = ctx.lookup(name).orElse(null);
                             if (val == null || val instanceof JsonTValue.Null
                                     || val instanceof JsonTValue.Unspecified) {
@@ -115,7 +115,7 @@ public class RuleChecker {
             return lit.value().toString();
         }
         if (expr instanceof JsonTExpression.FieldRef ref) {
-            return ref.path().leaf();
+            return ref.path().dotJoined();
         }
         if (expr instanceof JsonTExpression.Binary bin) {
             return "(" + stringifyExpr(bin.lhs()) + " " + symbolOf(bin.op()) + " " + stringifyExpr(bin.rhs()) + ")";
@@ -164,7 +164,7 @@ public class RuleChecker {
         if (expr instanceof JsonTExpression.Literal) {
             // no refs
         } else if (expr instanceof JsonTExpression.FieldRef ref) {
-            refs.add(ref.path().leaf());
+            refs.add(ref.path().dotJoined());
         } else if (expr instanceof JsonTExpression.Binary bin) {
             collectFieldRefsInto(bin.lhs(), refs);
             collectFieldRefsInto(bin.rhs(), refs);

@@ -5,6 +5,7 @@ import io.github.datakore.jsont.crypto.CryptoError;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * An ordered, positional row of {@link JsonTValue}s — the runtime data unit.
@@ -25,10 +26,11 @@ import java.util.Objects;
  *   row.index()    // 0L
  * }</pre>
  */
-public record JsonTRow(long index, List<JsonTValue> values) {
+public record JsonTRow(long index, List<JsonTValue> values, Optional<String> schema) {
 
     public JsonTRow {
         Objects.requireNonNull(values, "values must not be null");
+        Objects.requireNonNull(schema, "schema must not be null");
         values = List.copyOf(values);
     }
 
@@ -36,17 +38,22 @@ public record JsonTRow(long index, List<JsonTValue> values) {
 
     /** Creates a row at index 0 from varargs. */
     public static JsonTRow of(JsonTValue... values) {
-        return new JsonTRow(0L, List.of(values));
+        return new JsonTRow(0L, List.of(values), Optional.empty());
     }
 
     /** Creates a row at the specified index from varargs. */
     public static JsonTRow at(long index, JsonTValue... values) {
-        return new JsonTRow(index, List.of(values));
+        return new JsonTRow(index, List.of(values), Optional.empty());
     }
 
     /** Creates a row at the specified index from a list. */
     public static JsonTRow at(long index, List<JsonTValue> values) {
-        return new JsonTRow(index, values);
+        return new JsonTRow(index, values, Optional.empty());
+    }
+
+    /** Creates a row at the specified index from a list, stamped with a schema name. */
+    public static JsonTRow at(long index, List<JsonTValue> values, String schema) {
+        return new JsonTRow(index, values, Optional.of(schema));
     }
 
     // ─── Accessors ────────────────────────────────────────────────────────────
@@ -74,12 +81,17 @@ public record JsonTRow(long index, List<JsonTValue> values) {
 
     /** Returns a copy of this row with a different index (values unchanged). */
     public JsonTRow withIndex(long newIndex) {
-        return new JsonTRow(newIndex, values);
+        return new JsonTRow(newIndex, values, schema);
     }
 
     /** Returns a copy of this row with different values (index unchanged). */
     public JsonTRow withValues(List<JsonTValue> newValues) {
-        return new JsonTRow(index, newValues);
+        return new JsonTRow(index, newValues, schema);
+    }
+
+    /** Returns a copy of this row stamped with the given schema name. */
+    public JsonTRow withSchema(String schemaName) {
+        return new JsonTRow(index, values, Optional.of(schemaName));
     }
 
     // ── On-demand decrypt ─────────────────────────────────────────────────────

@@ -29,7 +29,7 @@ public final class ExcludeHandler implements RowOperationHandler, FieldResolutio
             CryptoContext ctx) throws JsonTError.Transform {
         SchemaOperation.Exclude exclude = (SchemaOperation.Exclude) op;
         for (FieldPath path : exclude.paths()) {
-            String key = path.leaf();
+            String key = path.dotJoined();
             if (!working.containsKey(key)) throw new JsonTError.Transform.FieldNotFound(key);
             working.remove(key);
         }
@@ -40,7 +40,7 @@ public final class ExcludeHandler implements RowOperationHandler, FieldResolutio
     public List<String> apply(SchemaOperation op, List<String> fieldNames) {
         SchemaOperation.Exclude exclude = (SchemaOperation.Exclude) op;
         List<String> result = new ArrayList<>(fieldNames);
-        exclude.paths().forEach(p -> result.remove(p.leaf()));
+        exclude.paths().forEach(p -> result.remove(p.dotJoined()));
         return result;
     }
 }

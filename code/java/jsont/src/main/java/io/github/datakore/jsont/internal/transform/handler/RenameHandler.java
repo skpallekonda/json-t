@@ -30,7 +30,7 @@ public final class RenameHandler implements RowOperationHandler, FieldResolution
             CryptoContext ctx) throws JsonTError.Transform {
         SchemaOperation.Rename rename = (SchemaOperation.Rename) op;
         for (RenamePair pair : rename.pairs()) {
-            String oldKey = pair.from().leaf();
+            String oldKey = pair.from().dotJoined();
             if (!working.containsKey(oldKey)) throw new JsonTError.Transform.FieldNotFound(oldKey);
             LinkedHashMap<String, JsonTValue> rebuilt = new LinkedHashMap<>();
             for (Map.Entry<String, JsonTValue> e : working.entrySet()) {
@@ -46,7 +46,7 @@ public final class RenameHandler implements RowOperationHandler, FieldResolution
         SchemaOperation.Rename rename = (SchemaOperation.Rename) op;
         List<String> result = new ArrayList<>(fieldNames);
         for (RenamePair pair : rename.pairs()) {
-            int idx = result.indexOf(pair.from().leaf());
+            int idx = result.indexOf(pair.from().dotJoined());
             if (idx >= 0) result.set(idx, pair.to());
         }
         return result;

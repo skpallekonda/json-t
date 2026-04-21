@@ -69,6 +69,9 @@ pub use model::field::{AnyOfVariant, JsonTField, JsonTFieldKind, JsonTFieldType,
 pub use model::namespace::{JsonTCatalog, JsonTNamespace};
 pub use model::schema::{FieldPath, JsonTSchema, RenamePair, SchemaKind, SchemaOperation};
 pub use model::validation::{BinaryOp, JsonTExpression, JsonTRule, JsonTValidationBlock, UnaryOp};
+pub use model::resolved::{
+    PrecomputedBinding, ResolvedRule, ResolvedSchema, ResolvedStep, ResolvedValidation,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Core traits
@@ -167,7 +170,7 @@ impl EvalContext {
 /// Used during derived-schema transformation chain resolution.
 #[derive(Debug, Default)]
 pub struct SchemaRegistry {
-    schemas: std::collections::HashMap<String, JsonTSchema>,
+    pub(crate) schemas: std::collections::HashMap<String, JsonTSchema>,
 }
 
 impl SchemaRegistry {
@@ -183,7 +186,7 @@ impl SchemaRegistry {
         self.schemas.get(name)
     }
 
-    /// Builds the registry from a namespace and validates everything like field refs 
+    /// Builds the registry from a namespace and validates everything like field refs
     /// and parent chains. If validation fails, it will return an Err.
     pub fn from_namespace(ns: &JsonTNamespace) -> Result<Self, JsonTError> {
         let mut registry = Self::new();
@@ -198,6 +201,8 @@ impl SchemaRegistry {
                 schema.validate_schema(&registry)?;
             }
         }
+        // Resolve all schemas: compute pre-computed execution descriptors once.
+        crate::transform::resolve::resolve_all(&mut registry)?;
         Ok(registry)
     }
 }

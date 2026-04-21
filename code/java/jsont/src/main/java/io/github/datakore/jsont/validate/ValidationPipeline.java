@@ -461,7 +461,7 @@ public final class ValidationPipeline {
     private List<String> buildUniqueKey(List<FieldPath> group, List<JsonTField> fieldList, List<JsonTValue> values) {
         List<String> key = new ArrayList<>();
         for (FieldPath path : group) {
-            String fieldName = path.leaf();
+            String fieldName = path.dotJoined();
             // Find the index of this field
             String described = "null";
             for (int i = 0; i < fieldList.size(); i++) {

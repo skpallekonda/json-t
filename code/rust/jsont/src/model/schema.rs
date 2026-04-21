@@ -8,10 +8,13 @@
 
 use crate::model::field::JsonTField;
 use crate::model::validation::JsonTValidationBlock;
+use crate::model::resolved::ResolvedSchema;
 
 /// A single schema definition within a catalog.
 ///
 /// The `name` is always present; `kind` carries the structural content.
+/// `resolved` is populated once by the namespace resolver after all schemas
+/// are parsed — it is `None` until that point.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonTSchema {
     /// The schema name (SCHEMAID — starts with an uppercase letter).
@@ -22,6 +25,10 @@ pub struct JsonTSchema {
 
     /// Optional validation rules attached to this schema.
     pub validation: Option<JsonTValidationBlock>,
+
+    /// Pre-computed execution descriptor.  Populated by the namespace resolver;
+    /// `None` until resolution runs.
+    pub resolved: Option<ResolvedSchema>,
 }
 
 /// Discriminates the two schema forms.
@@ -105,6 +112,20 @@ impl JsonTSchema {
         match &self.kind {
             SchemaKind::Straight { fields } => fields.iter().any(|f| f.kind.is_sensitive()),
             SchemaKind::Derived { .. } => false,
+        }
+    }
+
+    /// Returns the effective output fields for this schema after all operations.
+    ///
+    /// For straight schemas this is the declared field list.
+    /// For derived schemas this is `resolved.effective_fields`, which is populated
+    /// by the namespace resolver.  Returns `None` if resolution has not run yet.
+    pub fn effective_fields(&self) -> Option<&[JsonTField]> {
+        match &self.kind {
+            SchemaKind::Straight { fields } => Some(fields),
+            SchemaKind::Derived { .. } => {
+                self.resolved.as_ref()?.effective_fields.as_deref()
+            }
         }
     }
 }
