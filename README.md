@@ -111,23 +111,25 @@ JSON-T combines the best properties of existing data formats while avoiding thei
 |---|---|
 | [Language Specification](docs/language-spec.md) | Grammar, schema syntax, derived schemas, operations, expressions |
 | [Scalar Types](docs/Types.md) | All built-in scalar types with constraints and formats |
-| [Rust API](code/rust/jsont/README.md) | Building schemas, parsing, validating, and transforming in Rust |
-| [Java API](code/java/jsont/README.md) | Building schemas, parsing, validating, and transforming in Java |
+| [Rust API](code/rust/README.md) | Building schemas, parsing, validating, and transforming in Rust |
+| [Java API](code/java/README.md) | Building schemas, parsing, validating, and transforming in Java |
 | [Performance](docs/Performance.md) | Benchmark results and optimization notes |
 
 ---
 
 ## Implementations
 
-JSON-T has two production implementations that share the same grammar.
+JSON-T has two production implementations that share the same grammar and wire format, including cross-verified encrypted streams.
 
 | | Rust | Java 17 |
 |---|---|---|
 | **Source** | `code/rust/jsont/` | `code/java/jsont/` |
+| **Crypto** | `code/rust/jsont-crypto/` | `code/java/jsont-crypto/` |
 | **Parser** | `pest` PEG (schema) + hand-written row scanner | ANTLR4 (schema) + hand-written row scanner |
 | **Throughput (10 M rows)** | ~239 rows/ms streaming parse | ~131 rows/ms streaming parse |
 | **Streaming parse memory** | O(1) — ~14 KB regardless of file size | O(1) — bulk 64 KB buffer per reader |
 | **Thread model** | Single-threaded streaming or parallel `sync_channel` pipeline | Single-threaded streaming or parallel worker-per-core pipeline |
+| **Encryption** | ChaCha20-Poly1305, AES-256-GCM, ASCON-128a × RSA + ECDH | Same algorithms via BouncyCastle |
 
 ---
 
@@ -231,11 +233,11 @@ pipeline.finish()?;
 
 **Java:**
 ```java
-import io.github.datakore.jsont.validate.*;
+import io.github.datakore.jsont.validate.ValidationPipeline;
 import io.github.datakore.jsont.JsonT;
 import java.io.*;
 
-ValidationPipeline pipeline = new ValidationPipelineBuilder(schema)
+ValidationPipeline pipeline = ValidationPipeline.builder(schema)
     .withoutConsole()
     .build();
 
@@ -253,7 +255,7 @@ pipeline.finish();
 
 ## Privacy & Encryption
 
-Mark sensitive fields with `~` in the schema — they are encrypted on write and travel as opaque `base64:` tokens through the pipeline.
+Mark sensitive fields with `~` in the schema. On write they are encrypted (ChaCha20-Poly1305, AES-256-GCM, or ASCON-128a) with a per-stream DEK wrapped by RSA-OAEP or ECDH. Encrypted values travel as opaque `base64:` tokens and are only decrypted on demand.
 
 ### Schema with sensitive fields
 
@@ -267,17 +269,24 @@ Person: {
 }
 ```
 
-### Write encrypted, decrypt on demand
+### Write an encrypted stream
 
 **Rust:**
 ```rust
-use jsont::{PassthroughCryptoConfig, write_row_with_schema};
+use jsont::{write_encrypted_stream, EnvCryptoConfig, CryptoContext, SchemaKind};
+use std::io::{BufWriter, Write};
 
-// schema-aware write: SSN is encrypted to "base64:..." automatically
-write_row_with_schema(&row, schema_fields(&schema), &PassthroughCryptoConfig, &mut out)?;
-
-// on-demand decrypt of a single field
-let plaintext: Option<String> = row.decrypt_field_str(1, "ssn", &PassthroughCryptoConfig)?;
+// EnvCryptoConfig reads RSA PEM keys from environment variables.
+let cfg = EnvCryptoConfig::new("JSONT_PUBLIC_KEY", "JSONT_PRIVATE_KEY");
+let fields = match &schema.kind {
+    SchemaKind::Straight { fields } => fields.clone(),
+    _ => panic!("expected straight schema"),
+};
+let mut out = BufWriter::new(std::fs::File::create("people.jsont")?);
+write_encrypted_stream(&rows, &fields, &cfg, CryptoContext::VERSION_CHACHA_PUBKEY, &mut out)?;
+out.flush()?;
+// Wire: {"ENCRYPTED_HEADER",16,256,"<base64:enc_dek>"}
+//       {"Alice","<base64:field_payload>"}
 ```
 
 **Java:**
@@ -285,11 +294,63 @@ let plaintext: Option<String> = row.decrypt_field_str(1, "ssn", &PassthroughCryp
 import io.github.datakore.jsont.crypto.*;
 import io.github.datakore.jsont.stringify.RowWriter;
 
-// schema-aware write: SSN is encrypted to "base64:..." automatically
-RowWriter.writeRow(row, schema.fields(), new PassthroughCryptoConfig(), writer);
+PublicKeyCryptoConfig cfg = PublicKeyCryptoConfig.ofKeys(pubPem, privPem);
+try (CryptoContext ctx = CryptoContext.forEncrypt(AlgoVersion.CHACHA20_POLY1305, KekMode.PUBLIC_KEY, cfg);
+     BufferedWriter w  = Files.newBufferedWriter(Path.of("people.jsont"), StandardCharsets.UTF_8);
+     RowWriter writer  = new RowWriter(schema, ctx)) {
+    writer.writeStream(rows, w);
+}
+```
 
-// on-demand decrypt of a single field
-Optional<String> plaintext = row.decryptField(1, "ssn", new PassthroughCryptoConfig());
+### Read and decrypt an encrypted stream
+
+**Rust:**
+```rust
+use jsont::{try_parse_encrypt_header, parse_field_payload,
+            EnvCryptoConfig, JsonTRow, JsonTValue, Parseable, ValidationPipeline};
+
+let all_rows = Vec::<JsonTRow>::parse(&std::fs::read_to_string("people.jsont")?)?;
+let ctx      = try_parse_encrypt_header(&all_rows[0]).expect("EncryptHeader expected");
+let cfg      = EnvCryptoConfig::new("JSONT_PUBLIC_KEY", "JSONT_PRIVATE_KEY");
+
+let pipeline = ValidationPipeline::builder(schema)
+    .without_console()
+    .with_cipher_session(cfg.open_session(&ctx)?)
+    .build()?;
+let clean = pipeline.validate_rows(all_rows[1..].to_vec());
+pipeline.finish()?;
+
+// Decrypt one field
+let verify = cfg.open_session(&ctx)?;
+if let Some(JsonTValue::Encrypted(env)) = clean[0].get(1) {
+    let (iv, _, enc) = parse_field_payload(env, "ssn")?;
+    let ssn = String::from_utf8(verify.decrypt_field(&iv, &enc)?)?;
+}
+```
+
+**Java:**
+```java
+import io.github.datakore.jsont.crypto.*;
+import io.github.datakore.jsont.internal.crypto.*;
+import io.github.datakore.jsont.validate.ValidationPipeline;
+
+List<JsonTRow> allRows = new ArrayList<>();
+JsonT.parseRows(content, allRows::add);
+
+EncryptHeaderParser.ParsedHeader header = EncryptHeaderParser.tryParse(allRows.get(0)).orElseThrow();
+PublicKeyCryptoConfig cfg = PublicKeyCryptoConfig.ofKeys(pubPem, privPem);
+
+try (CryptoContext ctx = CryptoContext.forDecrypt(header.version(), header.encDek(), cfg)) {
+    List<JsonTRow> clean = ValidationPipeline.builder(schema)
+        .withCryptoContext(ctx)
+        .build()
+        .validateRows(allRows.subList(1, allRows.size()));
+
+    // Decrypt one field
+    JsonTValue.Encrypted enc = (JsonTValue.Encrypted) clean.get(0).values().get(1);
+    FieldPayload.Parsed p = FieldPayload.parse(enc.envelope(), "ssn");
+    String ssn = new String(ctx.decryptField(p.iv(), p.encContent()), StandardCharsets.UTF_8);
+}
 ```
 
 ### Decrypt in a derived schema pipeline
@@ -303,16 +364,14 @@ PersonDecrypted: FROM Person {
 ```
 
 **Rust:**
-
 ```rust
-let result = derived_schema.transform_with_crypto(row, &registry, &PassthroughCryptoConfig)?;
+let result = derived_schema.transform_with_crypto(row, &registry, &crypto_config)?;
 ```
 
 **Java:**
-
 ```java
 JsonTRow result = RowTransformer.of(derivedSchema, registry)
-    .transformWithCrypto(row, new PassthroughCryptoConfig());
+    .transformWithCrypto(row, cryptoConfig);
 ```
 
 ---
@@ -338,8 +397,9 @@ Both implementations — Rust and Java — are production-ready for:
 
 - Parsing, validation, and transformation of large datasets
 - JSON interoperability (bidirectional NDJSON / Array / Object modes)
-- Field-level encryption with pluggable `CryptoConfig`
-- On-demand decryption via the value and row APIs
+- Field-level envelope encryption — 3 algorithms (ChaCha20-Poly1305, AES-256-GCM, ASCON-128a) × 2 KEK modes (RSA, ECDH)
+- Encrypted stream wire compatibility verified bidirectionally (Rust-encrypted ↔ Java-decrypted and vice versa)
+- On-demand decryption via the `CipherSession` / `CryptoContext` APIs
 
 Benchmarked at 10 M rows on realistic schemas with no memory growth.
 

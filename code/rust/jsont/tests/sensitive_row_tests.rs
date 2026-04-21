@@ -24,8 +24,9 @@
 use std::sync::{Arc, Mutex};
 
 use jsont::{
-    DiagnosticEvent, DiagnosticSink, JsonTFieldBuilder, JsonTRow, JsonTSchemaBuilder,
-    JsonTValue, ScalarType, SinkError, ValidationPipeline,
+    CryptoConfig, CryptoContext, DiagnosticEvent, DiagnosticSink, JsonTFieldBuilder, JsonTRow,
+    JsonTSchemaBuilder, JsonTValue, PassthroughCryptoConfig, ScalarType, SinkError,
+    ValidationPipeline,
 };
 
 // ── capture sink ──────────────────────────────────────────────────────────────
@@ -63,11 +64,18 @@ fn employee_schema() -> jsont::JsonTSchema {
         .build().unwrap()
 }
 
+fn passthrough_session() -> jsont::CipherSession {
+    let ctx = CryptoContext::new(CryptoContext::VERSION_AES_PUBKEY, vec![0u8; 32]);
+    PassthroughCryptoConfig.open_session(&ctx).unwrap()
+}
+
 /// Run rows through the pipeline (no console output), return clean rows.
 fn run_silent(schema: jsont::JsonTSchema, rows: Vec<JsonTRow>) -> Vec<JsonTRow> {
-    let pipeline = ValidationPipeline::builder(schema)
-        .without_console()
-        .build();
+    let mut builder = ValidationPipeline::builder(schema.clone()).without_console();
+    if schema.has_sensitive_fields() {
+        builder = builder.with_cipher_session(passthrough_session());
+    }
+    let pipeline = builder.build().unwrap();
     let clean = pipeline.validate_rows(rows);
     pipeline.finish().unwrap();
     clean
@@ -79,10 +87,13 @@ fn run_with_events(
     rows: Vec<JsonTRow>,
 ) -> (Vec<JsonTRow>, Vec<DiagnosticEvent>) {
     let (sink, captured) = CaptureSink::new();
-    let pipeline = ValidationPipeline::builder(schema)
+    let mut builder = ValidationPipeline::builder(schema.clone())
         .without_console()
-        .with_sink(Box::new(sink))
-        .build();
+        .with_sink(Box::new(sink));
+    if schema.has_sensitive_fields() {
+        builder = builder.with_cipher_session(passthrough_session());
+    }
+    let pipeline = builder.build().unwrap();
     let clean = pipeline.validate_rows(rows);
     pipeline.finish().unwrap();
     let events = captured.lock().unwrap().clone();

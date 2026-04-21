@@ -54,7 +54,9 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+use crate::crypto::CipherSession;
 use crate::diagnostic::{DiagnosticEvent, EventKind, Severity, SinkError};
+use crate::error::{JsonTError, TransformError};
 use crate::model::data::{JsonTRow, JsonTValue};
 use crate::model::field::{AnyOfVariant, JsonTField, JsonTFieldKind, ScalarType};
 use crate::model::schema::{JsonTSchema, SchemaKind};
@@ -382,6 +384,9 @@ pub struct ValidationPipelineBuilder {
     has_console: bool,
     /// User-supplied additional sinks.
     extra_sinks: Vec<Box<dyn DiagnosticSink + Send>>,
+    /// Session for decrypting sensitive fields during validation (required when
+    /// the schema declares sensitive fields).
+    session: Option<CipherSession>,
 }
 
 impl ValidationPipelineBuilder {
@@ -391,7 +396,16 @@ impl ValidationPipelineBuilder {
             schema,
             has_console: true,
             extra_sinks: Vec::new(),
+            session: None,
         }
+    }
+
+    /// Supply a [`CipherSession`] for validating encrypted streams.
+    ///
+    /// Required when `schema.has_sensitive_fields()` is `true`.
+    pub fn with_cipher_session(mut self, session: CipherSession) -> Self {
+        self.session = Some(session);
+        self
     }
 
     /// Remove the default console sink.
@@ -412,7 +426,20 @@ impl ValidationPipelineBuilder {
     }
 
     /// Spawn the background sink thread and return a ready `ValidationPipeline`.
-    pub fn build(self) -> ValidationPipeline {
+    ///
+    /// Returns `Err` when the schema has sensitive fields but no `CipherSession`
+    /// was provided via [`with_cipher_session`].
+    pub fn build(self) -> Result<ValidationPipeline, JsonTError> {
+        if self.schema.has_sensitive_fields() && self.session.is_none() {
+            return Err(TransformError::DecryptFailed {
+                field:  String::new(),
+                reason: format!(
+                    "schema '{}' has sensitive fields — call with_cipher_session() before build()",
+                    self.schema.name
+                ),
+            }
+            .into());
+        }
         let fields: Vec<JsonTField> = match &self.schema.kind {
             SchemaKind::Straight { fields } => fields.clone(),
             // Derived-schema validation is not yet implemented.
@@ -478,14 +505,14 @@ impl ValidationPipelineBuilder {
             last_err
         });
 
-        ValidationPipeline {
+        Ok(ValidationPipeline {
             fields,
             validation,
             schema_name,
             rule_field_refs,
             tx,
             sink_thread: Some(sink_thread),
-        }
+        })
     }
 }
 

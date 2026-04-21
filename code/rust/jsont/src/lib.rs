@@ -29,7 +29,9 @@ pub mod json;
 pub use parse::rows::parse_rows;
 pub use parse::rows::parse_rows_streaming;
 pub use parse::rows::RowIter;
-pub use stringify::rows::{write_row, write_rows, write_row_with_dek, write_encrypted_stream};
+pub use stringify::rows::{
+    write_encrypted_stream, write_row, write_row_with_session, write_rows, RowWriter,
+};
 
 // Re-export everything a consumer needs at the crate root.
 pub use builder::catalog::JsonTCatalogBuilder;
@@ -49,7 +51,8 @@ pub use diagnostic::{DiagnosticEvent, EventKind, Severity, SinkError};
 pub use crypto::{
     assemble_field_payload, build_encrypt_header_row, parse_field_payload,
     try_parse_encrypt_header,
-    CryptoConfig, CryptoContext, CryptoError, EnvCryptoConfig, PassthroughCryptoConfig,
+    CipherSession, CryptoConfig, CryptoContext, CryptoError, EcdhCryptoConfig, EncryptedField,
+    EnvCryptoConfig, PassthroughCryptoConfig,
 };
 
 // Error

@@ -1,54 +1,35 @@
 // =============================================================================
-// env_config.rs — EnvCryptoConfig (stream-level DEK model)
+// env_config.rs — EnvCryptoConfig (RSA public-key DEK wrapping)
 // =============================================================================
 // CryptoConfig implementation that reads RSA key material from environment
-// variables at call time. No key bytes are stored as struct fields.
-//
-// Per-stream layout (steps 5+):
-//   EncryptHeader: one RSA-OAEP-SHA256 wrapped DEK  ← wrap_dek / unwrap_dek
-//   Per-field:     [IV (12 B)] [ciphertext+tag]      ← encrypt_field / decrypt_field
+// variables at call time.  No key bytes are stored as struct fields.
 //
 // Supported key formats (auto-detected):
 //   Full PEM  : value starts with "-----BEGIN"
 //   Stripped  : Base64-encoded DER (headers and newlines removed)
 // =============================================================================
 
-use crate::{CryptoConfig, CryptoError};
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::Engine as _;
 use pkcs8::{DecodePrivateKey, DecodePublicKey};
-use rand::RngCore;
 use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
 
-const DEK_LEN: usize = 32; // AES-256 key size in bytes
-const IV_LEN: usize  = 12; // AES-GCM 96-bit nonce
+use crate::{CryptoConfig, CryptoError};
 
-// =============================================================================
-// EnvCryptoConfig
-// =============================================================================
+const DEK_LEN: usize = 32;
 
-/// [`CryptoConfig`] that reads RSA key material from environment variables.
+/// [`CryptoConfig`] that wraps and unwraps the DEK using RSA-OAEP-SHA256.
 ///
-/// The struct holds only the *names* of the environment variables, not the key
-/// bytes. Keys are read, used, and dropped within each call.
+/// Keys are read from named environment variables at each call — no key bytes
+/// stored in the struct.
 ///
 /// # Key format
-/// Each env var must contain either a full PKCS#8 PEM block
-/// (`-----BEGIN PUBLIC KEY-----` / `-----BEGIN PRIVATE KEY-----`) or the same
+/// Each env var must contain either a full PKCS#8 PEM block or the same
 /// content as Base64-encoded DER with headers and newlines stripped.
-///
-/// # Example
-/// ```rust,ignore
-/// std::env::set_var("MY_PUB",  "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----");
-/// std::env::set_var("MY_PRIV", "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----");
-/// let cfg = EnvCryptoConfig::new("MY_PUB", "MY_PRIV");
-/// ```
 pub struct EnvCryptoConfig {
-    /// Name of the env var holding the receiver's PKCS#8 public key (for DEK wrap).
+    /// Name of the env var holding the receiver's PKCS#8 public key.
     pub public_key_var: String,
-    /// Name of the env var holding the receiver's PKCS#8 private key (for DEK unwrap).
+    /// Name of the env var holding the receiver's PKCS#8 private key.
     pub private_key_var: String,
 }
 
@@ -80,10 +61,6 @@ impl EnvCryptoConfig {
     }
 }
 
-// =============================================================================
-// CryptoConfig impl
-// =============================================================================
-
 impl CryptoConfig for EnvCryptoConfig {
     /// Wrap the raw DEK with the receiver's public key (RSA-OAEP-SHA256).
     fn wrap_dek(&self, _version: u16, dek: &[u8]) -> Result<Vec<u8>, CryptoError> {
@@ -107,45 +84,8 @@ impl CryptoConfig for EnvCryptoConfig {
         }
         Ok(dek)
     }
-
-    /// Generate a fresh IV and encrypt `plaintext` with AES-256-GCM using `dek`.
-    ///
-    /// Returns `(iv, enc_content)` where `enc_content` includes the 16-byte
-    /// authentication tag appended by AES-GCM.
-    fn encrypt_field(&self, dek: &[u8], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-        let mut iv_bytes = [0u8; IV_LEN];
-        rand::thread_rng().fill_bytes(&mut iv_bytes);
-
-        let key    = Key::<Aes256Gcm>::from_slice(dek);
-        let cipher = Aes256Gcm::new(key);
-        let nonce  = Nonce::from_slice(&iv_bytes);
-        let enc_content = cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|_| CryptoError::EncryptFailed {
-                field:  String::new(),
-                reason: "AES-256-GCM encryption failed".to_string(),
-            })?;
-
-        Ok((iv_bytes.to_vec(), enc_content))
-    }
-
-    /// Decrypt one field using AES-256-GCM with the supplied `dek` and `iv`.
-    fn decrypt_field(&self, dek: &[u8], iv: &[u8], enc_content: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let key    = Key::<Aes256Gcm>::from_slice(dek);
-        let cipher = Aes256Gcm::new(key);
-        let nonce  = Nonce::from_slice(iv);
-        cipher
-            .decrypt(nonce, enc_content)
-            .map_err(|_| CryptoError::DecryptFailed {
-                field:  String::new(),
-                reason: "AES-256-GCM decryption failed (auth tag mismatch or corrupt data)".to_string(),
-            })
-    }
+    // open_session is inherited from the CryptoConfig default implementation.
 }
-
-// =============================================================================
-// Key parsing helpers
-// =============================================================================
 
 fn parse_public_key(s: &str) -> Result<RsaPublicKey, CryptoError> {
     if s.starts_with("-----") {

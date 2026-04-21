@@ -8,7 +8,7 @@
 
 ## P1 — Security / Rust Parity
 
-1. **Rust implementation: apply Java's design changes** (next session)
+1. **Rust implementation: apply Java's design changes**
 
    The Java implementation was refactored for SOLID principles. The Rust implementation needs
    the same treatment before the two diverge further.
@@ -25,22 +25,21 @@
    * Current: inline `match` in `validateWithParent` / equivalent Rust function
    * Target: `OperationScopeValidator` trait, one struct per operation type, orchestrated by `ScopeValidation::validate`
 
-   ### Step 3 — ASCON-128a field cipher + ECDH DEK wrapping (Rust)
+   ### ~~Step 3 — ASCON-128a field cipher + ECDH DEK wrapping (Rust)~~ ✅ Complete
 
-   * Java: implemented via BouncyCastle `AsconEngine`
-   * Rust: use `ascon-aead` crate (RustCrypto family) for ASCON-128a
-   * Key: first 16 bytes of the 32-byte DEK; nonce: 16 bytes; tag: 16 bytes
-   * ECDH DEK wrapping: add ASCON branch alongside AES-GCM and ChaCha20
+   * Implemented via `ascon-aead` crate (RustCrypto family)
+   * All 3 algorithms (AES-GCM, ChaCha20-Poly1305, ASCON-128a) × 2 KEK modes (RSA, ECDH) working
 
-   ### Step 4 — EcdhCryptoConfig `ofKeys` equivalent (Rust)
+   ### ~~Step 4 — EcdhCryptoConfig `ofKeys` equivalent (Rust)~~ ✅ Complete
 
-   * Add a constructor/builder variant that accepts key bytes directly (no env-var requirement)
+   * `EcdhCryptoConfig::of_keys(peer_pub_der: Vec<u8>, host_priv_pem: &str)` added
    * Enables in-process testing without environment setup
 
-   ### Step 5 — Wire compatibility tests
+   ### ~~Step 5 — Wire compatibility tests~~ ✅ Complete
 
-   * Encrypt in Rust, decrypt in Java (and vice versa) for all 3 algorithms
-   * Verify `EncryptHeader` round-trip, per-field payload structure, and digest verification
+   * Crypto layer: `code/cross-compat/fixtures/` — 4 committed fixture files (RSA + ECDH × Rust + Java)
+   * Full stream: `code/cross-compat/rust-encrypted.jsont` + `java-encrypted.jsont` — 10 rows each, verified bidirectionally
+   * `EncryptHeader` round-trip, per-field payload structure, SHA-256 digest verification — all confirmed
 
    ### Important: apply SOLID principles throughout
 

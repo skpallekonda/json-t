@@ -2,41 +2,38 @@
 // config.rs — CryptoConfig trait (stream-level DEK model)
 // =============================================================================
 
-use crate::CryptoError;
+use crate::session::CipherSession;
+use crate::{CryptoContext, CryptoError};
 
 /// Pluggable crypto contract for encrypted JsonT streams.
 ///
 /// The stream-level DEK model:
 /// - One DEK is generated per stream and wrapped once → written as `EncryptHeader`.
-/// - Every sensitive field is encrypted with that shared DEK (`encrypt_field`).
-/// - On read, the DEK is unwrapped once (`unwrap_dek`) and reused for all fields.
+/// - On write: call `open_session` with a freshly created `CryptoContext` to get a
+///   `CipherSession` that holds the plaintext DEK for field encryption.
+/// - On read: call `open_session` with the `CryptoContext` parsed from the
+///   `EncryptHeader` row to unwrap the DEK and get a `CipherSession` for decryption.
 ///
-/// Implementations read key material from the environment at call time — no key
-/// bytes should be stored as struct fields. `CryptoConfig` objects are safe to
-/// keep alive across calls.
-///
-/// All implementations must be `Send + Sync` so they can be shared across threads
-/// in the streaming validation pipeline.
+/// Implementations must be `Send + Sync` so they can be shared across threads.
 pub trait CryptoConfig: Send + Sync {
     /// Wrap a raw DEK (plaintext) for writing to the `EncryptHeader` row.
     ///
     /// `version` carries the `algo_ver` and `kek_mode` bits so the implementation
-    /// can choose the correct key and algorithm.
+    /// can select the correct key and wrapping algorithm.
     fn wrap_dek(&self, version: u16, dek: &[u8]) -> Result<Vec<u8>, CryptoError>;
 
-    /// Unwrap `enc_dek` from the `EncryptHeader` → raw plaintext DEK.
-    ///
-    /// The returned DEK must be zeroed by the caller after use.
+    /// Unwrap `enc_dek` from the `EncryptHeader` → raw plaintext DEK bytes.
     fn unwrap_dek(&self, version: u16, enc_dek: &[u8]) -> Result<Vec<u8>, CryptoError>;
 
-    /// Encrypt one field value with the shared DEK.
+    /// Open a cipher session for `ctx`, unwrapping the DEK exactly once.
     ///
-    /// Returns `(iv, enc_content)`. The IV must be freshly generated per call —
-    /// reusing an IV with the same DEK under AES-GCM is catastrophic. The
-    /// `enc_content` includes the authentication tag for AEAD ciphers.
-    fn encrypt_field(&self, dek: &[u8], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>), CryptoError>;
-
-    /// Decrypt one field value using the shared DEK, the per-field IV, and the
-    /// raw ciphertext+tag bytes.
-    fn decrypt_field(&self, dek: &[u8], iv: &[u8], enc_content: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    /// The returned [`CipherSession`] holds the plaintext DEK and zeroes it on drop.
+    /// Use it for all `encrypt_field` / `decrypt_field` calls within one stream.
+    ///
+    /// The default implementation calls `unwrap_dek` and constructs a `CipherSession`;
+    /// override only when the unwrap step differs from the standard contract.
+    fn open_session(&self, ctx: &CryptoContext) -> Result<CipherSession, CryptoError> {
+        let dek = self.unwrap_dek(ctx.version, &ctx.enc_dek)?;
+        Ok(CipherSession::new(ctx.version, dek))
+    }
 }

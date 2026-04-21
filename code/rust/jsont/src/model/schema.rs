@@ -97,6 +97,18 @@ pub struct RenamePair {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldPath(pub Vec<String>);
 
+impl JsonTSchema {
+    /// Returns `true` if this straight schema declares at least one sensitive (`~`) field.
+    ///
+    /// Derived schemas always return `false` — sensitivity is declared on straight schemas.
+    pub fn has_sensitive_fields(&self) -> bool {
+        match &self.kind {
+            SchemaKind::Straight { fields } => fields.iter().any(|f| f.kind.is_sensitive()),
+            SchemaKind::Derived { .. } => false,
+        }
+    }
+}
+
 impl FieldPath {
     pub fn new(segments: Vec<String>) -> Self {
         Self(segments)

@@ -405,42 +405,104 @@ pub struct EvalContext { pub bindings: HashMap<String, JsonTValue> }
 pub struct SchemaRegistry { pub schemas: HashMap<String, JsonTSchema> }
 // Methods: new(), register(schema), get(name), from_namespace(ns)
 
-// ── Crypto (module: crypto) ──────────────────────────────────────────────────
+// ── jsont-crypto — crate: jsont_crypto (also re-exported from jsont crate root) ──
+
+// CryptoConfig trait — implemented by EnvCryptoConfig and EcdhCryptoConfig
 pub trait CryptoConfig {
-    fn encrypt(&self, field: &str, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>;
-    fn decrypt(&self, field: &str, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn wrap_dek(&self, version: u16, dek: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn unwrap_dek(&self, version: u16, enc_dek: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    fn open_session(&self, ctx: &CryptoContext) -> Result<CipherSession, CryptoError>;
 }
 
-pub struct PassthroughCryptoConfig;  // identity: encrypt/decrypt return bytes unchanged
+// CryptoContext — wire holder: version word + wrapped DEK (no plaintext secrets)
+pub struct CryptoContext {
+    pub version: u16,
+    pub enc_dek: Vec<u8>,
+}
+impl CryptoContext {
+    pub fn new(version: u16, enc_dek: Vec<u8>) -> Self;
+    // Well-known version constants:
+    pub const VERSION_AES_PUBKEY:    u16 = 0x0008;  // AES-256-GCM  + RSA OAEP
+    pub const VERSION_AES_ECDH:      u16 = 0x0009;  // AES-256-GCM  + ECDH P-256
+    pub const VERSION_CHACHA_PUBKEY: u16 = 0x0010;  // ChaCha20-Poly1305 + RSA OAEP
+    pub const VERSION_CHACHA_ECDH:   u16 = 0x0011;  // ChaCha20-Poly1305 + ECDH P-256
+    pub const VERSION_ASCON_PUBKEY:  u16 = 0x0018;  // ASCON-128a + RSA OAEP
+    pub const VERSION_ASCON_ECDH:    u16 = 0x0019;  // ASCON-128a + ECDH P-256
+}
+
+// CipherSession — short-lived per-stream DEK holder; DEK zeroed on drop
+pub struct CipherSession { /* version + Zeroizing<Vec<u8>> DEK */ }
+impl CipherSession {
+    pub fn encrypt_field(&self, plaintext: &[u8]) -> Result<EncryptedField, CryptoError>;
+    // Fresh random IV per call (12 bytes for ChaCha20/AES-GCM, 16 bytes for ASCON)
+    pub fn decrypt_field(&self, iv: &[u8], enc_content: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    pub fn version(&self) -> u16;
+}
+
+pub struct EncryptedField { pub iv: Vec<u8>, pub enc_content: Vec<u8> }
+
+// EnvCryptoConfig — reads RSA PEM key material from env vars at call time
+pub struct EnvCryptoConfig { /* pub_var, priv_var: String */ }
+impl EnvCryptoConfig {
+    pub fn new(pub_var: &str, priv_var: &str) -> Self;
+}
+
+// EcdhCryptoConfig — ECDH P-256 + HKDF KEK, accepts key bytes directly
+pub struct EcdhCryptoConfig { /* peer public key DER + host private key PEM */ }
+impl EcdhCryptoConfig {
+    pub fn of_keys(peer_pub_der: Vec<u8>, host_priv_pem: &str) -> Self;
+}
+
+pub struct PassthroughCryptoConfig;  // identity — plaintext = ciphertext (tests only)
 
 pub enum CryptoError {
-    EncryptFailed(String),
-    DecryptFailed(String),
-    InvalidUtf8(String),
+    KeyNotFound(String), InvalidKey(String),
+    UnsupportedAlgorithm(u16), UnsupportedKekMode(u16),
+    DekWrapFailed(String), DekUnwrapFailed(String),
+    EncryptFailed(String), DecryptFailed(String),
+    DigestMismatch(String), MalformedPayload(String, String),
 }
 
-// ── Schema-aware stringify (free function) ───────────────────────────────────
-fn write_row_with_schema<W: Write>(
+// ── jsont crate — encrypted stream helpers (re-exported at crate root) ────────
+
+// Write EncryptHeader row + encrypted data rows in one pass
+fn write_encrypted_stream<W: Write>(
+    rows: &[JsonTRow],
+    fields: &[JsonTField],
+    cfg: &dyn CryptoConfig,
+    version: u16,
+    out: &mut W,
+) -> io::Result<()>
+
+// Write one row with per-field encryption using an open session
+fn write_row_with_session<W: Write>(
     row: &JsonTRow,
     fields: &[JsonTField],
-    crypto: &dyn CryptoConfig,
+    session: &CipherSession,
     w: &mut W,
 ) -> io::Result<()>
-// Sensitive+plaintext fields: encrypt then emit as "base64:<b64>"; Encrypted fields: re-encode.
-// Non-sensitive fields: written plain (same as write_row).
 
-// ── Transform with crypto ─────────────────────────────────────────────────────
-// On impl JsonTSchema:
-fn transform(&self, row: JsonTRow, registry: &SchemaRegistry) -> Result<JsonTRow, JsonTError>
-fn transform_with_crypto(&self, row: JsonTRow, registry: &SchemaRegistry, crypto: &dyn CryptoConfig) -> Result<JsonTRow, JsonTError>
+// Parse the EncryptHeader row (row 0 of an encrypted stream) → CryptoContext
+fn try_parse_encrypt_header(row: &JsonTRow) -> Option<CryptoContext>
 
-// ── On-demand decrypt (impl JsonTValue) ──────────────────────────────────────
-fn decrypt_bytes(&self, field: &str, crypto: &dyn CryptoConfig) -> Result<Option<Vec<u8>>, CryptoError>
-fn decrypt_str(&self, field: &str, crypto: &dyn CryptoConfig) -> Result<Option<String>, CryptoError>
+// Parse the binary field payload → (iv, sha256_digest, enc_content)
+fn parse_field_payload(envelope: &[u8], field_name: &str)
+    -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), CryptoError>
 
-// ── On-demand decrypt (impl JsonTRow) ────────────────────────────────────────
-fn decrypt_field_str(&self, index: usize, field_name: &str, crypto: &dyn CryptoConfig) -> Result<Option<String>, CryptoError>
-// Returns None for out-of-range index (no panic).
+// Assemble raw payload bytes from parts (used by RowWriter internally)
+fn assemble_field_payload(iv: &[u8], digest: &[u8], enc_content: &[u8]) -> Vec<u8>
+
+// Build a serialised EncryptHeader JsonTRow from a CryptoContext
+fn build_encrypt_header_row(ctx: &CryptoContext) -> JsonTRow
+
+// ── ValidationPipeline — encrypted stream support ─────────────────────────────
+ValidationPipeline::builder(schema: JsonTSchema) -> ValidationPipelineBuilder
+
+ValidationPipelineBuilder
+  .without_console()
+  .with_sink(Box<dyn DiagnosticSink + Send>)
+  .with_cipher_session(session: CipherSession)  // enables per-field decryption during validation
+  .build() -> Result<ValidationPipeline, SinkError>
 ```
 
 ---
@@ -795,19 +857,78 @@ class JsonTError extends RuntimeException {
     static class SchemaInvalid extends JsonTError {}
 }
 
-// ── Crypto (package: crypto) ──────────────────────────────────────────────────
+// ── jsont-crypto (package: io.github.datakore.jsont.crypto) ──────────────────
+
+// CryptoConfig interface — implemented by PublicKeyCryptoConfig and EcdhCryptoConfig
 interface CryptoConfig {
-    byte[] encrypt(String field, byte[] plaintext) throws CryptoError;
-    byte[] decrypt(String field, byte[] ciphertext) throws CryptoError;
+    byte[] wrapDek(int version, byte[] dek) throws CryptoError;
+    byte[] unwrapDek(int version, byte[] encDek) throws CryptoError;
 }
 
-class PassthroughCryptoConfig implements CryptoConfig {}  // identity
+// CryptoContext — owns the plaintext DEK for one stream; zeroed on close()
+// Construction:
+CryptoContext.forEncrypt(AlgoVersion algo, KekMode kekMode, CryptoConfig config) throws CryptoError
+  // generates a random 256-bit DEK, wraps it, stores enc_dek for the EncryptHeader
+CryptoContext.forDecrypt(int version, byte[] encDek, CryptoConfig config) throws CryptoError
+  // unwraps enc_dek immediately; fails fast on wrong key or corrupt bytes
+// Field-level encryption (fresh random IV per call):
+CryptoContext.encryptField(byte[] plaintext) throws CryptoError -> EncryptedField
+CryptoContext.decryptField(byte[] iv, byte[] encContent) throws CryptoError -> byte[]
+CryptoContext.decryptField(EncryptedField ef) throws CryptoError -> byte[]
+// Wire accessors:
+CryptoContext.version() -> int     // packed version word (u16)
+CryptoContext.encDek()  -> byte[]  // defensive copy of wrapped DEK for EncryptHeader
+// AutoCloseable — close() zeros the DEK
 
+// Well-known version constants on CryptoContext:
+CryptoContext.VERSION_AES_PUBKEY    = 0x0008  // AES-256-GCM  + RSA OAEP
+CryptoContext.VERSION_AES_ECDH      = 0x0009  // AES-256-GCM  + ECDH P-256
+CryptoContext.VERSION_CHACHA_PUBKEY = 0x0010  // ChaCha20-Poly1305 + RSA OAEP
+CryptoContext.VERSION_CHACHA_ECDH   = 0x0011  // ChaCha20-Poly1305 + ECDH P-256
+CryptoContext.VERSION_ASCON_PUBKEY  = 0x0018  // ASCON-128a + RSA OAEP
+CryptoContext.VERSION_ASCON_ECDH    = 0x0019  // ASCON-128a + ECDH P-256
+
+record EncryptedField(byte[] iv, byte[] encContent) {}
+
+enum AlgoVersion { AES_GCM(1), CHACHA20_POLY1305(2), ASCON(3) }
+enum KekMode     { PUBLIC_KEY(0), ECDH(1) }
+
+// PublicKeyCryptoConfig — RSA-OAEP-SHA256 DEK wrapping
+PublicKeyCryptoConfig.ofKeys(String pubPem, String privPem)  // from PEM strings
+// (also EnvCryptoConfig for env-var-based key loading)
+
+// EcdhCryptoConfig — ECDH P-256 + HKDF KEK
+EcdhCryptoConfig.ofKeys(byte[] peerPublicKeyDer, String hostPrivKeyPem)
+
+// EncryptHeaderParser — reads the EncryptHeader row from a parsed stream
+EncryptHeaderParser.tryParse(JsonTRow row) -> Optional<ParsedHeader>
+  // ParsedHeader: version() -> int, encDek() -> byte[]
+
+// FieldPayload — parses the binary per-field payload bytes
+FieldPayload.parse(byte[] envelope, String fieldName) -> Parsed
+  // Parsed: iv() -> byte[], encContent() -> byte[]
+
+class PassthroughCryptoConfig implements CryptoConfig {}  // identity (tests only)
 class CryptoError extends Exception {}  // checked exception
+
+// ── RowWriter (package: stringify) — encrypted stream support ─────────────────
+new RowWriter(JsonTSchema schema, CryptoContext ctx)
+  // throws IllegalArgumentException if schema has sensitive fields but ctx is null
+  .writeStream(List<JsonTRow> rows, Writer w) throws IOException
+  // emits EncryptHeader row then encrypted data rows
+
+// ── ValidationPipeline — encrypted stream support ─────────────────────────────
+ValidationPipeline.builder(JsonTSchema schema) -> ValidationPipelineBuilder
+
+ValidationPipelineBuilder
+  .withoutConsole()
+  .withSink(DiagnosticSink sink)
+  .withCryptoContext(CryptoContext ctx)   // enables Encrypted field promotion during validation
+  .build() -> ValidationPipeline
 
 // ── Transform with crypto (RowTransformer) ────────────────────────────────────
 RowTransformer.of(JsonTSchema schema, SchemaRegistry registry) -> RowTransformer
-  .transform(JsonTRow row) throws JsonTError.Transform             // Decrypt → DecryptFailed
+  .transform(JsonTRow row) throws JsonTError.Transform
   .transformWithCrypto(JsonTRow row, CryptoConfig crypto) throws JsonTError.Transform
 
 // ── On-demand decrypt (JsonTValue default methods) ────────────────────────────

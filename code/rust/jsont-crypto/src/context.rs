@@ -60,4 +60,10 @@ impl CryptoContext {
 
     /// ASCON + receiver public key (algo=3 → bits 6-3 = 0011 → 0x0018).
     pub const VERSION_ASCON_PUBKEY: u16 = 0x0018;
+
+    /// ChaCha20-Poly1305 + ECDH pre-established key (algo=2, kek=1 → 0x0011).
+    pub const VERSION_CHACHA_ECDH: u16 = 0x0011;
+
+    /// ASCON + ECDH pre-established key (algo=3, kek=1 → 0x0019).
+    pub const VERSION_ASCON_ECDH: u16 = 0x0019;
 }

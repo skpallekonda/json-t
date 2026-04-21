@@ -79,7 +79,7 @@ fn test_all_valid_rows_pass_through() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         make_order(1, "Widget", 10, 9.99),
@@ -104,7 +104,7 @@ fn test_shape_mismatch_excluded() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         make_order(1, "Widget", 10, 9.99),            // good (4 fields)
@@ -142,7 +142,7 @@ fn test_required_field_missing_excluded() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new()
@@ -185,7 +185,7 @@ fn test_optional_field_null_accepted() {
 
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new()
@@ -219,7 +219,7 @@ fn test_value_constraint_warning_row_accepted() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new().push(JsonTValue::i64(1)).push(JsonTValue::d64(50.0)).build(),    // OK
@@ -263,7 +263,7 @@ fn test_length_constraint_warning_row_accepted() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new().push(JsonTValue::str("ok_label")).build(),       // OK (8 chars)
@@ -302,7 +302,7 @@ fn test_regex_constraint_warning_row_accepted() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new().push(JsonTValue::str("user@example.com")).build(), // OK
@@ -349,7 +349,7 @@ fn test_rule_violation_warning_row_accepted() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new().push(JsonTValue::d64(9.99)).build(),  // passes rule
@@ -390,7 +390,7 @@ fn test_uniqueness_violation_excluded() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new().push(JsonTValue::i64(1)).push(JsonTValue::str("A")).build(),
@@ -430,7 +430,7 @@ fn test_constant_mismatch_excluded() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         JsonTRowBuilder::new().push(JsonTValue::i64(1)).push(JsonTValue::i32(1)).build(), // OK
@@ -479,7 +479,7 @@ fn test_conditional_requirement_excluded() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         // PENDING — no tracking number required
@@ -510,7 +510,7 @@ fn test_validate_each_streaming() {
     let schema = order_schema();
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
-        .build();
+        .build().unwrap();
 
     // Supply rows as a lazy iterator — no Vec allocation for input.
     let input = (1i64..=3).map(|i| make_order(i, "Item", 1, 1.0));
@@ -531,7 +531,7 @@ fn test_process_completed_event_emitted() {
     let pipeline = ValidationPipeline::builder(schema)
         .without_console()
         .with_sink(Box::new(sink))
-        .build();
+        .build().unwrap();
 
     let rows = vec![
         make_order(1, "Widget", 10, 9.99),

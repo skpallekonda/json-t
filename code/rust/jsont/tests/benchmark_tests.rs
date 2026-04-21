@@ -98,7 +98,15 @@ const WCT20_SCHEMA: &str = include_str!("../../../benchmark-schema/wct20-match.j
 
 fn load_schemas() -> (jsont::JsonTSchema, jsont::JsonTSchema, SchemaRegistry) {
     let ns = JsonTNamespace::parse(WCT20_SCHEMA).expect("wct20 schema parse failed");
-    let registry = SchemaRegistry::from_namespace(&ns).expect("registry build failed");
+    // Build the registry directly without schema validation — the wct20 schema uses
+    // enum-typed fields (e.g. <TournamentPhase>) which the object-ref validator would
+    // flag as unknown schemas (enums are not stored in the registry).
+    let mut registry = SchemaRegistry::new();
+    for catalog in &ns.catalogs {
+        for schema in &catalog.schemas {
+            registry.register(schema.clone());
+        }
+    }
     let cricket = registry.get("CricketMatch")
         .expect("CricketMatch schema not found")
         .clone();
@@ -363,7 +371,8 @@ fn step_parse_validate(path: &std::path::Path, cricket_schema: jsont::JsonTSchem
     let pipeline = ValidationPipeline::builder(cricket_schema)
         .without_console()
         .with_sink(Box::new(NullSink))
-        .build();
+        .build()
+        .unwrap();
 
     let file = File::open(path).expect("cannot open temp file");
     let iter = RowIter::new(BufReader::new(file));
@@ -405,7 +414,8 @@ fn step_parse_validate_transform(
     let pipeline = ValidationPipeline::builder(cricket_schema)
         .without_console()
         .with_sink(Box::new(NullSink))
-        .build();
+        .build()
+        .unwrap();
 
     let file = File::open(path).expect("cannot open temp file");
     let iter = RowIter::new(BufReader::new(file));
@@ -471,6 +481,7 @@ fn flat_schema_for_json(schema: &jsont::JsonTSchema) -> jsont::JsonTSchema {
                 (s, *optional)
             }
             JsonTFieldKind::Object { optional, .. } => (ScalarType::Str, *optional),
+            JsonTFieldKind::AnyOf { optional, .. } => (ScalarType::Str, *optional),
         };
         let mut fb = JsonTFieldBuilder::scalar(&field.name, scalar);
         if optional { fb = fb.optional(); }

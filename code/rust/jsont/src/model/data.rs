@@ -158,24 +158,21 @@ impl JsonTValue {
     /// Decrypt this value if it is `Encrypted`, returning raw plaintext bytes.
     ///
     /// The `Encrypted` payload carries `[len_iv][len_digest][iv][digest][enc_content]`.
-    /// The DEK is unwrapped once from `ctx.enc_dek`, used to decrypt the field, then
-    /// the SHA-256 digest is verified before returning.
+    /// The `session` holds the already-unwrapped DEK; no key material is re-read.
+    /// SHA-256 digest is verified before returning.
     ///
     /// Returns `Ok(None)` if the value is not `Encrypted`.
     pub fn decrypt_bytes(
         &self,
         field: &str,
-        ctx: &crate::crypto::CryptoContext,
-        crypto: &dyn crate::crypto::CryptoConfig,
+        session: &crate::crypto::CipherSession,
     ) -> Result<Option<Vec<u8>>, crate::crypto::CryptoError> {
         use sha2::{Digest, Sha256};
         match self {
             JsonTValue::Encrypted(payload) => {
                 let (iv, stored_digest, enc_content) =
                     crate::crypto::parse_field_payload(payload, field)?;
-                let dek = crypto.unwrap_dek(ctx.version, &ctx.enc_dek)?;
-                let plaintext = crypto.decrypt_field(&dek, iv, enc_content)?;
-                // Verify SHA-256 integrity.
+                let plaintext = session.decrypt_field(iv, enc_content)?;
                 let computed = Sha256::digest(&plaintext);
                 if computed.as_slice() != stored_digest {
                     return Err(crate::crypto::CryptoError::DigestMismatch {
@@ -195,10 +192,9 @@ impl JsonTValue {
     pub fn decrypt_str(
         &self,
         field: &str,
-        ctx: &crate::crypto::CryptoContext,
-        crypto: &dyn crate::crypto::CryptoConfig,
+        session: &crate::crypto::CipherSession,
     ) -> Result<Option<String>, crate::crypto::CryptoError> {
-        match self.decrypt_bytes(field, ctx, crypto)? {
+        match self.decrypt_bytes(field, session)? {
             None => Ok(None),
             Some(bytes) => {
                 String::from_utf8(bytes)
@@ -546,18 +542,17 @@ impl JsonTRow {
     /// Decrypt a specific field by index and return it as a UTF-8 string.
     ///
     /// Uses the stream-level `CryptoContext` (from the EncryptHeader) together
-    /// with the caller-supplied `CryptoConfig` to unwrap the DEK and decrypt.
+    /// Decrypt the field at `index` if it is `Encrypted`, returning the UTF-8 string.
     ///
     /// Returns `Ok(None)` if the index is out of range or the value is not `Encrypted`.
     pub fn decrypt_field_str(
         &self,
         index: usize,
         field_name: &str,
-        ctx: &crate::crypto::CryptoContext,
-        crypto: &dyn crate::crypto::CryptoConfig,
+        session: &crate::crypto::CipherSession,
     ) -> Result<Option<String>, crate::crypto::CryptoError> {
         match self.fields.get(index) {
-            Some(v) => v.decrypt_str(field_name, ctx, crypto),
+            Some(v) => v.decrypt_str(field_name, session),
             None => Ok(None),
         }
     }

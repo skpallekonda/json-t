@@ -19,7 +19,7 @@ Thank you for your interest in contributing. JSON-T has two production implement
 
 **Rust:**
 ```sh
-cd code/rust/jsont
+cd code/rust
 cargo build
 ```
 
@@ -35,13 +35,14 @@ mvn clean package -DskipTests
 
 **Rust (unit + integration):**
 ```sh
-cd code/rust/jsont
+cd code/rust
 cargo test
 ```
 
 **Rust (performance benchmarks — opt-in only):**
 ```sh
-cargo test --features bench bench_wct -- --nocapture
+cd code/rust/jsont
+cargo test --release --features bench bench_wct -- --nocapture
 ```
 
 **Java (unit + integration):**
@@ -55,6 +56,30 @@ mvn test
 cd code/java
 mvn test -Pbenchmark
 ```
+
+### Cross-compatibility tests
+
+The `code/cross-compat/` directory holds persistent key pairs and committed fixture files that verify Rust and Java produce wire-compatible output. Run them in this order when adding encryption changes:
+
+```sh
+# 1. Rust generates its fixtures (no-ops if files already exist)
+cd code/rust
+cargo test --test cross_compat_tests            # crypto layer (jsont-crypto)
+cargo test --test encrypted_cross_compat_tests  # full encrypted stream (jsont)
+
+# 2. Java reads Rust fixtures and generates Java fixtures
+cd code/java
+mvn test -Dtest=CrossCompatTest                 # crypto layer
+mvn test -Dtest=EncryptedCrossCompatTest        # full encrypted stream
+
+# 3. Rust verifies Java fixtures
+cd code/rust
+cargo test --test cross_compat_tests
+cargo test --test encrypted_cross_compat_tests
+```
+
+`gen_*` tests skip silently when the output file already exists.
+`verify_*` tests fail hard when the other language's fixture is missing — this is intentional.
 
 ---
 

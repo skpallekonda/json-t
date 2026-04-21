@@ -82,12 +82,6 @@ impl<'a> JsonParser<'a> {
         }
     }
 
-    /// Returns true when the remaining input (after whitespace) is exhausted.
-    pub(crate) fn is_done(&mut self) -> bool {
-        self.skip_ws();
-        self.pos >= self.src.len()
-    }
-
     // ── Object ────────────────────────────────────────────────────────────────
 
     fn parse_object(&mut self) -> Result<JsonNode, String> {

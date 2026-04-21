@@ -17,7 +17,7 @@ All benchmarks use the **ICC Men's T20 World Cup Match schema**
 
 ## How to run
 
-**Rust** — run from `code/rust/jsont/` (feature-gated, excluded from normal `cargo test`):
+**Rust** — run from `code/rust/jsont/` (crate directory, not workspace root; feature-gated, excluded from normal `cargo test`):
 ```bash
 # All sizes in one run
 cargo test --release --features bench bench_wct -- --nocapture

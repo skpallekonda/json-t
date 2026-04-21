@@ -10,7 +10,7 @@
 // =============================================================================
 
 use std::collections::HashMap;
-use std::io::{BufRead, Read};
+use std::io::BufRead;
 
 use crate::error::{JsonTError, ParseError, StringifyError};
 use crate::model::data::{JsonTArray, JsonTNumber, JsonTRow, JsonTString, JsonTValue};

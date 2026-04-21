@@ -231,7 +231,12 @@ class BenchmarkTest {
     private static Schemas loadSchemas() throws IOException {
         String text = Files.readString(SCHEMA_PATH);
         JsonTNamespace ns = JsonTParser.parseNamespace(text);
-        SchemaRegistry registry = SchemaRegistry.fromNamespace(ns);
+        SchemaRegistry registry = SchemaRegistry.empty();
+        for (var catalog : ns.catalogs()) {
+            for (var schema : catalog.schemas()) {
+                registry = registry.register(schema);
+            }
+        }
         JsonTSchema cricket = registry.resolve("CricketMatch")
                 .orElseThrow(() -> new IllegalStateException("CricketMatch not found"));
         JsonTSchema broadcast = registry.resolve("MatchBroadcastSummary")

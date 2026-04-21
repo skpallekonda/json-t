@@ -7,7 +7,8 @@
 // =============================================================================
 
 pub use jsont_crypto::{
-    CryptoConfig, CryptoContext, CryptoError, EnvCryptoConfig, PassthroughCryptoConfig,
+    CipherSession, CryptoConfig, CryptoContext, CryptoError, EcdhCryptoConfig, EncryptedField,
+    EnvCryptoConfig, PassthroughCryptoConfig,
 };
 
 // =============================================================================

@@ -7,17 +7,17 @@
 //   5.3  — write_encrypted_stream: non-sensitive field written as plain value
 //   5.4  — write_encrypted_stream: sensitive Encrypted value re-encoded (no second crypto call)
 //   6.1  — try_parse_encrypt_header: round-trips CryptoContext via write_encrypted_stream
-//   6.2  — JsonTValue::decrypt_bytes: Encrypted payload → Some(plaintext) via CryptoContext
-//   6.3  — JsonTValue::decrypt_str: Encrypted payload → Some(string) via CryptoContext
+//   6.2  — JsonTValue::decrypt_bytes: Encrypted payload → Some(plaintext) via CipherSession
+//   6.3  — JsonTValue::decrypt_str: Encrypted payload → Some(string) via CipherSession
 //   6.4  — JsonTValue::decrypt_bytes: non-encrypted → None
-//   6.5  — JsonTRow::decrypt_field_str: Encrypted field → Some(string) via CryptoContext
+//   6.5  — JsonTRow::decrypt_field_str: Encrypted field → Some(string) via CipherSession
 //   6.6  — JsonTRow::decrypt_field_str: out-of-range index → None
 //   6.7  — JsonTRow::decrypt_field_str: non-encrypted field → None
-//   6.8  — transform_with_crypto: Decrypt op decrypts Encrypted → plain using CryptoContext
-//   6.9  — transform_with_crypto: idempotent on already-plaintext field
-//   6.10 — transform (no ctx/crypto): Decrypt op → DecryptFailed error
-//   6.11 — transform_with_crypto on straight schema → row unchanged
-//   misc — PassthroughCryptoConfig: wrap/unwrap/encrypt/decrypt round-trip
+//   6.8  — transform_with_session: Decrypt op decrypts Encrypted → plain using CipherSession
+//   6.9  — transform_with_session: idempotent on already-plaintext field
+//   6.10 — transform (no session): Decrypt op → DecryptFailed error
+//   6.11 — transform_with_session on straight schema → row unchanged
+//   misc — PassthroughCryptoConfig: wrap/unwrap round-trip; CipherSession encrypt/decrypt
 // =============================================================================
 
 use std::io::Cursor;
@@ -51,15 +51,15 @@ fn schema_fields(schema: &jsont::JsonTSchema) -> &[JsonTField] {
     }
 }
 
-/// Build a CryptoContext with a known all-zero DEK for tests.
-/// With PassthroughCryptoConfig, unwrap_dek returns the enc_dek unchanged, so
-/// enc_dek here == the raw DEK that will be used for field decryption.
+/// Build a CryptoContext with a known all-zero enc_dek for tests.
+/// With PassthroughCryptoConfig, unwrap_dek returns enc_dek unchanged, so
+/// enc_dek == plaintext DEK used for field encryption/decryption.
 fn test_ctx() -> CryptoContext {
     let dek = vec![0u8; 32];
     CryptoContext::new(CryptoContext::VERSION_AES_PUBKEY, dek)
 }
 
-/// Encode bytes to the plain base64 wire format (no prefix).
+/// Encode bytes to plain base64 wire format (no prefix).
 fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -67,15 +67,16 @@ fn base64_encode(bytes: &[u8]) -> String {
 
 /// Build a passthrough-encrypted field payload for `plaintext`.
 ///
-/// Uses PassthroughCryptoConfig: encrypt_field returns (iv=[0;12], enc=plaintext).
-/// The assembled payload is: [len_iv=12][len_digest=256][iv][sha256(plaintext)][plaintext].
+/// Opens a CipherSession from `test_ctx()` (all-zero DEK, AES-GCM) and
+/// assembles the full field payload: [iv_len][digest_len][iv][sha256][ciphertext].
 fn make_encrypted_payload(plaintext: &[u8]) -> Vec<u8> {
     use sha2::{Digest, Sha256};
-    use jsont::assemble_field_payload;
-    let crypto = PassthroughCryptoConfig;
-    let (iv, enc_content) = crypto.encrypt_field(&[0u8; 32], plaintext).unwrap();
-    let digest = Sha256::digest(plaintext).to_vec();
-    assemble_field_payload(&iv, &digest, &enc_content)
+    let ctx     = test_ctx();
+    let crypto  = PassthroughCryptoConfig;
+    let session = crypto.open_session(&ctx).unwrap();
+    let enc     = session.encrypt_field(plaintext).unwrap();
+    let digest  = Sha256::digest(plaintext).to_vec();
+    assemble_field_payload(&enc.iv, &digest, &enc.enc_content)
 }
 
 // =============================================================================
@@ -92,12 +93,13 @@ fn passthrough_wrap_unwrap_is_identity() {
 }
 
 #[test]
-fn passthrough_encrypt_decrypt_field_is_identity() {
-    let crypto = PassthroughCryptoConfig;
-    let dek = [0u8; 32];
+fn cipher_session_encrypt_decrypt_is_identity() {
+    let ctx     = test_ctx();
+    let crypto  = PassthroughCryptoConfig;
+    let session = crypto.open_session(&ctx).unwrap();
     let plaintext = b"hello-world";
-    let (iv, enc) = crypto.encrypt_field(&dek, plaintext).unwrap();
-    let dec = crypto.decrypt_field(&dek, &iv, &enc).unwrap();
+    let enc = session.encrypt_field(plaintext).unwrap();
+    let dec = session.decrypt_field(&enc.iv, &enc.enc_content).unwrap();
     assert_eq!(plaintext.as_slice(), dec.as_slice());
 }
 
@@ -119,7 +121,6 @@ fn write_stream_emits_encrypt_header_first() {
     write_encrypted_stream(&rows, fields, &crypto, CryptoContext::VERSION_AES_PUBKEY, &mut buf).unwrap();
     let out = String::from_utf8(buf.into_inner()).unwrap();
 
-    // First row must be the EncryptHeader.
     assert!(out.starts_with("{\"ENCRYPTED_HEADER\""), "first row must be EncryptHeader: {out}");
 }
 
@@ -137,9 +138,7 @@ fn write_stream_sensitive_field_is_base64_payload() {
     write_encrypted_stream(&rows, fields, &crypto, CryptoContext::VERSION_AES_PUBKEY, &mut buf).unwrap();
     let out = String::from_utf8(buf.into_inner()).unwrap();
 
-    // The ssn plaintext must NOT appear verbatim.
     assert!(!out.contains("\"123-45-6789\""), "ssn must not be plain: {out}");
-    // The second row (after the header) must have a quoted base64 for the ssn field.
     let data_row = out.split(",\n").nth(1).unwrap_or("");
     assert!(data_row.starts_with("{\"Alice\""), "name should be plain: {data_row}");
 }
@@ -168,7 +167,6 @@ fn write_stream_already_encrypted_value_reencoded() {
     let fields = schema_fields(&schema);
     let crypto = PassthroughCryptoConfig;
 
-    // ssn already holds a raw payload blob — should be base64-encoded as-is.
     let payload_bytes = make_encrypted_payload(b"already-encrypted");
     let rows = vec![JsonTRow::new(vec![
         JsonTValue::str("Dave"),
@@ -205,7 +203,6 @@ fn encrypt_header_round_trip_via_write_stream() {
     let ctx = try_parse_encrypt_header(header_row.as_ref().unwrap())
         .expect("should parse EncryptHeader");
     assert_eq!(ctx.version, CryptoContext::VERSION_AES_PUBKEY);
-    // PassthroughCryptoConfig wrap_dek returns DEK unchanged, and DEK is 32 random bytes.
     assert_eq!(ctx.enc_dek.len(), 32);
 }
 
@@ -215,38 +212,38 @@ fn encrypt_header_round_trip_via_write_stream() {
 
 #[test]
 fn decrypt_bytes_on_encrypted_returns_plaintext() {
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
     let payload = make_encrypted_payload(b"hello");
-    let val = JsonTValue::encrypted(payload);
-    let result = val.decrypt_bytes("f", &ctx, &crypto).unwrap();
+    let val     = JsonTValue::encrypted(payload);
+    let result  = val.decrypt_bytes("f", &session).unwrap();
     assert_eq!(result, Some(b"hello".to_vec()));
 }
 
 #[test]
 fn decrypt_str_on_encrypted_returns_string() {
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
     let payload = make_encrypted_payload(b"hello");
-    let val = JsonTValue::encrypted(payload);
-    let result = val.decrypt_str("f", &ctx, &crypto).unwrap();
+    let val     = JsonTValue::encrypted(payload);
+    let result  = val.decrypt_str("f", &session).unwrap();
     assert_eq!(result, Some("hello".to_string()));
 }
 
 #[test]
 fn decrypt_bytes_on_non_encrypted_returns_none() {
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
-    let val = JsonTValue::str("plaintext");
-    let result = val.decrypt_bytes("f", &ctx, &crypto).unwrap();
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
+    let val     = JsonTValue::str("plaintext");
+    let result  = val.decrypt_bytes("f", &session).unwrap();
     assert_eq!(result, None);
 }
 
 #[test]
 fn decrypt_bytes_on_null_returns_none() {
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
-    let result = JsonTValue::Null.decrypt_bytes("f", &ctx, &crypto).unwrap();
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
+    let result  = JsonTValue::Null.decrypt_bytes("f", &session).unwrap();
     assert_eq!(result, None);
 }
 
@@ -256,40 +253,40 @@ fn decrypt_bytes_on_null_returns_none() {
 
 #[test]
 fn row_decrypt_field_str_at_valid_encrypted_index() {
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
     let payload = make_encrypted_payload(b"123-45-6789");
-    let row = JsonTRow::new(vec![
+    let row     = JsonTRow::new(vec![
         JsonTValue::str("Alice"),
         JsonTValue::encrypted(payload),
     ]);
-    let result = row.decrypt_field_str(1, "ssn", &ctx, &crypto).unwrap();
+    let result = row.decrypt_field_str(1, "ssn", &session).unwrap();
     assert_eq!(result, Some("123-45-6789".to_string()));
 }
 
 #[test]
 fn row_decrypt_field_str_out_of_range_returns_none() {
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
-    let row = JsonTRow::new(vec![JsonTValue::str("Alice")]);
-    let result = row.decrypt_field_str(99, "ssn", &ctx, &crypto).unwrap();
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
+    let row     = JsonTRow::new(vec![JsonTValue::str("Alice")]);
+    let result  = row.decrypt_field_str(99, "ssn", &session).unwrap();
     assert_eq!(result, None);
 }
 
 #[test]
 fn row_decrypt_field_str_non_encrypted_returns_none() {
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
-    let row = JsonTRow::new(vec![
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
+    let row     = JsonTRow::new(vec![
         JsonTValue::str("Alice"),
         JsonTValue::str("plain ssn"),
     ]);
-    let result = row.decrypt_field_str(1, "ssn", &ctx, &crypto).unwrap();
+    let result = row.decrypt_field_str(1, "ssn", &session).unwrap();
     assert_eq!(result, None);
 }
 
 // =============================================================================
-// 6.8-6.11 — transform_with_crypto
+// 6.8-6.11 — transform_with_session
 // =============================================================================
 
 fn make_person_with_decrypt() -> (jsont::JsonTSchema, jsont::JsonTSchema, SchemaRegistry) {
@@ -312,67 +309,90 @@ fn make_person_with_decrypt() -> (jsont::JsonTSchema, jsont::JsonTSchema, Schema
 }
 
 #[test]
-fn transform_with_crypto_decrypts_encrypted_field() {
+fn transform_with_session_decrypts_encrypted_field() {
     let (_, derived, registry) = make_person_with_decrypt();
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
 
     let payload = make_encrypted_payload(b"123-45-6789");
-    let row = JsonTRow::new(vec![
+    let row     = JsonTRow::new(vec![
         JsonTValue::str("Alice"),
         JsonTValue::encrypted(payload),
     ]);
 
-    let result = derived.transform_with_crypto(row, &registry, &ctx, &crypto).unwrap();
+    let result = derived.transform_with_session(row, &registry, &session).unwrap();
     assert_eq!(result.fields[0], JsonTValue::str("Alice"));
     assert_eq!(result.fields[1], JsonTValue::str("123-45-6789"));
 }
 
 #[test]
-fn transform_with_crypto_idempotent_on_plaintext_field() {
+fn transform_with_session_idempotent_on_plaintext_field() {
     let (_, derived, registry) = make_person_with_decrypt();
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
 
-    // ssn already plaintext — Decrypt should leave it unchanged.
     let row = JsonTRow::new(vec![
         JsonTValue::str("Bob"),
         JsonTValue::str("000-11-2222"),
     ]);
 
-    let result = derived.transform_with_crypto(row, &registry, &ctx, &crypto).unwrap();
+    let result = derived.transform_with_session(row, &registry, &session).unwrap();
     assert_eq!(result.fields[1], JsonTValue::str("000-11-2222"));
 }
 
 #[test]
-fn transform_without_crypto_returns_err_for_decrypt_op() {
+fn transform_without_session_returns_err_for_decrypt_op() {
     let (_, derived, registry) = make_person_with_decrypt();
 
     let payload = make_encrypted_payload(b"secret");
-    let row = JsonTRow::new(vec![
+    let row     = JsonTRow::new(vec![
         JsonTValue::str("Carol"),
         JsonTValue::encrypted(payload),
     ]);
 
-    // RowTransformer::transform passes None for crypto — Decrypt must fail.
+    // RowTransformer::transform passes None for session — Decrypt must fail.
     let result = derived.transform(row, &registry);
-    assert!(result.is_err(), "expected error when Decrypt has no CryptoConfig");
+    assert!(result.is_err(), "expected error when Decrypt has no CipherSession");
 }
 
 #[test]
-fn transform_with_crypto_straight_schema_unchanged() {
+fn transform_with_session_straight_schema_unchanged() {
     let schema = JsonTSchemaBuilder::straight("Simple")
         .field(JsonTFieldBuilder::scalar("x", ScalarType::I32).build().unwrap()).unwrap()
         .build()
         .unwrap();
     let mut registry = SchemaRegistry::new();
     registry.register(schema.clone());
-    let ctx = test_ctx();
-    let crypto = PassthroughCryptoConfig;
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
 
-    let row = JsonTRow::new(vec![JsonTValue::i32(42)]);
-    let result = schema.transform_with_crypto(row.clone(), &registry, &ctx, &crypto).unwrap();
+    let row    = JsonTRow::new(vec![JsonTValue::i32(42)]);
+    let result = schema.transform_with_session(row.clone(), &registry, &session).unwrap();
     assert_eq!(result, row);
+}
+
+// =============================================================================
+// Digest mismatch — mirrors Java CryptoTests 6.5
+// =============================================================================
+
+#[test]
+fn decrypt_bytes_digest_mismatch_returns_error() {
+    use sha2::{Digest, Sha256};
+    let ctx     = test_ctx();
+    let session = PassthroughCryptoConfig.open_session(&ctx).unwrap();
+
+    // Encrypt real content but substitute a wrong (all-zeros) digest.
+    let plaintext = b"data";
+    let enc       = session.encrypt_field(plaintext).unwrap();
+    let wrong_digest = vec![0u8; 32]; // deliberately incorrect
+    let bad_payload  = assemble_field_payload(&enc.iv, &wrong_digest, &enc.enc_content);
+
+    let val    = JsonTValue::encrypted(bad_payload);
+    let result = val.decrypt_bytes("f", &session);
+    assert!(
+        matches!(result, Err(jsont::CryptoError::DigestMismatch { .. })),
+        "expected DigestMismatch, got {result:?}"
+    );
 }
 
 // =============================================================================
@@ -398,39 +418,36 @@ fn end_to_end_write_read_roundtrip() {
     write_encrypted_stream(&rows, fields, &crypto, CryptoContext::VERSION_AES_PUBKEY, &mut buf).unwrap();
     let wire = String::from_utf8(buf.into_inner()).unwrap();
 
-    // Parse all rows (raw scanner — no validation pipeline).
+    // Parse all rows.
     let mut parsed_rows = Vec::new();
     jsont::parse_rows(&wire, |r| parsed_rows.push(r)).unwrap();
-
     assert_eq!(parsed_rows.len(), 2, "expected header + 1 data row");
 
-    // First row: EncryptHeader → CryptoContext.
-    let ctx = try_parse_encrypt_header(&parsed_rows[0])
-        .expect("first row must be EncryptHeader");
+    // First row: EncryptHeader → CryptoContext → CipherSession.
+    let ctx     = try_parse_encrypt_header(&parsed_rows[0]).expect("first row must be EncryptHeader");
+    let session = crypto.open_session(&ctx).unwrap();
 
-    // Data row: name is plain, ssn is a quoted base64 string (raw scanner output).
+    // Data row: name is plain, ssn is a quoted base64 string.
     let data_row = &parsed_rows[1];
     assert_eq!(data_row.fields[0], JsonTValue::str("Alice"), "name should be plain");
-    let ssn_b64 = data_row.fields[1].as_str()
-        .expect("ssn must be a string on the wire");
+    let ssn_b64 = data_row.fields[1].as_str().expect("ssn must be a string on the wire");
 
     // Base64-decode the ssn wire value → payload bytes.
     let payload_bytes = base64::engine::general_purpose::STANDARD
         .decode(ssn_b64)
         .expect("ssn must be valid base64");
 
-    // Parse the payload → decrypt manually.
+    // Parse the payload → decrypt via session.
     let (iv, stored_digest, enc_content) =
         parse_field_payload(&payload_bytes, "ssn").unwrap();
-    let dek = crypto.unwrap_dek(ctx.version, &ctx.enc_dek).unwrap();
-    let plaintext = crypto.decrypt_field(&dek, iv, enc_content).unwrap();
+    let plaintext = session.decrypt_field(iv, enc_content).unwrap();
     // Verify digest.
     let computed = Sha256::digest(&plaintext);
     assert_eq!(computed.as_slice(), stored_digest);
     assert_eq!(plaintext, b"123-45-6789");
 
-    // Alternatively: wrap in Encrypted and use the high-level API.
-    let enc_val = JsonTValue::encrypted(payload_bytes);
-    let decrypted = enc_val.decrypt_str("ssn", &ctx, &crypto).unwrap().unwrap();
+    // High-level API path.
+    let enc_val   = JsonTValue::encrypted(payload_bytes);
+    let decrypted = enc_val.decrypt_str("ssn", &session).unwrap().unwrap();
     assert_eq!(decrypted, "123-45-6789");
 }

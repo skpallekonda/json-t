@@ -11,7 +11,7 @@
 use std::io::{self, Write};
 
 use crate::error::{JsonTError, StringifyError};
-use crate::model::data::{JsonTNumber, JsonTRow, JsonTString, JsonTValue};
+use crate::model::data::{JsonTNumber, JsonTRow, JsonTValue};
 use crate::model::field::JsonTField;
 use crate::model::schema::{JsonTSchema, SchemaKind};
 
