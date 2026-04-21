@@ -1,0 +1,74 @@
+{
+  // ── 0010: Interchange Control Header (ISA) ─────────────────────────
+  {
+    "00", "          ", "00", "          ",
+    "ZZ", "SENDER-ID      ",
+    "ZZ", "RECEIVER-ID    ",
+    "2026-04-09", "11:20:00", "^", "00501",
+    999888777, "0", "P", ":"
+  },
+
+  // ── 0015: Functional Group Loop ──────────────────────────────────
+  [
+    {
+      // Functional Group Header (GS)
+      { "BE", "CORP-SENDER", "INSURE-RECEIVE", "2026-04-09", "11:20:00", 888777666, "X", "005010X220A1" },
+
+      // Transaction Set Loop
+      [
+        {
+          { "834", "1001" },  // ST Segment
+          { ORIGINAL, "BATCH-2026-001", "2026-04-09", "11:20:00", "ET", "2" },  // BGN
+          { "AY", "2", "GLOBAL TECH INC", "FI", "99-8887776" },  // Loop 1000A (Sponsor)
+          { "PR", "2", "UNITED HEALTHCARE", "PI", "UHC-001" },   // Loop 1000B (Payer)
+
+          // ── Members (Loop 2000) ───────────────────────────────────
+          [
+            // 1. Primary Subscriber (Self)
+            {
+              { "Y", SELF, ADDITION, BIRTH, "A", "1", "N", "FT" },        // INS
+              [ { "0F", "MEM-1001" }, { "SS", "123456789" } ],             // REF
+              [ { "348", "D8", "20260101" }, { "349", "D8", "20261231" } ], // DTP
+              { "IL", "1", "DOE", "JOHN", "ALAN", "MR", "MEM-1001" },      // NM1
+              { "D8", "1980-05-15", MALE, MARRIED },                        // DMG
+              [
+                { { ADDITION, "HLT", "PREMIUM PPO" }, [ { "348", "D8", "20260101" } ] }
+              ]  // Coverage
+            },
+
+            // 2. Spouse Dependent
+            {
+              { "N", SPOUSE, ADDITION, MARRIAGE, "A", "2", "N", "PT" },    // INS
+              [ { "0F", "MEM-1001-S" }, { "SS", "987654321" } ],           // REF
+              [ { "348", "D8", "20260101" } ],                              // DTP
+              { "IL", "1", "DOE", "JANE", "MARIE", "MRS", "MEM-1001-S" }, // NM1
+              { "D8", "1982-08-20", FEMALE, MARRIED },                     // DMG
+              [
+                { { ADDITION, "HLT", "PREMIUM PPO" }, [ { "348", "D8", "20260101" } ] }
+              ]  // Coverage
+            },
+
+            // 3. Child Dependent
+            {
+              { "N", CHILD, ADDITION, BIRTH, "A", "3", "N", "NA" },        // INS
+              [ { "0F", "MEM-1001-C1" }, { "SS", "555667777" } ],          // REF
+              [ { "348", "D8", "20260101" } ],                              // DTP
+              { "IL", "1", "DOE", "JIMMY", "RAY", "JR", "MEM-1001-C1" },  // NM1
+              { "D8", "2015-11-10", MALE, SINGLE },                        // DMG
+              [
+                { { ADDITION, "HLT", "PREMIUM PPO" }, [ { "348", "D8", "20260101" } ] }
+              ]  // Coverage
+            }
+          ],
+
+          { 45, "1001" }  // SE Trailer
+        }
+      ],
+
+      { 1, 888777666 }  // GE Trailer
+    }
+  ],
+
+  // ── 0030: Interchange Control Trailer (IEA) ─────────────────────────
+  { 1, 999888777 }
+}

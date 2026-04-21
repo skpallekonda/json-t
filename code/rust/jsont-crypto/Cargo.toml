@@ -1,0 +1,21 @@
+[package]
+name        = "jsont-crypto"
+version     = "0.2.0"
+edition     = "2021"
+description = "Envelope encryption for JsonT streams"
+license     = "MIT"
+repository  = "https://github.com/datakore/json-t"
+
+[dependencies]
+thiserror        = "1"
+aes-gcm          = "0.10"
+chacha20poly1305 = "0.10"
+ascon-aead       = "0.2"
+sha2             = "0.10"
+rand             = { version = "0.8", features = ["std", "std_rng"] }
+rsa              = { version = "0.9", features = ["sha2"] }
+p256             = { version = "0.13", features = ["ecdh", "pkcs8"] }
+hkdf             = "0.12"
+pkcs8            = { version = "0.10", features = ["pem", "std"] }
+base64           = "0.22"
+zeroize          = "1"

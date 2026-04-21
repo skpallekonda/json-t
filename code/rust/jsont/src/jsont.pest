@@ -1,0 +1,531 @@
+// =============================================================================
+// JsonT.pest  —  PEG grammar for JsonT, converted from JsonT.g4 (ANTLRv4)
+// Target crate: pest (https://pest.rs)
+// Source: uploaded JsonT.g4 (v2 — data-schema moved into namespace block,
+//         chunkData renamed to dataRows and promoted to top-level)
+// =============================================================================
+//
+// DECISION LOG (referenced in comments below as [D-N])
+//
+// [D-1] IDENTIFIER ORDERING — CONSTID vs SCHEMAID vs FIELDID
+//   ANTLR uses longest-match (maximal munch) across all lexer rules globally.
+//   PEG tries alternatives strictly in order and stops at the first match.
+//   CONSTID  = [A-Z][A-Z0-9_]+   (uppercase-only body, 2+ chars total)
+//   SCHEMAID = [A-Z][a-zA-Z0-9_]* (mixed body, 1+ chars — subsumes CONSTID)
+//   FIELDID  = [a-z][a-zA-Z0-9_]* (lowercase-start — disjoint from above)
+//   Fix: wherever both CONSTID and SCHEMAID could appear, always try CONSTID
+//   first. FIELDID is disjoint (lowercase start) so ordering relative to the
+//   other two does not matter, but we place it last for readability.
+//   Also applies inside primary_expression: function_call (FIELDID + "(")
+//   must be tried before field_path so the "(" disambiguates cleanly.
+//
+// [D-2] NUMBER vs MINUS operator
+//   ANTLR tokenises '-' as a standalone MINUS token; the NUMBER rule also
+//   begins with an optional '-'. In PEG the same input position is shared,
+//   so "-3" inside an expression could be consumed as MINUS + "3" OR as a
+//   negative NUMBER, causing ambiguity.
+//   Decision: strip the leading '-' from the NUMBER primitive and handle
+//   negation exclusively via unary_expression ("-" ~ unary_expression).
+//   This matches common PEG/Pratt practice. If negative number literals are
+//   needed in data rows they are expressed as unary-minus on a positive number.
+//
+// [D-3] KEYWORD vs IDENTIFIER shadowing
+//   In ANTLR, keywords win over identifiers globally. In PEG there is no
+//   global priority — whichever rule is tried first wins locally. Any keyword
+//   sharing a prefix with FIELDID/SCHEMAID must end with !id_continue so that
+//   e.g. "required_if" is not partially consumed as keyword "required".
+//   Every keyword rule below ends with !id_continue for this reason.
+//
+// [D-4] TRAILING COMMA in dataRows
+//   The ANTLR rule is:  dataRow (COMMA dataRow)* COMMA?
+//   In PEG this is a direct transcription: dataRow ~ ("," ~ dataRow)* ~ ","?
+//   No structural change needed.
+//
+// [D-5] NULL keyword — 'null' | 'nil'
+//   Both spellings are semantically equivalent in JsonT. "null" is listed
+//   first to mirror JSON convention. Since "null" and "nil" share only the
+//   leading "n", either order is safe — this is purely a readability choice.
+//
+// [D-6] data-schema moved into namespace (NEW vs previous grammar version)
+//   In the previous grammar, data-schema lived in a separate top-level `data`
+//   block. In this version it is declared inline inside the namespace block,
+//   after the catalogs list. The pest rule mirrors this exactly — no wrapper
+//   rule needed. The old `data`, `dataSection`, `dataSchemaSection` rules are
+//   removed entirely.
+//
+// =============================================================================
+
+
+// ---------------------------------------------------------------------------
+// WHITESPACE  (pest inserts WHITESPACE silently between ~ tokens in non-atomic
+// rules, replicating ANTLR's WS -> skip behaviour)
+// ---------------------------------------------------------------------------
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT    = _{ ("//" ~ (!"\n" ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
+
+// id_continue is used for keyword boundary checks [D-3]
+id_continue = _{ ASCII_ALPHANUMERIC | "_" }
+
+
+// =============================================================================
+// TOP-LEVEL
+// =============================================================================
+
+// [D-6] Top level is now: optional namespace, optional dataRows — the old
+// separate `data?` wrapper is gone.
+json_t = { SOI ~ namespace? ~ data_rows? ~ EOI }
+
+
+// =============================================================================
+// NAMESPACE / CATALOG
+// =============================================================================
+
+// [D-6] data-schema is now declared at the end of the namespace block, after
+// the catalogs array and a separating comma. Mirrors the updated ANTLR rule.
+namespace = {
+    "{" ~ kw_namespace ~ ":" ~ "{"
+        ~ kw_base_url    ~ ":" ~ ns_base_url ~ ","
+        ~ kw_version     ~ ":" ~ ns_version  ~ ","
+        ~ kw_catalogs    ~ ":" ~ "[" ~ catalog ~ ("," ~ catalog)* ~ "]" ~ ","
+        ~ kw_data_schema ~ ":" ~ SCHEMAID
+    ~ "}" ~ "}"
+}
+
+catalog = {
+    "{" ~ schemas_section ~ ("," ~ enums_section)? ~ "}"
+}
+
+schemas_section = {
+    kw_schemas ~ ":" ~ "[" ~ schema_entry ~ ("," ~ schema_entry)* ~ "]"
+}
+
+
+// =============================================================================
+// SCHEMA ENTRY & DEFINITION
+// =============================================================================
+
+schema_entry      = { ns_schema_name ~ ":" ~ schema_definition }
+schema_definition = { straight_schema | derived_schema }
+
+straight_schema = {
+    "{" ~ field_block ~ ("," ~ validation_block)? ~ "}"
+}
+
+derived_schema = {
+    kw_from ~ ns_schema_name
+    ~ "{" ~ operations_block ~ ("," ~ validation_block)? ~ "}"
+}
+
+
+// =============================================================================
+// FIELD BLOCK
+// =============================================================================
+
+field_block = {
+    kw_fields ~ ":" ~ "{" ~ field_decl ~ ("," ~ field_decl)* ~ "}"
+}
+
+// [D-1] scalar_field_decl starts with a type keyword; object_field_decl starts
+// with "<"; any_of_field_decl starts with "anyOf(". Try any_of first so that
+// "anyOf" is not consumed as a FIELDID inside scalar_field_decl.
+field_decl = { any_of_field_decl | scalar_field_decl | object_field_decl }
+
+scalar_field_decl = {
+    scalar_type_ref ~ sensitive_mark? ~ ":" ~ ns_field_name ~ optional_mark?
+    ~ ("[" ~ scalar_attribute ~ ("," ~ scalar_attribute)* ~ "]")?
+}
+
+/// Marks a scalar field as sensitive (encrypted on the wire).
+sensitive_mark = { "~" }
+
+object_field_decl = {
+    object_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
+    ~ ("[" ~ object_attribute ~ ("," ~ object_attribute)* ~ "]")?
+}
+
+// anyOf field — union of two or more scalar or schema-ref variants.
+// Discriminator clause (on "fieldName") required when ≥2 variants are full
+// object schemas; optional otherwise.  Constraints follow the object model
+// (required, array_items) since value/length constraints are variant-specific.
+any_of_field_decl = {
+    any_of_type_ref ~ ":" ~ ns_field_name ~ optional_mark?
+    ~ ("[" ~ common_constraints_section ~ "]")?
+}
+
+any_of_type_ref = {
+    kw_any_of ~ "(" ~ any_of_variant ~ ("|" ~ any_of_variant)+ ~ ")"
+    ~ array_suffix?
+    ~ (kw_on ~ string)?
+}
+
+// object_type_ref tried first — "<" makes it unambiguous vs scalar keywords.
+any_of_variant = { object_type_ref | scalar_type_ref }
+
+scalar_attribute = { scalar_constraint | default_value | constant_value }
+object_attribute = { common_constraint }
+
+optional_mark    = { "?" }
+object_type_ref  = { "<" ~ object_type_name ~ ">" ~ array_suffix? }
+scalar_type_ref  = { scalar_types ~ array_suffix? }
+object_type_name = { SCHEMAID }
+array_suffix     = { "[" ~ "]" }
+
+
+// =============================================================================
+// SCALAR TYPES
+// =============================================================================
+
+scalar_types = {
+    numeric_types | boolean_types | string_types | temporal_types | binary_types
+}
+
+// [D-3] Type keywords need boundary check so e.g. "datetime" is not consumed
+// as "date". Longer / more-specific keywords are listed first within each group.
+
+numeric_types = {
+    kw_i16 | kw_i32 | kw_i64
+    | kw_u16 | kw_u32 | kw_u64
+    | kw_d128 | kw_d32 | kw_d64   // d128 before d32/d64 — shares "d" prefix
+}
+
+boolean_types = { kw_bool }
+
+string_types = {
+    kw_hostname                    // longest first to avoid prefix shadowing
+    | kw_nstr | kw_str
+    | kw_uuid | kw_uri
+    | kw_email | kw_ipv4 | kw_ipv6
+}
+
+temporal_types = {
+    kw_datetime | kw_timestamp | kw_duration   // longer keywords first [D-3]
+    | kw_date | kw_time | kw_inst | kw_tsz
+}
+
+binary_types = { kw_base64 | kw_oid | kw_hex }
+
+
+// =============================================================================
+// CONSTRAINTS
+// =============================================================================
+
+common_constraints_section = { common_constraint ~ ("," ~ common_constraint)* }
+scalar_constraints_section = { scalar_constraint ~ ("," ~ scalar_constraint)* }
+
+common_constraint = { required_constraint | array_items_constraint }
+
+scalar_constraint = {
+    value_constraint | length_constraint | regex_constraint | common_constraint
+}
+
+required_constraint = { kw_required ~ "=" ~ boolean }
+
+value_constraint = {
+    "(" ~ value_constraint_option ~ ("," ~ value_constraint_option)* ~ ")"
+}
+value_constraint_option = { value_constraint_kw ~ "=" ~ number }
+
+length_constraint = {
+    "(" ~ length_constraint_option ~ ("," ~ length_constraint_option)* ~ ")"
+}
+length_constraint_option = { length_constraint_kw ~ "=" ~ number }
+
+array_items_constraint = {
+    "(" ~ array_items_constraint_option ~ ("," ~ array_items_constraint_option)* ~ ")"
+}
+array_items_constraint_option = {
+    (array_constraint_nbr  ~ "=" ~ number)
+    | (array_constraint_bool ~ "=" ~ boolean)
+}
+
+regex_constraint = { regex_kw ~ "=" ~ string }
+
+
+// =============================================================================
+// DERIVED SCHEMA — OPERATIONS
+// =============================================================================
+
+operations_block = {
+    kw_operations ~ ":" ~ "(" ~ schema_operation ~ ("," ~ schema_operation)* ~ ")"
+}
+
+schema_operation = {
+    rename_operation
+    | exclude_operation
+    | project_operation
+    | transform_operation
+    | filter_operation
+    | decrypt_operation
+}
+
+rename_operation    = { kw_rename    ~ "(" ~ rename_pair ~ ("," ~ rename_pair)* ~ ")" }
+decrypt_operation   = { kw_decrypt   ~ "(" ~ field_path_list ~ ")" }
+rename_pair         = { field_path ~ kw_as ~ ns_field_name }
+exclude_operation   = { kw_exclude   ~ "(" ~ field_path_list ~ ")" }
+project_operation   = { kw_project   ~ "(" ~ field_path_list ~ ")" }
+filter_operation    = { kw_filter    ~ expression }
+transform_operation = { kw_transform ~ field_path ~ "=" ~ expression }
+
+
+// =============================================================================
+// FIELD PATH
+// =============================================================================
+
+field_path      = { ns_field_name ~ ("." ~ ns_field_name)* }
+field_path_list = { field_path ~ ("," ~ field_path)* }
+
+
+// =============================================================================
+// EXPRESSIONS
+// (Already left-factored in ANTLR; maps cleanly to iterative PEG)
+// =============================================================================
+
+expression             = { logical_or_expression }
+logical_or_expression  = { logical_and_expression ~ (op_or  ~ logical_and_expression)* }
+logical_and_expression = { equality_expression    ~ (op_and ~ equality_expression)* }
+
+equality_expression = {
+    relational_expression ~ ((op_eeq | op_neq) ~ relational_expression)*
+}
+
+// [D-3] <= and >= must come before < and > to avoid partial match
+relational_expression = {
+    additive_expression ~ ((op_le | op_ge | op_lt | op_gt) ~ additive_expression)*
+}
+
+additive_expression = {
+    multiplicative_expression ~ ((op_plus | op_minus) ~ multiplicative_expression)*
+}
+
+multiplicative_expression = {
+    unary_expression ~ ((op_star | op_div) ~ unary_expression)*
+}
+
+// [D-2] Unary minus handled here — NOT as part of the number literal.
+// Both "!" (logical not) and "-" (arithmetic negation) are unary prefix ops.
+// Named op rules are used (not inline literals) so the operator Pair appears
+// in the parse tree and build_unary can read it.
+unary_expression = {
+    (op_not ~ unary_expression)
+    | (op_neg ~ unary_expression)
+    | primary_expression
+}
+
+// [D-1] function_call tried before field_path — both start with FIELDID,
+// but function_call requires "(" immediately after, which disambiguates.
+primary_expression = {
+    literal
+    | function_call
+    | field_path
+    | ("(" ~ expression ~ ")")
+}
+
+function_call = { FIELDID ~ "(" ~ argument_list? ~ ")" }
+argument_list = { expression ~ ("," ~ expression)* }
+
+// Operators as NON-silent rules so they produce Pair nodes in the parse tree.
+// The parser (build_binary_chain / build_unary) reads them via pair.as_str().
+// Silent rules (_{ }) are invisible to Pairs iterators and would make the
+// operator undetectable at parse time.
+op_or    = { "||" }
+op_and   = { "&&" }
+op_eeq   = { "==" }
+op_neq   = { "!=" }
+op_le    = { "<=" }
+op_ge    = { ">=" }
+op_lt    = { "<" }
+op_gt    = { ">" }
+op_plus  = { "+" }
+op_minus = { "-" }
+op_star  = { "*" }
+op_div   = { "/" }
+op_not   = { "!" }
+op_neg   = { "-" }
+
+
+// =============================================================================
+// VALIDATIONS
+// =============================================================================
+
+validation_block = {
+    kw_validations ~ ":" ~ "{"
+        ~ rules_block?
+        ~ unique_block?
+        ~ dataset_block?
+    ~ "}"
+}
+
+rules_block   = { kw_rules   ~ "{" ~ rule   ~ ("," ~ rule)*   ~ "}" }
+unique_block  = { kw_unique  ~ "{" ~ unique_entry ~ ("," ~ unique_entry)* ~ "}" }
+dataset_block = { kw_dataset ~ "{" ~ expression   ~ ("," ~ expression)*  ~ "}" }
+
+unique_entry = { "(" ~ field_path_list ~ ")" }
+
+// [D-3] conditional_requirement must be tried before plain expression:
+// both start with an expression, but conditional_requirement requires "->"
+// after it. PEG ordered choice: if "->" is absent the second branch fires.
+rule = { conditional_requirement | expression }
+
+conditional_requirement = {
+    expression ~ "->" ~ kw_required ~ "(" ~ field_path_list ~ ")"
+}
+
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enums_section       = { kw_enums ~ ":" ~ "[" ~ enum_def ~ ("," ~ enum_def)* ~ "]" }
+enum_def            = { ns_enum_name ~ ":" ~ enum_body }
+enum_body           = { "[" ~ enum_value_constant ~ ("," ~ enum_value_constant)* ~ "]" }
+enum_value_constant = { CONSTID }
+
+
+// =============================================================================
+// DATA ROWS
+// [D-6] Old `data` / `dataSection` / `dataSchemaSection` wrapper rules are
+// removed. data_rows is now a direct top-level alternative in json_t, and
+// data-schema lives inside the namespace block.
+// [D-4] Trailing comma preserved: data_row ~ ("," ~ data_row)* ~ ","?
+// =============================================================================
+
+data_rows = { data_row ~ ("," ~ data_row)* ~ ","? }
+data_row  = { object_value }
+
+
+// =============================================================================
+// VALUES
+// =============================================================================
+
+literal = { scalar_value | null_value }
+
+// [D-1] enum_value (CONSTID) before object_value/array_value — CONSTID is the
+// stricter pattern; trying it first avoids misclassifying an all-caps identifier
+// as a generic SCHEMAID inside a value context.
+value = {
+    literal
+    | unspecified_value
+    | enum_value
+    | object_value
+    | array_value
+}
+
+null_value        = { kw_null }
+unspecified_value = { "_" }
+scalar_value      = { string | number | boolean }
+enum_value        = { CONSTID }
+object_value      = { "{" ~ value ~ ("," ~ value)* ~ "}" }
+array_value       = { "[" ~ value ~ ("," ~ value)* ~ "]" }
+
+
+// =============================================================================
+// FIELD & SCHEMA NAME WRAPPERS
+// (thin wrappers — give semantic names to parse tree nodes)
+// =============================================================================
+
+ns_base_url    = { string }
+ns_version     = { string }
+ns_schema_name = { SCHEMAID }
+ns_field_name  = { FIELDID }
+ns_enum_name   = { SCHEMAID }
+
+default_value  = { kw_default ~ (scalar_value | null_value) }
+constant_value = { kw_const   ~ scalar_value }
+
+
+// =============================================================================
+// TERMINAL RULES — PRIMITIVES
+// =============================================================================
+
+// [D-2] No leading '-' in number; negation is in unary_expression.
+number  = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+
+boolean = @{ "true" | "false" }
+
+// Atomic — prevents pest WHITESPACE rule from inserting spaces inside strings
+string = @{
+    ("\"" ~ (("\\" ~ ANY) | (!"\"" ~ ANY))* ~ "\"")
+    | ("'"  ~ (("\\" ~ ANY) | (!"'"  ~ ANY))* ~ "'")
+}
+
+// [D-1] CONSTID before SCHEMAID — CONSTID is the stricter (all-uppercase body)
+// pattern. If SCHEMAID were tried first it would consume everything CONSTID
+// matches, making CONSTID unreachable.
+// CONSTID  = [A-Z][A-Z0-9_]+    (all-uppercase body, 2+ chars total)
+// SCHEMAID = [A-Z][a-zA-Z0-9_]* (mixed body, 1 char minimum after first char)
+CONSTID  = @{ ASCII_ALPHA_UPPER ~ (ASCII_ALPHA_UPPER | ASCII_DIGIT | "_")+ }
+SCHEMAID = @{ ASCII_ALPHA_UPPER ~ (ASCII_ALPHANUMERIC | "_")* }
+FIELDID  = @{ ASCII_ALPHA_LOWER ~ (ASCII_ALPHANUMERIC | "_")* }
+
+
+// =============================================================================
+// KEYWORDS
+// All atomic (@) and terminated with !id_continue [D-3].
+// Prevents e.g. "required_if" being partially consumed as "required".
+// =============================================================================
+
+kw_namespace   = @{ "namespace"   ~ !id_continue }
+kw_base_url    = @{ "baseUrl"     ~ !id_continue }
+kw_version     = @{ "version"     ~ !id_continue }
+kw_catalogs    = @{ "catalogs"    ~ !id_continue }
+kw_schemas     = @{ "schemas"     ~ !id_continue }
+kw_data_schema = @{ "data-schema" ~ !id_continue }  // hyphen is not in id_continue anyway
+kw_enums       = @{ "enums"       ~ !id_continue }
+kw_fields      = @{ "fields"      ~ !id_continue }
+kw_from        = @{ "FROM"        ~ !id_continue }
+kw_validations = @{ "validations" ~ !id_continue }
+kw_operations  = @{ "operations"  ~ !id_continue }
+kw_default     = @{ "default"     ~ !id_continue }
+kw_const       = @{ "const"       ~ !id_continue }
+kw_rules       = @{ "rules"       ~ !id_continue }
+kw_unique      = @{ "unique"      ~ !id_continue }
+kw_dataset     = @{ "dataset"     ~ !id_continue }
+kw_required    = @{ "required"    ~ !id_continue }
+kw_rename      = @{ "rename"      ~ !id_continue }
+kw_decrypt     = @{ "decrypt"     ~ !id_continue }
+kw_exclude     = @{ "exclude"     ~ !id_continue }
+kw_project     = @{ "project"     ~ !id_continue }
+kw_filter      = @{ "filter"      ~ !id_continue }
+kw_transform   = @{ "transform"   ~ !id_continue }
+kw_as          = @{ "as"          ~ !id_continue }
+kw_null        = @{ ("null" | "nil") ~ !id_continue }  // [D-5] "null" first — JSON convention
+kw_any_of      = @{ "anyOf"       ~ !id_continue }
+kw_on          = @{ "on"          ~ !id_continue }
+
+// Constraint keywords
+value_constraint_kw   = @{ ("minValue" | "maxValue" | "minPrecision" | "maxPrecision") ~ !id_continue }
+length_constraint_kw  = @{ ("minLength" | "maxLength") ~ !id_continue }
+array_constraint_nbr  = @{ ("minItems" | "maxItems" | "maxNullItems") ~ !id_continue }
+array_constraint_bool = @{ "allowNullItems" ~ !id_continue }
+regex_kw              = @{ ("regex" | "pattern") ~ !id_continue }
+
+// Type keywords — longer/more-specific listed first within each group [D-3]
+kw_i16       = @{ "i16"       ~ !id_continue }
+kw_i32       = @{ "i32"       ~ !id_continue }
+kw_i64       = @{ "i64"       ~ !id_continue }
+kw_u16       = @{ "u16"       ~ !id_continue }
+kw_u32       = @{ "u32"       ~ !id_continue }
+kw_u64       = @{ "u64"       ~ !id_continue }
+kw_d32       = @{ "d32"       ~ !id_continue }
+kw_d64       = @{ "d64"       ~ !id_continue }
+kw_d128      = @{ "d128"      ~ !id_continue }
+kw_date      = @{ "date"      ~ !id_continue }
+kw_time      = @{ "time"      ~ !id_continue }
+kw_datetime  = @{ "datetime"  ~ !id_continue }
+kw_timestamp = @{ "timestamp" ~ !id_continue }
+kw_tsz       = @{ "tsz"       ~ !id_continue }
+kw_duration  = @{ "duration"  ~ !id_continue }
+kw_inst      = @{ "inst"      ~ !id_continue }
+kw_base64    = @{ "base64"    ~ !id_continue }
+kw_oid       = @{ "oid"       ~ !id_continue }
+kw_hex       = @{ "hex"       ~ !id_continue }
+kw_str       = @{ "str"       ~ !id_continue }
+kw_nstr      = @{ "nstr"      ~ !id_continue }
+kw_uri       = @{ "uri"       ~ !id_continue }
+kw_uuid      = @{ "uuid"      ~ !id_continue }
+kw_email     = @{ "email"     ~ !id_continue }
+kw_hostname  = @{ "hostname"  ~ !id_continue }
+kw_ipv4      = @{ "ipv4"      ~ !id_continue }
+kw_ipv6      = @{ "ipv6"      ~ !id_continue }
+kw_bool      = @{ "bool"      ~ !id_continue }

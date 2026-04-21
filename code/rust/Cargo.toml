@@ -1,0 +1,3 @@
+[workspace]
+members  = ["jsont", "jsont-crypto"]
+resolver = "2"

@@ -1,0 +1,40 @@
+{
+  // ISO 20022 pain.001 Example
+
+  // GroupHeader
+  {
+    "MSG-ID-2026-001",
+    "2026-04-09T10:30:00Z",
+    1,
+    1500.50,
+    { "ACME HOLDINGS", "ID-999", { "US", "Wall St 1", "Suite 100", "10005", "New York" } }
+  },
+
+  // PaymentInformation (array)
+  // Fields: paymentInfoId, paymentMethod, requestedExecutionDate, debtor, debtorAccount,
+  //         debtorAgent, creditTransfers[], instructionPriority?, chargeBearer?
+  [
+    {
+      "PMT-INF-001",
+      TRF_CREDIT,
+      "2026-04-10",
+      { "ACME HOLDINGS", "ID-999", { "US", "Wall St 1", "Suite 100", "10005", "New York" } },
+      { "US12345678901234567890", "CHASUS33XXX", "USD" },
+      { "CHASUS33XXX", "CHASE BANK" },
+      // CreditTransfer array
+      // Fields: endToEndId, paymentId, amount, currency, creditorAgent, creditor, creditorAccount, remittanceInfo?
+      [
+        {
+          "E2E-TX-A1-001",
+          "TX-ID-A1",
+          1500.50,
+          "USD",
+          { "WFBIUS6SXXX", "WELLS FARGO" },
+          { "GLOBEX CORP", "ID-555", { "US", "Broadway 123", "Room 5", "10001", "New York" } },
+          { "US98765432109876543210", "WFBIUS6SXXX", "USD" },
+          "Invoice #2026-A1 Payment"
+        }
+      ]
+    }
+  ]
+}

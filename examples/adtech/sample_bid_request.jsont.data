@@ -1,0 +1,33 @@
+{
+  // OpenRTB Bid Request Example (Standard 2.5)
+  "BR-2026-999",  // id
+  [
+    {
+      "IMP-001",  // Banner Impression
+      { 300, 250, 300, 250, "BANNER-123", [1], [2] },
+      null, null, // video, native
+      1.50, "USD"
+    },
+    {
+      "IMP-002",  // Video Impression
+      null,
+      { ["video/mp4", "video/webm"], 5, 30, [2, 3, 5, 6], 640, 480, 1, 1 },
+      null,
+      2.50, "USD"
+    }
+  ],
+  {
+    "S-123", "Cool Blog", "coolblog.com", ["IAB1", "IAB2"],
+    { "PUB-999", "Acme Publishing", ["IAB1"], "acmepub.com" }
+  },  // site
+  null,  // app (mutually exclusive with site)
+  {
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17-4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "1.2.3.4", "2001:db8:3333:4444:5555:6666:7777:8888",
+    "iPhone 15", "iOS", "17.4"
+  },  // device
+  { "U-888", "BUYER-UID-777", 1990, MALE, "tech,gaming,news" },  // user
+  SECOND_PRICE,  // at
+  100,           // tmax (ms)
+  ["USD"]        // cur
+}

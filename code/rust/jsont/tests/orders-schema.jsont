@@ -1,0 +1,147 @@
+{
+  namespace: {
+    baseUrl: "https://api.datakore.com/v1",
+    version: "1.0",
+    catalogs: [
+      {
+        schemas: [
+
+          // ── Address ─────────────────────────────────────────────────────
+          Address: {
+            fields: {
+              str: street    [(minLength=1, maxLength=100)],
+              str: city      [(minLength=1, maxLength=50)],
+              str: state     [(minLength=2, maxLength=3)],
+              str: zipCode   [(minLength=5, maxLength=10)],
+              str: country   [(minLength=2, maxLength=2)]
+            }
+          },
+
+          // ── Category ────────────────────────────────────────────────────
+          Category: {
+            fields: {
+              str: categoryId   [(minLength=1, maxLength=20)],
+              str: categoryName [(minLength=1, maxLength=100)],
+              str: department   [(minLength=1, maxLength=50)]
+            }
+          },
+
+          // ── CardDetails ─────────────────────────────────────────────────
+          CardDetails: {
+            fields: {
+              str:  last4Digits [(minLength=4, maxLength=4)],
+              str:  cardType    [(minLength=2, maxLength=20)],
+              date: expiryDate
+            }
+          },
+
+          // ── Customer ────────────────────────────────────────────────────
+          Customer: {
+            fields: {
+              u64:      customerId,
+              str:      firstName       [(minLength=1, maxLength=50)],
+              str:      lastName        [(minLength=1, maxLength=50)],
+              str:      email           [(minLength=5, maxLength=254)],
+              str:      phoneNumber     [(minLength=7, maxLength=20)],
+              <Address>: billingAddress,
+              <Address>: shippingAddress?
+            }
+          },
+
+          // ── OrderLineItem ───────────────────────────────────────────────
+          OrderLineItem: {
+            fields: {
+              u64: lineItemId,
+              str: sku         [(minLength=1, maxLength=50)],
+              str: productName [(minLength=1, maxLength=100)],
+              u32: quantity    [(minValue=1, maxValue=9999)],
+              d64: unitPrice   [(minValue=0)],
+              d64: discount?,
+              d64: tax         [(minValue=0)],
+              d64: totalPrice  [(minValue=0)],
+              <Category>: category
+            },
+            validations: {
+              rules {
+                totalPrice >= 0,
+                tax >= 0
+              }
+            }
+          },
+
+          // ── Payment ─────────────────────────────────────────────────────
+          Payment: {
+            fields: {
+              <PaymentMethod>: paymentMethod,
+              str:             transactionId [(minLength=1, maxLength=100)],
+              date:            paymentDate,
+              d64:             amount        [(minValue=0)],
+              str:             currency      [(minLength=3, maxLength=3)],
+              <CardDetails>:   cardDetails?
+            },
+            validations: {
+              rules {
+                amount > 0
+              }
+            }
+          },
+
+          // ── Shipping ────────────────────────────────────────────────────
+          Shipping: {
+            fields: {
+              str:              carrier          [(minLength=1, maxLength=50)],
+              str:              trackingNumber   [(minLength=1, maxLength=100)],
+              date:             estimatedDelivery,
+              date:             actualDelivery?,
+              d64:              shippingCost     [(minValue=0)],
+              <ShippingMethod>: shippingMethod
+            }
+          },
+
+          // ── Order ───────────────────────────────────────────────────────
+          // Root schema.  Validation rules (excluding uniqueness / dataset):
+          //   - grandTotal > 0          : every order must have a positive total
+          //   - subtotal >= 0           : subtotal is never negative
+          //   - totalTax >= 0           : tax is never negative
+          //   - shippingCost >= 0       : shipping is never negative
+          Order: {
+            fields: {
+              u64:             orderId,
+              str:             orderNumber    [(minLength=1, maxLength=50)],
+              date:            orderDate,
+              <OrderStatus>:   orderStatus,
+              <Customer>:      customer,
+              <OrderLineItem>[]: lineItems    [(minItems=1)],
+              <Payment>:       payment,
+              <Shipping>:      shipping,
+              d64:             subtotal       [(minValue=0)],
+              d64:             totalTax       [(minValue=0)],
+              d64:             totalDiscount  [(minValue=0)],
+              d64:             shippingCost   [(minValue=0)],
+              d64:             grandTotal     [(minValue=0)],
+              date:            createdAt,
+              date:            updatedAt,
+              str:             createdBy?,
+              str:             lastModifiedBy?
+            },
+            validations: {
+              rules {
+                grandTotal > 0,
+                subtotal >= 0,
+                totalTax >= 0,
+                shippingCost >= 0
+              }
+            }
+          }
+
+        ],
+        enums: [
+          ShippingMethod: [EXPRESS, OVERNIGHT, STANDARD],
+          OrderStatus:    [CANCELLED, DELIVERED, CONFIRMED, PENDING, SHIPPED],
+          PaymentMethod:  [CRYPTO, PAYPAL, DEBIT_CARD, CREDIT_CARD]
+        ]
+      }
+    ],
+    data-schema: Order
+  }
+}

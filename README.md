@@ -12,10 +12,10 @@ data as compact positional tuples.
 
 JSON is flexible and human-readable, but it has well-known limitations at scale:
 
-* Repeated field names inflate payload size
-* Validation is external, duplicated, and inconsistent
-* Schema drift is hard to detect
-* Streaming validation is inefficient
+- Repeated field names inflate payload size
+- Validation is external, duplicated, and inconsistent
+- Schema drift is hard to detect
+- Streaming validation is inefficient
 
 JSON-T addresses these problems directly.
 
@@ -33,46 +33,19 @@ JSON-T combines the best properties of existing data formats while avoiding thei
 
 ---
 
-## The Result: JSON-T
+## Key Features
 
-JSON-T is the result of combining these ideas:
-
-* CSV-like **positional compactness**
-* Protobuf-like **strict typing**
-* Avro-like **schema-first validation**
-* JSON-like **human-readable text**
-
-The result is a data format that is:
-
-* Smaller than JSON at scale
-* Safer than JSON by design
-* Easier to validate symmetrically
-* Still inspectable and tooling-friendly
+- **Schema-first design** — Structure is defined once and reused for all data.
+- **Positional encoding** — Data is encoded as ordered tuples, eliminating repeated keys.
+- **Strong validation** — Types, optionality, constraints, and nullability enforced by the language.
+- **Smaller payloads** — Typically 45–55% smaller than JSON for large datasets.
+- **Streaming-friendly** — Records can be validated incrementally without loading the full dataset.
+- **Text-based** — Human-inspectable, diff-friendly, and tooling-friendly.
+- **Derived schemas** — A schema can be projected, filtered, and transformed from a parent schema.
+- **Field-level encryption** — Privacy markers (`~`) designate sensitive fields; encrypted values travel as `base64:` tokens through the pipeline and are only decrypted on demand.
 
 > JSON-T is not trying to replace JSON everywhere.
 > It is designed for **large, structured, validated data exchange**.
-
----
-
-## Key Features
-
-* **Schema-first design**
-  Structure is defined once and reused for all data.
-
-* **Positional encoding**
-  Data is encoded as ordered tuples, eliminating repeated keys.
-
-* **Strong validation**
-  Types, optionality, constraints, and nullability are enforced by the language.
-
-* **Smaller payloads**
-  Typically **45–55% smaller than JSON** for large datasets.
-
-* **Streaming-friendly**
-  Records can be validated incrementally without loading full objects.
-
-* **Text-based (not binary)**
-  Human-inspectable, diff-friendly, and tooling-friendly.
 
 ---
 
@@ -80,205 +53,325 @@ The result is a data format that is:
 
 ### Schema Definition
 
-Define your data structure once.  Expanded schema to include namespace, catalog, and then schemas / enums - to bring parity to Json Schema so that we can use either of them to serialize / deserialize data
-
 ```jsont
 {
   namespace: {
-    baseUrl: "https://api.datakore.com/v1",
+    baseUrl: "https://api.example.com/v1",
+    version: "1.0",
     catalogs: [
       {
         schemas: [
-          User: {
-            i32: id,
-            str: username(minLength=5,maxLength='10'),
-            str: email?(minLength=8)
+          // Straight schema — declares its own fields
+          Order: {
+            fields: {
+              i64:   id,
+              str:   product  [(minLength=2, maxLength=80)],
+              i32:   quantity [(minValue=1, maxValue=999)],
+              d64:   price    [(minValue=0.01)],
+              <Status>: status
+            },
+            validations: {
+              rules   { price > 0, quantity > 0 }
+              unique  { (id) }
+            }
           },
-          Address: {
-             str: city,
-             str: zipCode
+
+          // Derived schema — projects and transforms Order
+          OrderSummary: FROM Order {
+            operations: (
+              project(id, product, price),
+              filter price > 10,
+              transform price = price * 1.1
+            )
           }
         ],
         enums: [
-          Status: [ ACTIVE, INACTIVE, SUSPENDED ],
-          Role: [ ADMIN, USER ]
+          Status: [PENDING, CONFIRMED, SHIPPED, CANCELLED]
         ]
       }
-    ]
+    ],
+    data-schema: Order
   }
 }
 ```
 
 ### Data Payload
 
-Transmit data as compact tuples.
-
 ```jsont
-{
-    data-schema: User,
-    data: [
-        {
-            1,
-            "alice_dev",
-            "alice@example.com",
-            ADMIN, ["t1","t2"],
-            {"Chennai","60015",ACTIVE}
-        },
-        {
-            2,
-            "bob_guest",
-            null,USER,null,{"Delhi","123456",SUSPENDED}
-        }
-    ]
+{1,"Widget A",10,9.99,CONFIRMED},
+{2,"Widget B",5,24.50,SHIPPED},
+{3,"Widget C",1,99.00,PENDING}
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Language Specification](docs/language-spec.md) | Grammar, schema syntax, derived schemas, operations, expressions |
+| [Scalar Types](docs/Types.md) | All built-in scalar types with constraints and formats |
+| [Rust API](code/rust/README.md) | Building schemas, parsing, validating, and transforming in Rust |
+| [Java API](code/java/README.md) | Building schemas, parsing, validating, and transforming in Java |
+| [Performance](docs/Performance.md) | Benchmark results and optimization notes |
+
+---
+
+## Implementations
+
+JSON-T has two production implementations that share the same grammar and wire format, including cross-verified encrypted streams.
+
+| | Rust | Java 17 |
+|---|---|---|
+| **Source** | `code/rust/jsont/` | `code/java/jsont/` |
+| **Crypto** | `code/rust/jsont-crypto/` | `code/java/jsont-crypto/` |
+| **Parser** | `pest` PEG (schema) + hand-written row scanner | ANTLR4 (schema) + hand-written row scanner |
+| **Throughput (10 M rows)** | ~239 rows/ms streaming parse | ~131 rows/ms streaming parse |
+| **Streaming parse memory** | O(1) — ~14 KB regardless of file size | O(1) — bulk 64 KB buffer per reader |
+| **Thread model** | Single-threaded streaming or parallel `sync_channel` pipeline | Single-threaded streaming or parallel worker-per-core pipeline |
+| **Encryption** | ChaCha20-Poly1305, AES-256-GCM, ASCON-128a × RSA + ECDH | Same algorithms via BouncyCastle |
+
+---
+
+## Common Patterns
+
+### Parse a schema DSL document
+
+**Rust:**
+```rust
+use jsont::{Parseable, JsonTNamespace};
+
+let ns = JsonTNamespace::parse(source)?;
+```
+
+**Java:**
+```java
+import io.github.datakore.jsont.JsonT;
+import io.github.datakore.jsont.model.JsonTNamespace;
+
+JsonTNamespace ns = JsonT.parseNamespace(source);
+```
+
+---
+
+### Stream rows from a file (O(1) memory)
+
+**Rust:**
+```rust
+use std::fs::File;
+use std::io::BufReader;
+use jsont::parse_rows_streaming;
+
+let file = File::open("orders.jsont")?;
+parse_rows_streaming(BufReader::new(file), |row| {
+    // process each row inline — no accumulation
+})?;
+```
+
+**Java:**
+```java
+import io.github.datakore.jsont.JsonT;
+import java.io.*;
+
+try (var reader = new BufferedReader(new FileReader("orders.jsont"))) {
+    JsonT.parseRowsStreaming(reader, row -> {
+        // process each row inline — no accumulation
+    });
 }
 ```
 
 ---
 
-## Java Integration
+### Build a schema programmatically
 
-JSON-T provides a Java API for parsing and generating data.
+**Rust:**
+```rust
+use jsont::{JsonTFieldBuilder, JsonTSchemaBuilder, ScalarType};
 
-### Add maven repository
-
-```xml
-<repositories>
-    <repository>
-        <id>github-datakore</id>
-        <url>https://maven.pkg.github.com/datakore/json-t</url>
-    </repository>
-</repositories>
+let schema = JsonTSchemaBuilder::straight("Order")
+    .field_from(JsonTFieldBuilder::scalar("id",       ScalarType::I64))?
+    .field_from(JsonTFieldBuilder::scalar("product",  ScalarType::Str).min_length(2))?
+    .field_from(JsonTFieldBuilder::scalar("quantity", ScalarType::I32)
+        .min_value(1.0).max_value(999.0))?
+    .field_from(JsonTFieldBuilder::scalar("price",    ScalarType::D64).min_value(0.01))?
+    .build()?;
 ```
 
-### Maven Dependency
-
-```xml
-<dependency>
-    <groupId>io.github.datakore</groupId>
-    <artifactId>json-t</artifactId>
-    <version>0.0.2</version>
-</dependency>
-```
-
-### Reading Data (Async as Stream) - Use this approach as a default mechanism (or) specifically while handling large batches
-
-1. 
-
+**Java:**
 ```java
-private JsonTConfig getJsonTConfig(Path errorPath) throws IOException {
-    // provide schema path
-  Path schemaPath = Paths.get("src/test/resources/all-type-schema.jsont");
-  assert schemaPath.toFile().exists();
-  // Use adapters to read the content
-  AllTypeHolderAdapter a1 = new AllTypeHolderAdapter();
-  DateTypeAdapter a2 = new DateTypeAdapter();
-  NumberTypeAdapter a3 = new NumberTypeAdapter();
-  StringEntryAdapter a4 = new StringEntryAdapter();
-  ArrayEntryAdapter a5 = new ArrayEntryAdapter();
-  JsonTConfigBuilder builder = JsonT.configureBuilder()
-          .withErrorCollector(errorCollector).withAdapters(a1).withAdapters(a2).withAdapters(a3).withAdapters(a4).withAdapters(a5);
-  if (errorPath != null) {
-    builder = builder.withErrorFile(errorPath);
+import io.github.datakore.jsont.builder.*;
+import io.github.datakore.jsont.model.ScalarType;
+
+JsonTSchema schema = JsonTSchemaBuilder.straight("Order")
+    .fieldFrom(JsonTFieldBuilder.scalar("id",       ScalarType.I64))
+    .fieldFrom(JsonTFieldBuilder.scalar("product",  ScalarType.STR).minLength(2))
+    .fieldFrom(JsonTFieldBuilder.scalar("quantity", ScalarType.I32).minValue(1).maxValue(999))
+    .fieldFrom(JsonTFieldBuilder.scalar("price",    ScalarType.D64).minValue(0.01))
+    .build();
+```
+
+---
+
+### Validate a stream of rows
+
+**Rust:**
+```rust
+use jsont::{ValidationPipeline, RowIter};
+use std::fs::File;
+use std::io::BufReader;
+
+let pipeline = ValidationPipeline::builder(schema)
+    .without_console()
+    .build();
+
+pipeline.validate_each(
+    RowIter::new(BufReader::new(File::open("orders.jsont")?)),
+    |clean_row| { /* emit */ }
+);
+pipeline.finish()?;
+```
+
+**Java:**
+```java
+import io.github.datakore.jsont.validate.ValidationPipeline;
+import io.github.datakore.jsont.JsonT;
+import java.io.*;
+
+ValidationPipeline pipeline = ValidationPipeline.builder(schema)
+    .withoutConsole()
+    .build();
+
+try (var reader = new BufferedReader(new FileReader("orders.jsont"))) {
+    var rows = new ArrayList<JsonTRow>();
+    JsonT.parseRowsStreaming(reader, rows::add);
+    pipeline.validateEach(rows, cleanRow -> { /* emit */ });
+}
+pipeline.finish();
+```
+
+---
+
+---
+
+## Privacy & Encryption
+
+Mark sensitive fields with `~` in the schema. On write they are encrypted (ChaCha20-Poly1305, AES-256-GCM, or ASCON-128a) with a per-stream DEK wrapped by RSA-OAEP or ECDH. Encrypted values travel as opaque `base64:` tokens and are only decrypted on demand.
+
+### Schema with sensitive fields
+
+```jsont
+Person: {
+  fields: {
+    str:  name,
+    ~str: ssn,          // always encrypted on wire
+    ~str: cardNumber?   // optional, encrypted when present
   }
-  // Read the schema here
-  return builder.source(schemaPath).build();
 }
-
-    @Test
-void shouldParseUsingJsonTExecution() throws IOException {
-  // Supply the data file (or) CharStream  
-  String dataFile = "src/test/resources/all-type-sample.jsont";
-  Path dataPath = Paths.get(dataFile);
-  assert dataPath.toFile().exists();
-  // While parsing, if there're any errors, errors are emitted to CSV
-  Path errorPath = Paths.get(dataFile.concat(".csv"));
-  JsonTConfig config = getJsonTConfig(errorPath);
-  // This is a oneliner that creates the execution
-  JsonTExecution execution = config.source(dataPath);
-
-  AtomicLong rowsProcessed = new AtomicLong();
-  Instant start = Instant.now();
-  // Parse the data using parallel threads
-  execution.parse(4) // Use 4 parallel threads
-          .doOnNext(row -> {
-            long count = rowsProcessed.incrementAndGet();
-            if (count % 10 == 0) {
-              System.out.printf("Processed %d rows so far - time elapsed %s \n", count, Duration.between(start, Instant.now()));
-            }
-          })
-          .blockLast(); // Wait for completion
-  Instant end = Instant.now();
-  System.out.printf("Took %s to process %d records", Duration.between(start, end), rowsProcessed.get());
-}
-
 ```
 
-### Reading Data (Synchronous as List) - Use this approach for smaller payloads
+### Write an encrypted stream
 
-```java
-    @Test
-    void shouldReadDataAsList() throws IOException {
-        JsonTConfig config = JsonT.configureBuilder()
-                .withAdapters(new AddressAdapter()).withAdapters(new UserAdapter())
-                .withErrorCollector(new DefaultErrorCollector())
-                .source(scPath)
-                .build();
+**Rust:**
+```rust
+use jsont::{write_encrypted_stream, EnvCryptoConfig, CryptoContext, SchemaKind};
+use std::io::{BufWriter, Write};
 
-        CharStream dataStream = CharStreams.fromPath(datPath);
-        
-        // Collect stream into a list
-        List<User> userList = config.source(dataStream)
-                                    .convert(User.class, 1)
-                                    .collectList()
-                                    .block();
-
-        assertEquals(total, userList.size());
-        System.out.println(userList);
-    }
+// EnvCryptoConfig reads RSA PEM keys from environment variables.
+let cfg = EnvCryptoConfig::new("JSONT_PUBLIC_KEY", "JSONT_PRIVATE_KEY");
+let fields = match &schema.kind {
+    SchemaKind::Straight { fields } => fields.clone(),
+    _ => panic!("expected straight schema"),
+};
+let mut out = BufWriter::new(std::fs::File::create("people.jsont")?);
+write_encrypted_stream(&rows, &fields, &cfg, CryptoContext::VERSION_CHACHA_PUBKEY, &mut out)?;
+out.flush()?;
+// Wire: {"ENCRYPTED_HEADER",16,256,"<base64:enc_dek>"}
+//       {"Alice","<base64:field_payload>"}
 ```
 
-### Writing Data
-There are 3 ways to stringify JsonT data
-1. ```java public Mono<Void> stringify(T data, Writer writer, boolean includeSchema) ``` This is to stringify a single record
-2. ```java public Mono<Void> stringify(List<T> data, Writer writer, boolean includeSchema)``` This is to stringify a list of records
-3. ```java public Mono<Void> stringify(Writer writer, long totalRecords, int batchSize, int flushEveryNBatches, boolean includeSchema)``` This hleps stringify many records as a stream
-
+**Java:**
 ```java
-// This method is to create JsonTWriter
-private <T> StreamingJsonTWriter<T> getTypedStreamWriter(String path, Class<T> clazz, DataGenerator<T> gen, SchemaAdapter<?>... adapters) throws IOException {
-  JsonTConfig config = getJsonTConfig(path, adapters);
-  StreamingJsonTWriterBuilder<T> builder = new StreamingJsonTWriterBuilder<T>()
-          .registry(config.getAdapters())
-          .namespace(config.getNamespace());
-  if (gen != null) {
-    builder = builder.generator(gen);
-  }
-  return builder
-          .build(clazz.getSimpleName());
-}
+import io.github.datakore.jsont.crypto.*;
+import io.github.datakore.jsont.stringify.RowWriter;
 
-// This method is to create JsonTConfig, from schema
-private JsonTConfig getJsonTConfig(String schemaPath, SchemaAdapter<?>... adapters) throws IOException {
-  Path scPath = Paths.get(schemaPath);
-  assert scPath.toFile().exists();
-  return JsonT.configureBuilder()
-          .withAdapters(adapters)
-          .withErrorCollector(errorCollector).source(scPath).build();
+PublicKeyCryptoConfig cfg = PublicKeyCryptoConfig.ofKeys(pubPem, privPem);
+try (CryptoContext ctx = CryptoContext.forEncrypt(AlgoVersion.CHACHA20_POLY1305, KekMode.PUBLIC_KEY, cfg);
+     BufferedWriter w  = Files.newBufferedWriter(Path.of("people.jsont"), StandardCharsets.UTF_8);
+     RowWriter writer  = new RowWriter(schema, ctx)) {
+    writer.writeStream(rows, w);
 }
+```
 
-@Test
-void shouldStringifyData() throws IOException {
-  Address add = new Address("Dallas", "12345", "ACTIVE");
-  User u1 = new User(123, "user001", "ADMIN", add);
-  u1.setEmail("alice@example.com");
-  u1.setTags(new String[]{"programmer"});
-  StreamingJsonTWriter<User> writer = getTypedStreamWriter("src/test/resources/ns-schema.jsont", User.class, null, adapter1, adapter2);
-  StringWriter sw = new StringWriter();
-  // This is where the actual stringification happens
-  writer.stringify(u1, sw, true).block();
-  System.out.println(sw);
+### Read and decrypt an encrypted stream
+
+**Rust:**
+```rust
+use jsont::{try_parse_encrypt_header, parse_field_payload,
+            EnvCryptoConfig, JsonTRow, JsonTValue, Parseable, ValidationPipeline};
+
+let all_rows = Vec::<JsonTRow>::parse(&std::fs::read_to_string("people.jsont")?)?;
+let ctx      = try_parse_encrypt_header(&all_rows[0]).expect("EncryptHeader expected");
+let cfg      = EnvCryptoConfig::new("JSONT_PUBLIC_KEY", "JSONT_PRIVATE_KEY");
+
+let pipeline = ValidationPipeline::builder(schema)
+    .without_console()
+    .with_cipher_session(cfg.open_session(&ctx)?)
+    .build()?;
+let clean = pipeline.validate_rows(all_rows[1..].to_vec());
+pipeline.finish()?;
+
+// Decrypt one field
+let verify = cfg.open_session(&ctx)?;
+if let Some(JsonTValue::Encrypted(env)) = clean[0].get(1) {
+    let (iv, _, enc) = parse_field_payload(env, "ssn")?;
+    let ssn = String::from_utf8(verify.decrypt_field(&iv, &enc)?)?;
 }
+```
 
+**Java:**
+```java
+import io.github.datakore.jsont.crypto.*;
+import io.github.datakore.jsont.internal.crypto.*;
+import io.github.datakore.jsont.validate.ValidationPipeline;
+
+List<JsonTRow> allRows = new ArrayList<>();
+JsonT.parseRows(content, allRows::add);
+
+EncryptHeaderParser.ParsedHeader header = EncryptHeaderParser.tryParse(allRows.get(0)).orElseThrow();
+PublicKeyCryptoConfig cfg = PublicKeyCryptoConfig.ofKeys(pubPem, privPem);
+
+try (CryptoContext ctx = CryptoContext.forDecrypt(header.version(), header.encDek(), cfg)) {
+    List<JsonTRow> clean = ValidationPipeline.builder(schema)
+        .withCryptoContext(ctx)
+        .build()
+        .validateRows(allRows.subList(1, allRows.size()));
+
+    // Decrypt one field
+    JsonTValue.Encrypted enc = (JsonTValue.Encrypted) clean.get(0).values().get(1);
+    FieldPayload.Parsed p = FieldPayload.parse(enc.envelope(), "ssn");
+    String ssn = new String(ctx.decryptField(p.iv(), p.encContent()), StandardCharsets.UTF_8);
+}
+```
+
+### Decrypt in a derived schema pipeline
+
+```jsont
+PersonDecrypted: FROM Person {
+  operations: (
+    decrypt(ssn)
+  )
+}
+```
+
+**Rust:**
+```rust
+let result = derived_schema.transform_with_crypto(row, &registry, &crypto_config)?;
+```
+
+**Java:**
+```java
+JsonTRow result = RowTransformer.of(derivedSchema, registry)
+    .transformWithCrypto(row, cryptoConfig);
 ```
 
 ---
@@ -287,81 +380,30 @@ void shouldStringifyData() throws IOException {
 
 JSON-T is a good fit for:
 
-* Large API responses (thousands+ records)
-* Batch ingestion pipelines
-* Event streams and logs
-* Analytics exports
-* Mobile or WAN-constrained environments
-* Systems requiring strict producer/consumer contracts
+- Large API responses (thousands+ records)
+- Batch ingestion pipelines
+- Event streams and logs
+- Analytics exports
+- Mobile or WAN-constrained environments
+- Systems requiring strict producer/consumer contracts
 
 JSON remains better for small, ad-hoc, or human-authored payloads.
 
 ---
 
-## Validation Model
-
-JSON-T validation is **built-in**, not optional:
-
-* Required vs optional fields
-* Primitive and structured types
-* Value ranges and patterns
-* Array size and nullability rules
-* Positional correctness
-
-If a document parses successfully, it is structurally valid.
-
----
-## Updates for v0.0.2
-
-1. **Streaming Parser Implementation**: Replaced in-memory parsing with a streaming listener approach to eliminate out-of-memory errors when processing files beyond 700k records. By implementing fixed backpressure and asynchronous subscriber processing, the parser now handles 1.5M+ records (~1.5KB each) efficiently.
-
-2. **Streaming Serialization**: Introduced multiple stringification strategies to avoid loading entire object graphs into memory, providing clients with flexible approaches based on their use case.
-
-3. **Scalability Validation**: Successfully tested generation of 10M records without errors. Performance optimization remains an ongoing focus.
-
-4. **Parser Library Evaluation**: Identified file size limitations in the current parsing library when processing 1M+ record files. Exploring alternative parsing solutions.
-
-5. **Code Refactoring**: Improved code readability and architectural patterns across core modules.
-
-6. **UNSPECIFIED Token**: Added UNSPECIFIED status to the grammar as a distinct state (separate from NULL or explicit values), enabling efficient Change Data Capture (CDC) use cases where unchanged fields can be omitted.
-
-7. **Bidirectional Validation**: Implemented validation for both parsing and serialization paths.
-
-8. **Type System Expansion**: Introduced additional data types. See [Types documentation](/datakore/json-t/blob/main/docs/Types.md) for details.
----
-
 ## Status
 
-🚧 **Work in progress**
+Both implementations — Rust and Java — are production-ready for:
 
-🚀 Current Development Status
+- Parsing, validation, and transformation of large datasets
+- JSON interoperability (bidirectional NDJSON / Array / Object modes)
+- Field-level envelope encryption — 3 algorithms (ChaCha20-Poly1305, AES-256-GCM, ASCON-128a) × 2 KEK modes (RSA, ECDH)
+- Encrypted stream wire compatibility verified bidirectionally (Rust-encrypted ↔ Java-decrypted and vice versa)
+- On-demand decryption via the `CipherSession` / `CryptoContext` APIs
 
-- Performance Engineering: The Java implementation currently handles 750k records in stream mode with high efficiency.
-  We are currently optimizing the engine to breach the 1 million record threshold without performance degradation.
-- Annotation Processing: Finalizing the Adapter annotation processing templates to allow seamless integration with
-  custom application POJOs and frameworks.
-- JsonT (namespace) <-> Json Schema conversion
+Benchmarked at 10 M rows on realistic schemas with no memory growth.
 
-🗺️ Future Roadmap
-
-- The vision for JsonT is to become a cross-language standard for efficient data transformation:
-- Tooling & IDE Support: * Development of a formal TextMate Grammar to provide high-quality syntax highlighting across
-  VS Code, Sublime Text, and GitHub.
-- Multi-Language Support: First-class implementations for Rust (high-performance systems) and TypeScript (web/node.js)
-  to enable a truly universal data stack.
-- Interoperability: Bidirectional converters for JSON ↔ JSON-T and support for other major data serialization formats
-  like YAML and MessagePack.
-
-🤝 Seeking Contributors & Support
-JsonT is an ambitious project aimed at redefining data density and validation. We are looking for collaborators to help
-accelerate growth in these specific areas:
-
-1. Grammar & Tooling: If you have experience with TextMate grammars or Language Server Protocol (LSP), we need your help
-   building the developer experience for the next generation of data tools.
-2. Language Ports: Expert Rust or TypeScript developers are needed to help port the core grammar logic, ensuring JsonT
-   is available wherever performance matters.
-3. Benchmarking & Optimization: Help us profile the engine as we push toward (and beyond) the 1-million-record streaming
-   milestone in Java
+See [Performance.md](docs/Performance.md) for benchmark details.
 
 ---
 

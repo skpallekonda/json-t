@@ -1,0 +1,13 @@
+{
+  // FIX New Order Single — Limit Order (MsgType=D)
+
+  // FixHeader
+  { "FIX.4.4", 156, "D", "CLIENT-ABC", "BROKER-XYZ", 1, "2026-04-09T10:45:00Z" },
+
+  // NewOrderSingle (body)
+  // Fields: clOrdId, symbol, side, orderQty, ordType, handlInst, transactTime, price?, stopPx?, timeInForce?, account?, currency?
+  { "ORD1001", "AAPL", BUY, 100.0, LIMIT, AUTO_PRIV, "2026-04-09T10:45:00Z", 155.25 },
+
+  // FixTrailer
+  { "128" }
+}

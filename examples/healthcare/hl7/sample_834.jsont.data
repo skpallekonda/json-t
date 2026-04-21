@@ -1,0 +1,73 @@
+{
+  // Interchange Control Header (ISA)
+  {
+    "00", "          ", "00", "          ",
+    "ZZ", "SENDER-ID      ", "ZZ", "RECEIVER-ID    ",
+    "2026-04-09", "10:30:00", "^", "00501", 123456789, "0", "P", ":"
+  },
+
+  // Functional Groups
+  [
+    {
+      // Functional Group Header (GS)
+      { "BE", "SENDER-CODE", "RECEIVER-CODE", "2026-04-09", "10:30:00", 987654321, "X", "005010X220A1" },
+
+      // Transaction Sets
+      [
+        {
+          // ST: Transaction Set Header
+          { "834", "0001" },
+
+          // BGN: Beginning Segment
+          { ORIGINAL, "REQ12345", "2026-04-09", "10:30:00", "ET", "2" },
+
+          // Loop 1000A: Plan Sponsor
+          { "AY", "2", "ACME CORP", "FI", "123456789" },
+
+          // Loop 1000B: Payer
+          { "PR", "2", "BLUE CROSS BLUE SHIELD", "PI", "BCBS001" },
+
+          // Members (Loop 2000)
+          [
+            {
+              // INS: Member Detail — SUBSCRIBER (Self, Y)
+              { "Y", SELF, CHANGE, BIRTH, "A", "1", "N", "FT" },
+              // REF: Member Identifiers
+              [ { "0F", "SUB123" } ],
+              // DTP: Member Dates
+              [ { "348", "D8", "20260401" } ],
+              // NM1: Member Name
+              { "IL", "1", "SMITH", "JOHN", "A", "MR", "SUB123" },
+              // DMG: Demographics — PHI
+              { "D8", "1980-01-01", MALE, MARRIED },
+              // Health Coverage
+              [
+                { { ADDITION, "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
+              ]
+            },
+            {
+              // INS: Member Detail — DEPENDENT (Child, N)
+              { "N", CHILD, CHANGE, BIRTH, "A", "1", "N", "FT" },
+              [ { "0F", "DEP456" } ],
+              [ { "348", "D8", "20260101" } ],
+              { "IL", "1", "SMITH", "JANE", "M", "MS", "DEP456" },
+              { "D8", "2010-05-20", FEMALE, SINGLE },
+              [
+                { { ADDITION, "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
+              ]
+            }
+          ],
+
+          // SE: Transaction Set Trailer
+          { 15, "0001" }
+        }
+      ],
+
+      // GE: Functional Group Trailer
+      { 1, 987654321 }
+    }
+  ],
+
+  // IEA: Interchange Control Trailer
+  { 1, 123456789 }
+}

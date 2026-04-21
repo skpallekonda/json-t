@@ -1,0 +1,221 @@
+// =============================================================================
+// ICC Men's T20 World Cup — Match Schema
+//
+// Domain  : Cricket  |  Competition : ICC Men's T20 World Cup
+// Coverage: Groups, Super 8, Semi-Finals, Final
+//
+// Design goals
+//   • Exercise nearly every scalar type available in JsonT so benchmark
+//     runs cover the full type-dispatch surface (serialisation + validation).
+//   • One flat root schema (CricketMatch) — no nested objects — so every
+//     field is a direct columnar value, eliminating object-traversal overhead
+//     from the benchmark signal.
+//   • Target serialised size ≈ 1 000 bytes per CricketMatch row.
+//
+// Scalar-type coverage (all used below)
+//   Integers  : i16, i32, i64, u16, u32, u64
+//   Decimals  : d32, d64, d128
+//   Boolean   : bool
+//   Strings   : str, email, uri, hostname, ipv4, ipv6, hex, base64
+//   Identity  : uuid
+//   Temporal  : datetime, time, timestamp, duration
+//
+// Derived schema
+//   MatchBroadcastSummary — broadcast-feed projection of CricketMatch.
+//   Operations: filter (day-night or large crowd), rename (broadcast naming
+//   convention), transform (compute on-screen NRR delta), exclude (strip
+//   internal / admin fields).  No uniqueness, no dataset validations.
+// =============================================================================
+
+{
+  namespace: {
+    baseUrl: "https://icc.cricket/jsont/wc-t20/2024",
+    version: "2024",
+    catalogs: [
+      {
+        schemas: [
+
+          // ── CricketMatch ──────────────────────────────────────────────────
+          // Root schema. One row per T20 WC fixture — completed or scheduled.
+          // All match, venue, toss, innings summary, result and broadcast-meta
+          // fields are flattened for O(1) column access.
+          CricketMatch: {
+            fields: {
+
+              // ── Match identity ────────────────────────────────────────────
+              uuid:    matchId,
+              u64:     iccMatchSequenceId,
+              str:     matchCode          [(minLength=6,   maxLength=25)],
+              str:     tournamentName     [(minLength=5,   maxLength=80)],
+              u16:     matchNumber        [(minValue=1,    maxValue=999)],
+              str:     groupName?         [(minLength=1,   maxLength=20)],
+              <TournamentPhase>: phase,
+
+              // ── Team A ────────────────────────────────────────────────────
+              str:     teamAId            [(minLength=2,   maxLength=10)],
+              str:     teamAName          [(minLength=3,   maxLength=60)],
+              str:     teamAIccCode       [(minLength=3,   maxLength=3)],
+              u16:     teamAWorldRanking  [(minValue=1,    maxValue=100)],
+              d64:     teamARatingPoints  [(minValue=0)],
+              str:     teamACoachName     [(minLength=3,   maxLength=80)],
+              email:   teamAContactEmail?,
+
+              // ── Team B ────────────────────────────────────────────────────
+              str:     teamBId            [(minLength=2,   maxLength=10)],
+              str:     teamBName          [(minLength=3,   maxLength=60)],
+              str:     teamBIccCode       [(minLength=3,   maxLength=3)],
+              u16:     teamBWorldRanking  [(minValue=1,    maxValue=100)],
+              d64:     teamBRatingPoints  [(minValue=0)],
+              str:     teamBCoachName     [(minLength=3,   maxLength=80)],
+              email:   teamBContactEmail?,
+
+              // ── Venue ─────────────────────────────────────────────────────
+              str:     venueId            [(minLength=3,   maxLength=20)],
+              str:     venueName          [(minLength=3,   maxLength=100)],
+              str:     city               [(minLength=2,   maxLength=60)],
+              str:     country            [(minLength=2,   maxLength=60)],
+              i32:     venueCapacity      [(minValue=1000, maxValue=200000)],
+              bool:    isFloodlit,
+              bool:    isNeutralVenue,
+              d64:     venueLatitude      [(maxValue=90)],
+              d64:     venueLongitude     [(maxValue=180)],
+              <WicketSurface>: wicketSurface,
+              hostname: statsApiHost?,
+
+              // ── Schedule ──────────────────────────────────────────────────
+              datetime: scheduledAt,
+              time:     matchStartLocalTime,
+              duration: expectedDuration,
+              bool:     isDayNight,
+
+              // ── Toss ──────────────────────────────────────────────────────
+              str:     tossWinnerTeamId   [(minLength=2,  maxLength=10)],
+              <TossDecision>: tossDecision,
+              bool:    teamABattedFirst,
+
+              // ── Team A innings summary ────────────────────────────────────
+              u32:     teamAInnings1Runs     [(minValue=0, maxValue=300)],
+              u16:     teamAInnings1Wickets  [(minValue=0, maxValue=10)],
+              u16:     teamAInnings1Balls    [(minValue=0, maxValue=120)],
+              d64:     teamAInnings1RunRate  [(minValue=0)],
+              str:     teamATopBatsmanName   [(minLength=3, maxLength=80)],
+              u32:     teamATopBatsmanRuns   [(minValue=0, maxValue=200)],
+              str:     teamATopBowlerName    [(minLength=3, maxLength=80)],
+              u16:     teamATopBowlerWickets [(minValue=0, maxValue=10)],
+              d32:     teamATopBowlerEconomy [(minValue=0)],
+
+              // ── Team B innings summary ────────────────────────────────────
+              u32:     teamBInnings1Runs     [(minValue=0, maxValue=300)],
+              u16:     teamBInnings1Wickets  [(minValue=0, maxValue=10)],
+              u16:     teamBInnings1Balls    [(minValue=0, maxValue=120)],
+              d64:     teamBInnings1RunRate  [(minValue=0)],
+              str:     teamBTopBatsmanName   [(minLength=3, maxLength=80)],
+              u32:     teamBTopBatsmanRuns   [(minValue=0, maxValue=200)],
+              str:     teamBTopBowlerName    [(minLength=3, maxLength=80)],
+              u16:     teamBTopBowlerWickets [(minValue=0, maxValue=10)],
+              d32:     teamBTopBowlerEconomy [(minValue=0)],
+
+              // ── Match outcome ─────────────────────────────────────────────
+              <MatchStatus>: matchStatus,
+              str:     winnerTeamId?      [(minLength=2,  maxLength=10)],
+              str:     resultDescription  [(minLength=5,  maxLength=250)],
+              i32:     winMarginRuns      [(minValue=0,   maxValue=200)],
+              i16:     winMarginWickets   [(minValue=0,   maxValue=10)],
+              bool:    isSuperOver,
+              d64:     netRunRateDiffTeamA,
+              d64:     netRunRateDiffTeamB,
+              i16:     teamAGroupPoints   [(minValue=0,   maxValue=2)],
+              i16:     teamBGroupPoints   [(minValue=0,   maxValue=2)],
+              d128:    prizeMoneySplit    [(minValue=0)],
+              i64:     matchDurationSeconds [(minValue=0)],
+
+              // ── Player of the match ───────────────────────────────────────
+              uuid:    manOfTheMatchId?,
+              str:     manOfTheMatchName?   [(minLength=3, maxLength=80)],
+              str:     manOfTheMatchTeamId? [(minLength=2, maxLength=10)],
+
+              // ── Officials ─────────────────────────────────────────────────
+              str:     umpire1Name       [(minLength=3,  maxLength=80)],
+              str:     umpire2Name       [(minLength=3,  maxLength=80)],
+              str:     tvUmpireName?     [(minLength=3,  maxLength=80)],
+              str:     matchRefereeName  [(minLength=3,  maxLength=80)],
+
+              // ── Weather / conditions ──────────────────────────────────────
+              bool:    isRainAffected,
+              i16:     dlsOversReduction?  [(minValue=0, maxValue=20)],
+              d64:     dlsTargetRevised?   [(minValue=0)],
+              d32:     avgTemperatureCelsius? [(maxValue=55)],
+              u32:     attendanceCount?    [(minValue=0)],
+
+              // ── Broadcast & metadata ──────────────────────────────────────
+              bool:    isHighlightsAvailable,
+              i64:     totalViewership?  [(minValue=0)],
+              str:     broadcastLanguages [(minLength=2, maxLength=200)],
+              uri:     dataSourceUrl?,
+              hex:     matchContentHash?  [(minLength=64, maxLength=64)],
+              base64:  matchCertificate?,
+              ipv4:    statsServerIpv4?,
+              ipv6:    broadcastServerIpv6?,
+              str:     dataSource        [(minLength=1,  maxLength=100)],
+              timestamp: createdAt,
+              timestamp: updatedAt
+            },
+            validations: {
+              rules {
+                teamAInnings1Runs >= 0,
+                teamBInnings1Runs >= 0,
+                winMarginRuns >= 0,
+                prizeMoneySplit >= 0
+              }
+            }
+          },
+
+          // ── MatchBroadcastSummary (derived) ──────────────────────────────
+          // Projection of CricketMatch for TV / streaming broadcast overlays.
+          //
+          // Operations applied in order:
+          //   1. filter    — retain only day-night fixtures or high-attendance
+          //   2. rename    — adopt broadcast naming conventions
+          //   3. transform — compute the on-screen NRR delta for the scorebug
+          //   4. exclude   — strip internal / admin fields not needed downstream
+          MatchBroadcastSummary: FROM CricketMatch {
+            operations: (
+              filter isDayNight == true || attendanceCount > 5000,
+              rename(
+                venueName           as stadium,
+                scheduledAt         as matchDateTime,
+                tossWinnerTeamId    as tossWinner,
+                venueCapacity       as stadiumCapacity,
+                manOfTheMatchName   as playerOfMatch,
+                matchStartLocalTime as localKickoffTime
+              ),
+              transform netRunRateDiffTeamA = teamAInnings1RunRate - teamBInnings1RunRate,
+              exclude(
+                matchContentHash,
+                matchCertificate,
+                statsServerIpv4,
+                broadcastServerIpv6,
+                dataSource,
+                dataSourceUrl,
+                statsApiHost,
+                teamAContactEmail,
+                teamBContactEmail,
+                dlsOversReduction,
+                dlsTargetRevised,
+                iccMatchSequenceId
+              )
+            )
+          }
+
+        ],
+        enums: [
+          TournamentPhase: [GROUP_STAGE, SUPER_8, SEMI_FINAL, FINAL],
+          MatchStatus: [SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED, ABANDONED],
+          TossDecision: [BAT, BOWL],
+          WicketSurface: [GRASS, HARD_CLAY, RED_SOIL, DRY_FLAT, WET_FAST]
+        ]
+      }
+    ],
+    data-schema: CricketMatch
+  }
+}

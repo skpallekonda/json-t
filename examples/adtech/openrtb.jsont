@@ -1,0 +1,168 @@
+{
+  namespace: {
+    baseUrl: "https://jsont.io/adtech/openrtb",
+    version: "2.5",
+    catalogs: [
+      {
+        schemas: [
+          // ── OpenRTB 2.5: Bid Request ───────────────────────────────────────
+
+          Impression: {
+            fields: {
+              str: id                     [(minLength=1)],
+              <Banner>: banner?,
+              <Video>: video?,
+              <Native>: native?,
+              d64: bidfloor               [(minValue=0)],
+              str: bidfloorcur            [(minLength=3, maxLength=3)]
+            },
+            validations: {
+              rules {
+                banner != null || video != null || native != null
+              }
+            }
+          },
+
+          Banner: {
+            fields: {
+              u32: w                      [(minValue=1)],
+              u32: h                      [(minValue=1)],
+              u32: wmax?                  [(minValue=1)],
+              u32: hmax?                  [(minValue=1)],
+              str: id?                    [(maxLength=64)],
+              u32[]: btype?               ,
+              u32[]: battr?
+            },
+            validations: {
+              rules {
+                wmax == null || wmax >= w,
+                hmax == null || hmax >= h
+              }
+            }
+          },
+
+          Video: {
+            fields: {
+              str[]: mimes                [(minItems=1)],
+              u32: minduration?           [(minValue=0)],
+              u32: maxduration?           [(minValue=1)],
+              u32[]: protocols?           ,
+              u32: w?                     [(minValue=1)],
+              u32: h?                     [(minValue=1)],
+              u32: linearity?             ,
+              u32: sequence?              [(minValue=1)]
+            },
+            validations: {
+              rules {
+                minduration == null || maxduration == null || maxduration >= minduration
+              }
+            }
+          },
+
+          Native: {
+            fields: {
+              str: request,
+              str: ver?                   [(maxLength=10)],
+              u32[]: api?                 ,
+              u32[]: battr?
+            }
+          },
+
+          Site: {
+            fields: {
+              str: id?                    [(maxLength=64)],
+              str: name?                  [(maxLength=255)],
+              str: domain?                [(maxLength=255)],
+              str[]: cat?                 ,
+              <Publisher>: publisher?
+            }
+          },
+
+          App: {
+            fields: {
+              str: id?                    [(maxLength=64)],
+              str: name?                  [(maxLength=255)],
+              str: bundle?                [(maxLength=255)],
+              str: domain?                [(maxLength=255)],
+              str[]: cat?                 ,
+              <Publisher>: publisher?
+            }
+          },
+
+          Device: {
+            fields: {
+              ~str: ua?                   [(maxLength=1024)],
+              ~ipv4: ip?,
+              ~ipv6: ipv6?,
+              str: model?                 [(maxLength=255)],
+              str: os?                    [(maxLength=255)],
+              str: osv?                   [(maxLength=255)]
+            }
+          },
+
+          User: {
+            fields: {
+              ~str: id?                   [(maxLength=64)],
+              ~str: buyeruid?             [(maxLength=64)],
+              ~u32: yob?                  [(minValue=1900, maxValue=2100)],
+              ~<GenderCode>: gender?,
+              ~str: keywords?             [(maxLength=1024)]
+            }
+          },
+
+          Publisher: {
+            fields: {
+              str: id?                    [(maxLength=64)],
+              str: name?                  [(maxLength=255)],
+              str[]: cat?                 ,
+              str: domain?                [(maxLength=255)]
+            }
+          },
+
+          // ── Root: Bid Request ─────────────────────────────────────────────
+
+          BidRequest: {
+            fields: {
+              str: id                     [(minLength=1)],
+              <Impression>[]: imp         [(minItems=1)],
+              <Site>: site?,
+              <App>: app?,
+              <Device>: device?,
+              <User>: user?,
+              <AuctionType>: at,
+              u32: tmax?                  [(minValue=50)],
+              str[]: cur?
+            },
+            validations: {
+              rules {
+                (site != null) != (app != null)
+              }
+            }
+          },
+
+          // ── Derived: PII-free audit projection ────────────────────────────
+
+          BidRequestAudit: FROM BidRequest {
+            operations: (
+              project(id, at, imp, tmax)
+            )
+          }
+        ],
+        enums: [
+          AuctionType: [
+            FIRST_PRICE,
+            SECOND_PRICE,
+            FIXED_PRICE
+          ],
+          GenderCode: [
+            MALE,
+            FEMALE,
+            OTHER,
+            UNKNOWN
+          ]
+        ]
+      }
+    ],
+    data-schema: BidRequest
+  }
+}

@@ -1,0 +1,91 @@
+{
+  // EDI 850 Purchase Order — Full Document with Envelope
+
+  // ISA: Interchange Control Header
+  // Fields: authInfoQualifier, authInfo, securityInfoQualifier, securityInfo,
+  //         senderIdQualifier, senderId, receiverIdQualifier, receiverId,
+  //         interchangeDate, interchangeTime, versionNumber, controlNumber,
+  //         ackRequested, usageIndicator, componentSeparator
+  {
+    "00", "          ", "00", "          ",
+    "ZZ", "ACME-BUYER     ", "ZZ", "VENDOR-CORP    ",
+    "2026-04-21", "09:15:00", "00401",
+    100000001, "0", "P", ":"
+  },
+
+  // GS: Functional Group Header
+  // Fields: functionalCode, senderCode, receiverCode, groupDate, groupTime,
+  //         groupControlNumber, agencyCode, versionIdCode
+  { "PO", "ACME-BUYER", "VENDOR-CORP", "2026-04-21", "09:15:00", 200000001, "X", "004010" },
+
+  // ST: Transaction Set Header
+  { "850", "0001" },
+
+  // PurchaseOrder
+  // Fields: beginning, references?, dates?, parties[], lineItems[], totals
+  {
+    // BEG: Beginning Segment
+    // Fields: transactionSetPurpose, purchaseOrderNumber, purchaseOrderDate, releaseNumber?, contractNumber?
+    { NEW_ORDER, "PO-2026-04-001", "2026-04-21", null, "CTR-2026-100" },
+
+    // REF: References
+    [ { "CO", "CTR-2026-100" } ],
+
+    // DTM: Dates
+    [
+      { ORDER_DATE, "2026-04-21" },
+      { SHIP_DATE, "2026-04-28" },
+      { CANCEL_AFTER, "2026-05-15" }
+    ],
+
+    // Parties (N1 + Address)
+    [
+      {
+        { SHIP_TO, "ACME WAREHOUSE EAST", "91", "WH-EAST-001" },
+        { "100 Industrial Blvd", null, "Newark", "NJ", "07101", "US" }
+      },
+      {
+        { BILL_TO, "ACME ACCOUNTS PAYABLE", "91", "AP-ACME-001" },
+        { "1 Corporate Plaza", "Suite 500", "New York", "NY", "10001", "US" }
+      },
+      {
+        { VENDOR, "TECH PARTS CORP", "91", "VENDOR-TP-001" },
+        { "500 Supplier Way", null, "Chicago", "IL", "60601", "US" }
+      }
+    ],
+
+    // LineItems (PO1 + REF + DTM)
+    [
+      {
+        // PO1: Line Item 1 — Laptop Computers
+        { "001", 50.0, EA, 899.99, null, BUYER_PART, "LAPTOP-PRO-15", VENDOR_PART, "TP-LP-15-2026" },
+        [ { "PO", "PO-LINE-001" } ],
+        [ { SHIP_DATE, "2026-04-28" } ]
+      },
+      {
+        // PO1: Line Item 2 — Docking Stations
+        { "002", 50.0, EA, 149.99, null, BUYER_PART, "DOCK-STATION-USB4", VENDOR_PART, "TP-DS-USB4-2026" },
+        null, null
+      },
+      {
+        // PO1: Line Item 3 — Laptop Bags (case pricing)
+        { "003", 5.0, CS, 280.00, null, SKU, "BAG-15-CASE-10", null, null },
+        [ { "PO", "PO-LINE-003" } ],
+        null
+      }
+    ],
+
+    // CTT: Transaction Totals
+    // Fields: numberOfLineItems, hashTotal?
+    { 3, 56449.75 }
+  },
+
+  // SE: Transaction Set Trailer
+  { 22, "0001" },
+
+  // GE: Functional Group Trailer
+  { 1, 200000001 },
+
+  // IEA: Interchange Control Trailer
+  { 1, 100000001 }
+}
