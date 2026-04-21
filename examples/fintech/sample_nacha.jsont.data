@@ -1,0 +1,71 @@
+{
+  // NACHA ACH File — Payroll Direct Deposit Example
+
+  // FileHeader (record type 1)
+  // Fields: recordTypeCode, priorityCode, immediateDestination, immediateOrigin,
+  //         fileCreationDate, fileCreationTime, fileIdModifier, recordSize,
+  //         blockingFactor, formatCode, destinationName, originName, referenceCode?
+  {
+    "1", "01", "0210000890", "1234567890",
+    "2026-04-21", "08:00:00", "A",
+    94, 10, 1,
+    "BANK OF AMERICA", "ACME PAYROLL SVC", "PAYROLL"
+  },
+
+  // Batches
+  [
+    {
+      // BatchHeader (record type 5)
+      // Fields: recordTypeCode, serviceClassCode, companyName, companyDiscretionaryData?,
+      //         companyId, standardEntryClass, companyEntryDescription, descriptiveDate,
+      //         effectiveEntryDate, settlementDate?, originatorStatusCode, odfiId, batchNumber
+      {
+        "5", CREDITS_ONLY, "ACME CORP", null,
+        "9876543210", PPD, "PAYROLL",
+        "2026-04-19", "2026-04-21",
+        null, 1, "02100008", 1
+      },
+
+      // EntryDetails (record type 6)
+      // Fields: recordTypeCode, transactionCode, receivingDfiId, checkDigit,
+      //         dfaAccountNumber, amount, individualId?, individualName,
+      //         discretionaryData?, addendaRecordIndicator, traceNumber
+      [
+        {
+          "6", CHECKING_CREDIT, "12300000", "4",
+          "12345678901234567", 1000.50,
+          "EMP-001", "JOHN DOE",
+          null, "0", 21000089000001
+        },
+        {
+          "6", CHECKING_CREDIT, "08900000", "3",
+          "98765432109876543", 850.00,
+          "EMP-002", "JANE SMITH",
+          null, "0", 21000089000002
+        },
+        {
+          "6", SAVINGS_CREDIT, "32100000", "7",
+          "11112222333344445", 1250.75,
+          "EMP-003", "BOB JOHNSON",
+          null, "0", 21000089000003
+        }
+      ],
+
+      // BatchControl (record type 8)
+      // Fields: recordTypeCode, serviceClassCode, entryAddendaCount, entryHash,
+      //         totalDebitAmount, totalCreditAmount, companyId, messageAuthentication?,
+      //         odfiId, batchNumber
+      {
+        "8", CREDITS_ONLY, 3, 53300000,
+        0.00, 3101.25,
+        "9876543210", null,
+        "02100008", 1
+      }
+    }
+  ],
+
+  // FileControl (record type 9)
+  // Fields: recordTypeCode, batchCount, blockCount, entryAddendaCount,
+  //         entryHash, totalDebitAmount, totalCreditAmount
+  { "9", 1, 1, 3, 53300000, 0.00, 3101.25 }
+}

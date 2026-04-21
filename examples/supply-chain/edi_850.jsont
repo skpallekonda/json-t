@@ -5,70 +5,236 @@
     catalogs: [
       {
         schemas: [
-          // ── EDI 850: Purchase Order ─────────────────────────────────────────
-          
+          // ── ISA: Interchange Control Header ────────────────────────────────
+          ISA_Segment: {
+            fields: {
+              str: authInfoQualifier      [(minLength=2, maxLength=2, constant="00")],
+              str: authInfo               [(minLength=10, maxLength=10)],
+              str: securityInfoQualifier  [(minLength=2, maxLength=2, constant="00")],
+              str: securityInfo           [(minLength=10, maxLength=10)],
+              str: senderIdQualifier      [(minLength=2, maxLength=2)],
+              str: senderId               [(minLength=15, maxLength=15)],
+              str: receiverIdQualifier    [(minLength=2, maxLength=2)],
+              str: receiverId             [(minLength=15, maxLength=15)],
+              date: interchangeDate,
+              time: interchangeTime,
+              str: versionNumber          [(minLength=5, maxLength=5, constant="00401")],
+              u32: controlNumber          [(minValue=1, maxValue=999999999)],
+              str: ackRequested           [(minLength=1, maxLength=1)],
+              str: usageIndicator         [(minLength=1, maxLength=1)],  // P=Production, T=Test
+              str: componentSeparator     [(minLength=1, maxLength=1)]
+            }
+          },
+
+          // ── GS: Functional Group Header ────────────────────────────────────
+          GS_Segment: {
+            fields: {
+              str: functionalCode         [(minLength=2, maxLength=2, constant="PO")],  // PO = Purchase Order
+              str: senderCode             [(minLength=2, maxLength=15)],
+              str: receiverCode           [(minLength=2, maxLength=15)],
+              date: groupDate,
+              time: groupTime,
+              u32: groupControlNumber     [(minValue=1, maxValue=999999999)],
+              str: agencyCode             [(minLength=1, maxLength=2, constant="X")],
+              str: versionIdCode          [(minLength=1, maxLength=12)]
+            }
+          },
+
+          // ── ST: Transaction Set Header ──────────────────────────────────────
+          ST_Segment: {
+            fields: {
+              str: transactionSetId       [(minLength=3, maxLength=3, constant="850")],
+              str: controlNumber          [(minLength=4, maxLength=9)]
+            }
+          },
+
+          // ── BEG: Beginning Segment ─────────────────────────────────────────
           BEG_Segment: {
             fields: {
-              str: transactionSetPurpose  [(minLength=2, maxLength=2, constant="00")],
-              str: purchaseOrderTypeCode  [(minLength=2, maxLength=2, constant="NE")], // New Order
+              <PurchaseOrderType>: transactionSetPurpose,
               str: purchaseOrderNumber    [(minLength=1, maxLength=22)],
-              str: releaseNumber?         [(maxLength=30)],
               date: purchaseOrderDate,
+              str: releaseNumber?         [(maxLength=30)],
               str: contractNumber?        [(maxLength=30)]
             }
           },
 
+          // ── REF: Reference Numbers ─────────────────────────────────────────
+          REF_Segment: {
+            fields: {
+              str: referenceQualifier     [(minLength=2, maxLength=3)],  // e.g. CO=Contract, PO=PO
+              str: referenceValue         [(minLength=1, maxLength=50)]
+            }
+          },
+
+          // ── DTM: Date/Time Reference ───────────────────────────────────────
+          DTM_Segment: {
+            fields: {
+              <DTMQualifier>: qualifier,
+              date: date
+            }
+          },
+
+          // ── N1: Party Name Loop ─────────────────────────────────────────────
           N1_Loop: {
             fields: {
-              str: entityIdCode           [(minLength=2, maxLength=3)], // ST=ShipTo, BT=BillTo
+              <EntityIdCode>: entityIdCode,
               str: name                   [(maxLength=60)],
               str: idCodeQualifier?       [(minLength=1, maxLength=2)],
               str: idCode?                [(maxLength=80)]
             }
           },
 
+          // ── N3/N4: Party Address ────────────────────────────────────────────
+          Address_Segment: {
+            fields: {
+              str: addressLine1           [(maxLength=55)],
+              str: addressLine2?          [(maxLength=55)],
+              str: city                   [(maxLength=30)],
+              str: stateCode              [(minLength=2, maxLength=2)],
+              str: postalCode             [(minLength=5, maxLength=10)],
+              str: countryCode?           [(minLength=2, maxLength=2)]  // ISO 3166-1 alpha-2
+            }
+          },
+
+          // ── PO1: Line Item ──────────────────────────────────────────────────
           PO1_Segment: {
             fields: {
               str: assignedId             [(maxLength=20)],
               d64: quantity               [(minValue=1)],
-              str: uom                    [(minLength=2, maxLength=2)], // EA, BX, UN
-              d64: unitPrice              [(minValue=0)],
+              <UOM>: unitOfMeasure,
+              ~d64: unitPrice             [(minValue=0)],
               str: basisOfUnitPrice?      [(minLength=2, maxLength=2)],
-              str: productQualifier1      [(minLength=2, maxLength=2)], // BP=Buyer Part, VP=Vendor Part
+              <ProductQualifier>: productQualifier1,
               str: productId1             [(maxLength=48)],
-              str: productQualifier2?     [(minLength=2, maxLength=2)],
+              <ProductQualifier>: productQualifier2?,
               str: productId2?            [(maxLength=48)]
-            }
-          },
-
-          CTT_Segment: {
-            fields: {
-              u32: numberOfLineItems,
-              d64: hashTotal?
-            }
-          },
-
-          // ── Hierarchy ───────────────────────────────────────────────────────
-
-          PurchaseOrder: {
-            fields: {
-              <BEG_Segment>: beginning,
-              <N1_Loop>[]: parties,
-              <PO1_Segment>[]: lineItems,
-              <CTT_Segment>: totals
             },
             validations: {
               rules {
-                // Number of line items must match the count in totals
-                // lineItems.length() == totals.numberOfLineItems
+                productQualifier2 == null || productId2 != null
+              }
+            }
+          },
+
+          // ── CTT: Transaction Totals ─────────────────────────────────────────
+          CTT_Segment: {
+            fields: {
+              u32: numberOfLineItems      [(minValue=1)],
+              d64: hashTotal?             [(minValue=0)]
+            }
+          },
+
+          // ── SE/GE/IEA: Trailers ────────────────────────────────────────────
+          SE_Segment: {
+            fields: {
+              u32: segmentCount           [(minValue=1)],
+              str: controlNumber          [(minLength=4, maxLength=9)]
+            }
+          },
+
+          GE_Segment: {
+            fields: {
+              u32: transactionSetCount    [(minValue=1)],
+              u32: groupControlNumber     [(minValue=1, maxValue=999999999)]
+            }
+          },
+
+          IEA_Segment: {
+            fields: {
+              u32: groupCount             [(minValue=1)],
+              u32: controlNumber          [(minValue=1, maxValue=999999999)]
+            }
+          },
+
+          // ── Hierarchy: Line Item with optional addenda ─────────────────────
+          LineItem: {
+            fields: {
+              <PO1_Segment>: detail,
+              <REF_Segment>[]: references?,
+              <DTM_Segment>[]: dates?
+            }
+          },
+
+          // ── Hierarchy: Parties ─────────────────────────────────────────────
+          Party: {
+            fields: {
+              <N1_Loop>: name,
+              <Address_Segment>: address?
+            }
+          },
+
+          // ── Root: EDI 850 Purchase Order ────────────────────────────────────
+          PurchaseOrder: {
+            fields: {
+              <BEG_Segment>: beginning,
+              <REF_Segment>[]: references?,
+              <DTM_Segment>[]: dates?,
+              <Party>[]: parties,
+              <LineItem>[]: lineItems     [(minItems=1)],
+              <CTT_Segment>: totals
+            }
+          },
+
+          // ── Root: Full EDI 850 Document with envelope ──────────────────────
+          EDI_850: {
+            fields: {
+              <ISA_Segment>: interchangeHeader,
+              <GS_Segment>: groupHeader,
+              <ST_Segment>: transactionHeader,
+              <PurchaseOrder>: purchaseOrder,
+              <SE_Segment>: transactionTrailer,
+              <GE_Segment>: groupTrailer,
+              <IEA_Segment>: interchangeTrailer
+            },
+            validations: {
+              rules {
+                interchangeHeader.controlNumber == interchangeTrailer.controlNumber,
+                groupHeader.groupControlNumber == groupTrailer.groupControlNumber,
+                transactionHeader.controlNumber == transactionTrailer.controlNumber
               }
             }
           }
         ],
-        enums: [],
-        "data-schema": PurchaseOrder
+        enums: [
+          PurchaseOrderType: [
+            NEW_ORDER,      // NE — new purchase order
+            REVISED,        // RL — revised/replace
+            CANCEL,         // KC — cancel
+            STANDING        // SA — standing order
+          ],
+          EntityIdCode: [
+            SHIP_TO,        // ST
+            BILL_TO,        // BT
+            SOLD_TO,        // SE
+            VENDOR,         // VN
+            MANUFACTURER    // MF
+          ],
+          UOM: [
+            EA,   // each
+            BX,   // box
+            CS,   // case
+            DZ,   // dozen
+            LB,   // pound
+            OZ,   // ounce
+            PR,   // pair
+            RL    // roll
+          ],
+          ProductQualifier: [
+            BUYER_PART,     // BP — buyer's part number
+            VENDOR_PART,    // VP — vendor's part number
+            SKU,            // SK — stock keeping unit
+            UPC             // UP — universal product code
+          ],
+          DTMQualifier: [
+            ORDER_DATE,         // 004
+            SHIP_DATE,          // 010
+            CANCEL_AFTER,       // 036
+            DO_NOT_SHIP_BEFORE  // 064
+          ]
+        ]
       }
     ],
-    data-schema: PurchaseOrder
+    data-schema: EDI_850
   }
 }

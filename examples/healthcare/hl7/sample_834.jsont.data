@@ -1,78 +1,73 @@
 {
   // Interchange Control Header (ISA)
   {
-    "00", "          ", "00", "          ", "ZZ", "SENDER-ID      ", "ZZ", "RECEIVER-ID    ", "2026-04-09", "10:30", "^", "00501", 123456789, "0", "P", ":"
+    "00", "          ", "00", "          ",
+    "ZZ", "SENDER-ID      ", "ZZ", "RECEIVER-ID    ",
+    "2026-04-09", "10:30:00", "^", "00501", 123456789, "0", "P", ":"
   },
-  
-  // Functional Groups (Loop)
+
+  // Functional Groups
   [
     {
       // Functional Group Header (GS)
-      {
-        "BE", "SENDER-CODE", "RECEIVER-CODE", "2026-04-09", "10:30", 987654321, "X", "005010X220A1"
-      },
-      
-      // Transaction Sets (Loop)
+      { "BE", "SENDER-CODE", "RECEIVER-CODE", "2026-04-09", "10:30:00", 987654321, "X", "005010X220A1" },
+
+      // Transaction Sets
       [
         {
-          // Transaction Set Header (ST)
+          // ST: Transaction Set Header
           { "834", "0001" },
-          
-          // Beginning Segment (BGN)
-          { ORIGINAL, "REQ12345", "2026-04-09", "10:30", "ET", "2" },
-          
-          // Sponsor Name (Loop 1000A)
+
+          // BGN: Beginning Segment
+          { ORIGINAL, "REQ12345", "2026-04-09", "10:30:00", "ET", "2" },
+
+          // Loop 1000A: Plan Sponsor
           { "AY", "2", "ACME CORP", "FI", "123456789" },
-          
-          // Payer Name (Loop 1000B)
+
+          // Loop 1000B: Payer
           { "PR", "2", "BLUE CROSS BLUE SHIELD", "PI", "BCBS001" },
-          
-          // Member Loops (Loop 2000)
+
+          // Members (Loop 2000)
           [
             {
-              // Member Detail (INS) - SUBSCRIBER
-              { "Y", "18", CHANGE, BIRTH, "A", "1", "N", "FT" },
-              [
-                { "0F", "SUB123" }
-              ],
-              [
-                { "348", "D8", "20260401" }
-              ],
-              // Member Name (NM1-Loop)
+              // INS: Member Detail — SUBSCRIBER (Self, Y)
+              { "Y", SELF, CHANGE, BIRTH, "A", "1", "N", "FT" },
+              // REF: Member Identifiers
+              [ { "0F", "SUB123" } ],
+              // DTP: Member Dates
+              [ { "348", "D8", "20260401" } ],
+              // NM1: Member Name
               { "IL", "1", "SMITH", "JOHN", "A", "MR", "SUB123" },
-              { "D8", "1980-01-01", M, M },
+              // DMG: Demographics — PHI
+              { "D8", "1980-01-01", MALE, MARRIED },
+              // Health Coverage
               [
-                { { "001", "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
-              ],
-              // SE Trailer
-              { 15, "0001" }
+                { { ADDITION, "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
+              ]
             },
             {
-              // Member Detail (INS) - DEPENDENT (Child=19, Indicator=N)
-              { "N", "19", CHANGE, BIRTH, "A", "1", "N", "FT" },
-              [
-                { "0F", "DEP456" }
-              ],
+              // INS: Member Detail — DEPENDENT (Child, N)
+              { "N", CHILD, CHANGE, BIRTH, "A", "1", "N", "FT" },
+              [ { "0F", "DEP456" } ],
               [ { "348", "D8", "20260101" } ],
               { "IL", "1", "SMITH", "JANE", "M", "MS", "DEP456" },
-              { "D8", "2010-05-20", F, S },
+              { "D8", "2010-05-20", FEMALE, SINGLE },
               [
-                { { "001", "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
-              ],
-              // SE Trailer (Wait, SE is per transaction, not per member. Fixing...)
+                { { ADDITION, "HLT", "MEDICAL PPO" }, [ { "348", "D8", "20260401" } ] }
+              ]
             }
           ],
-          
-          // Transaction Set Trailer (SE) - Per ST
-          { 28, "0001" }
+
+          // SE: Transaction Set Trailer
+          { 15, "0001" }
         }
       ],
-      
-      // Functional Group Trailer (GE)
+
+      // GE: Functional Group Trailer
       { 1, 987654321 }
     }
   ],
-  
-  // Interchange Control Trailer (IEA)
+
+  // IEA: Interchange Control Trailer
   { 1, 123456789 }
 }

@@ -6,13 +6,13 @@
       {
         schemas: [
           // ── NACHA: Automated Clearing House (ACH) File Format ──────────────
-          
+
           FileHeader_1: {
             fields: {
               str: recordTypeCode         [(constant="1")],
               str: priorityCode           [(minLength=2, maxLength=2, constant="01")],
-              str: immediateDestination   [(minLength=10, maxLength=10)], // ABA Number
-              str: immediateOrigin        [(minLength=10, maxLength=10)], // Company Identification
+              str: immediateDestination   [(minLength=10, maxLength=10)],  // ABA routing number
+              str: immediateOrigin        [(minLength=10, maxLength=10)],  // company identification
               date: fileCreationDate,
               time: fileCreationTime,
               str: fileIdModifier         [(minLength=1, maxLength=1)],
@@ -28,17 +28,17 @@
           BatchHeader_5: {
             fields: {
               str: recordTypeCode         [(constant="5")],
-              str: serviceClassCode       [(minLength=3, maxLength=3)], // 200, 220, 225
+              <ServiceClassCode>: serviceClassCode,
               str: companyName            [(maxLength=16)],
               str: companyDiscretionaryData? [(maxLength=20)],
               str: companyId              [(minLength=10, maxLength=10)],
-              str: standardEntryClass     [(minLength=3, maxLength=3)], // PPD, CCD, CTX
+              <StandardEntryClass>: standardEntryClass,
               str: companyEntryDescription [(maxLength=10)],
               date: descriptiveDate,
               date: effectiveEntryDate,
-              u32: settlementDate?        [(maxLength=3)],
-              u32: originatorStatusCode   [(maxLength=1)],
-              str: odfiId                 [(minLength=8, maxLength=8)],
+              u32: settlementDate?        [(maxValue=364)],              // Julian day within year
+              u32: originatorStatusCode   [(maxValue=2)],
+              str: odfiId                 [(minLength=8, maxLength=8)],  // originating DFI routing (8 digits)
               u32: batchNumber            [(minValue=1)]
             }
           },
@@ -46,29 +46,29 @@
           EntryDetail_6: {
             fields: {
               str: recordTypeCode         [(constant="6")],
-              str: transactionCode        [(minLength=2, maxLength=2)],
-              str: receivingDfiId         [(minLength=8, maxLength=8)],
+              <TransactionCode>: transactionCode,
+              str: receivingDfiId         [(minLength=8, maxLength=8)],  // routing transit number
               str: checkDigit             [(minLength=1, maxLength=1)],
-              str: dfaAccountNumber       [(maxLength=17)],
+              ~str: dfaAccountNumber      [(maxLength=17)],
               d128: amount                [(minValue=0, maxPrecision=2)],
-              str: individualId?          [(maxLength=15)],
-              str: individualName         [(maxLength=22)],
+              ~str: individualId?         [(maxLength=15)],
+              ~str: individualName        [(maxLength=22)],
               str: discretionaryData?     [(maxLength=2)],
               str: addendaRecordIndicator [(minLength=1, maxLength=1)],
-              u64: traceNumber            [(minLength=15, maxLength=15)]
+              u64: traceNumber
             }
           },
 
           BatchControl_8: {
             fields: {
               str: recordTypeCode         [(constant="8")],
-              u32: serviceClassCode       [(minLength=3, maxLength=3)],
+              <ServiceClassCode>: serviceClassCode,
               u32: entryAddendaCount,
               u64: entryHash,
-              d128: totalDebitAmount,
-              d128: totalCreditAmount,
+              d128: totalDebitAmount      [(minValue=0, maxPrecision=2)],
+              d128: totalCreditAmount     [(minValue=0, maxPrecision=2)],
               str: companyId              [(minLength=10, maxLength=10)],
-              str: messageAuthentication? [(maxLength=19)],
+              ~str: messageAuthentication? [(maxLength=19)],
               str: odfiId                 [(minLength=8, maxLength=8)],
               u32: batchNumber
             }
@@ -81,45 +81,68 @@
               u32: blockCount,
               u32: entryAddendaCount,
               u64: entryHash,
-              d128: totalDebitAmount,
-              d128: totalCreditAmount
+              d128: totalDebitAmount      [(minValue=0, maxPrecision=2)],
+              d128: totalCreditAmount     [(minValue=0, maxPrecision=2)]
             }
           },
 
-          // ── Hierarchy Wrapper ───────────────────────────────────────────
+          // ── Hierarchy Wrappers ──────────────────────────────────────────────
 
           Nacha_Batch: {
             fields: {
               <BatchHeader_5>: header,
-              <EntryDetail_6>[]: entries,
+              <EntryDetail_6>[]: entries  [(minItems=1)],
               <BatchControl_8>: trailer
             },
             validations: {
               rules {
                 header.companyId == trailer.companyId,
                 header.batchNumber == trailer.batchNumber
-                // counts match
-                // entries.length() == trailer.entryAddendaCount
               }
             }
           },
 
+          // ── Root: NACHA ACH File ────────────────────────────────────────────
+
           Nacha_File: {
             fields: {
               <FileHeader_1>: header,
-              <Nacha_Batch>[]: batches,
+              <Nacha_Batch>[]: batches    [(minItems=1)],
               <FileControl_9>: trailer
-            },
-            validations: {
-              rules {
-                // Number of batches must match
-                // batches.length() == trailer.batchCount
-              }
             }
           }
         ],
-        enums: [],
-        "data-schema": Nacha_File
+        enums: [
+          ServiceClassCode: [
+            MIXED,          // 200 — both credits and debits
+            CREDITS_ONLY,   // 220 — credits only
+            DEBITS_ONLY     // 225 — debits only
+          ],
+          StandardEntryClass: [
+            PPD,    // Prearranged Payment and Deposit (consumer)
+            CCD,    // Corporate Credit or Debit
+            CTX,    // Corporate Trade Exchange
+            WEB,    // Internet-Initiated Entries
+            TEL,    // Telephone-Initiated Entries
+            IAT,    // International ACH Transaction
+            ARC,    // Accounts Receivable Check
+            BOC,    // Back Office Conversion
+            POP,    // Point of Purchase
+            POS,    // Point of Sale
+            RCK     // Re-presented Check
+          ],
+          TransactionCode: [
+            CHECKING_CREDIT,            // 22 — live checking account credit
+            CHECKING_PRENOTE_CREDIT,    // 23 — pre-notification credit
+            CHECKING_DEBIT,             // 27 — live checking account debit
+            CHECKING_PRENOTE_DEBIT,     // 28 — pre-notification debit
+            SAVINGS_CREDIT,             // 32 — live savings account credit
+            SAVINGS_PRENOTE_CREDIT,     // 33 — pre-notification credit
+            SAVINGS_DEBIT,              // 37 — live savings account debit
+            SAVINGS_PRENOTE_DEBIT,      // 38 — pre-notification debit
+            LOAN_CREDIT                 // 52 — loan account credit
+          ]
+        ]
       }
     ],
     data-schema: Nacha_File

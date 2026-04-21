@@ -6,34 +6,39 @@
       {
         schemas: [
           // ── FIX Protocol: New Order Single (MsgType=D) ─────────────────────
-          
+
           FixHeader: {
             fields: {
-              str: beginString            [(constant="FIX.4.4")], // Tag 8
-              u32: bodyLength,                                    // Tag 9
-              str: msgType                [(constant="D")],       // Tag 35
-              str: senderCompId           [(minLength=1)],        // Tag 49
-              str: targetCompId           [(minLength=1)],        // Tag 56
-              u32: msgSeqNum              [(minValue=1)],         // Tag 34
-              datetime: sendingTime                                // Tag 52
+              str: beginString            [(constant="FIX.4.4")],   // Tag 8
+              u32: bodyLength,                                        // Tag 9
+              str: msgType                [(constant="D")],          // Tag 35
+              str: senderCompId           [(minLength=1, maxLength=12)], // Tag 49
+              str: targetCompId           [(minLength=1, maxLength=12)], // Tag 56
+              u32: msgSeqNum              [(minValue=1)],            // Tag 34
+              datetime: sendingTime                                   // Tag 52
             }
           },
 
           NewOrderSingle: {
             fields: {
-              str: clOrdId                [(minLength=1)],        // Tag 11
-              str: symbol                 [(minLength=1)],        // Tag 55
-              <SideCode>: side,                                   // Tag 54
-              d64: orderQty               [(minValue=0.000001)],  // Tag 38
-              <OrdTypeCode>: ordType,                             // Tag 40
-              d64: price?                 [(minValue=0)],         // Tag 44
-              <HandlInstCode>: handlInst,                         // Tag 21
-              datetime: transactTime                               // Tag 60
+              str: clOrdId                [(minLength=1, maxLength=20)], // Tag 11
+              str: symbol                 [(minLength=1, maxLength=20)], // Tag 55
+              <SideCode>: side,                                      // Tag 54
+              d64: orderQty               [(minValue=0.000001)],     // Tag 38
+              <OrdTypeCode>: ordType,                                // Tag 40
+              <HandlInstCode>: handlInst,                            // Tag 21
+              datetime: transactTime,                                 // Tag 60
+              d64: price?                 [(minValue=0)],            // Tag 44
+              d64: stopPx?                [(minValue=0)],            // Tag 99
+              <TimeInForce>: timeInForce?,                           // Tag 59
+              ~str: account?              [(maxLength=26)],          // Tag 1
+              str: currency?              [(minLength=3, maxLength=3)] // Tag 15 (ISO 4217)
             },
             validations: {
               rules {
-                // Rule: If OrdType is Limit (2), Price (44) is required
-                ordType == "2" -> required(price)
+                (ordType != LIMIT && ordType != STOP_LIMIT) || price != null,
+                (ordType != STOP && ordType != STOP_LIMIT) || stopPx != null,
+                ordType != MARKET || price == null
               }
             }
           },
@@ -52,29 +57,46 @@
               <NewOrderSingle>: body,
               <FixTrailer>: trailer
             }
+          },
+
+          // ── Derived: Audit log without sensitive account field ──────────
+
+          NewOrderAudit: FROM NewOrderSingle {
+            operations: (
+              exclude(account)
+            )
           }
         ],
         enums: [
           SideCode: [
-            "1", // Buy
-            "2", // Sell
-            "3", // Buy Minus
-            "4", // Sell Plus
-            "5"  // Sell Short
+            BUY,
+            SELL,
+            BUY_MINUS,
+            SELL_PLUS,
+            SELL_SHORT
           ],
           OrdTypeCode: [
-            "1", // Market
-            "2", // Limit
-            "3", // Stop
-            "4"  // Stop Limit
+            MARKET,
+            LIMIT,
+            STOP,
+            STOP_LIMIT
           ],
           HandlInstCode: [
-            "1", // Automated execution order, private
-            "2", // Automated execution order, public
-            "3"  // Manual order
+            AUTO_PRIV,
+            AUTO_PUB,
+            MANUAL
+          ],
+          TimeInForce: [
+            DAY,
+            GTC,
+            OPG,
+            IOC,
+            FOK,
+            GTX,
+            GTD,
+            AT_CLOSE
           ]
-        ],
-        "data-schema": FIX_Message_D
+        ]
       }
     ],
     data-schema: FIX_Message_D

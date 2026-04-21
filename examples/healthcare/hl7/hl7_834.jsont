@@ -9,20 +9,20 @@
           ISA_Segment: {
             fields: {
               str: authInfoQualifier      [(minLength=2, maxLength=2, constant="00")],
-              str: authInfo               [(minLength=10, maxLength=10, constant="          ")],
+              str: authInfo               [(minLength=10, maxLength=10)],
               str: securityInfoQualifier  [(minLength=2, maxLength=2, constant="00")],
-              str: securityInfo           [(minLength=10, maxLength=10, constant="          ")],
-              str: senderIdQualifier     [(minLength=2, maxLength=2, constant="ZZ")],
-              str: senderId              [(minLength=15, maxLength=15, constant="SENDER_ID      ")],
-              str: receiverIdQualifier   [(minLength=2, maxLength=2, constant="ZZ")],
-              str: receiverId            [(minLength=15, maxLength=15, constant="RECEIVER_ID    ")],
+              str: securityInfo           [(minLength=10, maxLength=10)],
+              str: senderIdQualifier      [(minLength=2, maxLength=2)],
+              str: senderId               [(minLength=15, maxLength=15)],
+              str: receiverIdQualifier    [(minLength=2, maxLength=2)],
+              str: receiverId             [(minLength=15, maxLength=15)],
               date: interchangeDate,
               time: interchangeTime,
               str: repetitionSeparator    [(minLength=1, maxLength=1, constant="^")],
               str: versionNumber          [(minLength=5, maxLength=5, constant="00501")],
               u32: controlNumber          [(minValue=1, maxValue=999999999)],
               str: ackRequested           [(minLength=1, maxLength=1, constant="0")],
-              str: usageIndicator         [(minLength=1, maxLength=1)], // P=Prod, T=Test
+              str: usageIndicator         [(minLength=1, maxLength=1)],  // P=Production, T=Test
               str: componentSeparator     [(minLength=1, maxLength=1, constant=":")]
             }
           },
@@ -30,9 +30,9 @@
           // ── 0015: Functional Group Header (GS) ────────────────────────────
           GS_Segment: {
             fields: {
-              str: functionalCode         [(minLength=2, maxLength=2, constant="BE")], // BE = Enrollment
-              str: senderCode            [(minLength=2, maxLength=15, constant="SENDER_CODE")],
-              str: receiverCode          [(minLength=2, maxLength=15, constant="RECEIVER_CODE")],
+              str: functionalCode         [(minLength=2, maxLength=2, constant="BE")],  // BE = Benefit Enrollment
+              str: senderCode             [(minLength=2, maxLength=15)],
+              str: receiverCode           [(minLength=2, maxLength=15)],
               date: groupDate,
               time: groupTime,
               u32: groupControlNumber     [(minValue=1, maxValue=999999999)],
@@ -57,7 +57,29 @@
               date: date,
               time: time?,
               str: timeZoneCode?          [(minLength=2, maxLength=2)],
-              str: actionCode?           [(minLength=1, maxLength=2)]
+              str: actionCode?            [(minLength=1, maxLength=2)]
+            }
+          },
+
+          // ── 1000A: Plan Sponsor Name ───────────────────────────────────────
+          Loop_1000A: {
+            fields: {
+              str: entityIdCode           [(constant="AY")],          // AY = Plan Sponsor
+              str: entityTypeQualifier    [(minLength=1, maxLength=1)],
+              str: sponsorName            [(minLength=1, maxLength=60)],
+              str: idCodeQualifier        [(minLength=2, maxLength=2)],
+              str: sponsorId              [(minLength=1, maxLength=80)]
+            }
+          },
+
+          // ── 1000B: Payer Name ──────────────────────────────────────────────
+          Loop_1000B: {
+            fields: {
+              str: entityIdCode           [(constant="PR")],          // PR = Payer
+              str: entityTypeQualifier    [(minLength=1, maxLength=1)],
+              str: payerName              [(minLength=1, maxLength=60)],
+              str: idCodeQualifier        [(minLength=2, maxLength=2)],
+              str: payerId                [(minLength=1, maxLength=80)]
             }
           },
 
@@ -73,37 +95,34 @@
             },
             validations: {
               rules {
-                // Syntactical check: If Relationship is "18" (Self), 
-                // Indicated Member MUST be the Insured (Y).
-                // If Relationship is NOT self, Indicated Member MUST NOT be the Insured (N).
-                (memberDetail.relationshipCode == "18") == (memberDetail.memberIndicator == "Y")
+                (memberDetail.relationshipCode == SELF) == (memberDetail.memberIndicator == "Y")
               }
             }
           },
 
-          // ── Item 2100A: Member Name ───────────────────────────────────────
+          // ── 2100A: Member Name ────────────────────────────────────────────
           NM1_Loop: {
             fields: {
-              str: entityIdQualifier      [(constant="IL")],
-              str: entityTypeQualifier    [(constant="1")],
-              str: lastName               [(minLength=1, maxLength=60)],
-              str: firstName?             [(minLength=1, maxLength=35)],
-              str: middleName?            [(minLength=1, maxLength=25)],
-              str: prefix?                [(minLength=1, maxLength=10)],
-              id:  memberId               [(minLength=2, maxLength=80)] // mapped from NM109
+              str: entityIdCode           [(constant="IL")],          // IL = Insured or Subscriber
+              str: entityTypeQualifier    [(constant="1")],           // 1 = Person
+              ~str: lastName              [(minLength=1, maxLength=60)],
+              ~str: firstName?            [(minLength=1, maxLength=35)],
+              ~str: middleName?           [(minLength=1, maxLength=25)],
+              ~str: prefix?               [(minLength=1, maxLength=10)],
+              ~str: memberId              [(minLength=2, maxLength=80)]  // NM109 — PHI
             }
           },
 
           // ── Member Detail (INS) ───────────────────────────────────────────
           INS_Segment: {
             fields: {
-              str: memberIndicator        [(minLength=1, maxLength=1)], // Y/N
-              str: relationshipCode       [(minLength=2, maxLength=2)], // 18=Self, 01=Spouse, etc.
+              str: memberIndicator        [(minLength=1, maxLength=1)],  // Y = insured, N = dependent
+              <RelationshipCode>: relationshipCode,
               <MaintenanceTypeCode>: maintenanceTypeCode,
               <MaintenanceReasonCode>: maintenanceReasonCode?,
               str: benefitStatusCode?     [(minLength=1, maxLength=1)],
               str: medicareStatusCode?    [(minLength=1, maxLength=1)],
-              str: consolidatedOmnibus?  [(minLength=1, maxLength=1)],
+              str: consolidatedOmnibus?   [(minLength=1, maxLength=1)],
               str: employmentStatusCode?  [(minLength=2, maxLength=2)]
             }
           },
@@ -111,7 +130,7 @@
           // ── Reference (REF) ──────────────────────────────────────────────
           REF_Segment: {
             fields: {
-              str: idQualifier            [(minLength=2, maxLength=3)],
+              str: idQualifier            [(minLength=2, maxLength=3)],  // e.g. 0F=Member ID, SS=SSN
               str: identification         [(minLength=1, maxLength=80)]
             }
           },
@@ -119,19 +138,19 @@
           // ── Date/Time (DTP) ──────────────────────────────────────────────
           DTP_Segment: {
             fields: {
-              str: dateQualifier          [(minLength=3, maxLength=3)],
-              str: formatQualifier        [(constant="D8")],
+              str: dateQualifier          [(minLength=3, maxLength=3)],  // e.g. 348=Plan Begin, 349=Plan End
+              str: formatQualifier        [(constant="D8")],             // D8 = CCYYMMDD
               str: dateValue              [(minLength=8, maxLength=8)]
             }
           },
 
-          // ── Demographics (DMG) ───────────────────────────────────────────
+          // ── Demographics (DMG) — PHI ──────────────────────────────────────
           DMG_Segment: {
             fields: {
               str: formatQualifier        [(constant="D8")],
-              date: dateOfBirth,
-              <GenderCode>: gender,
-              <MaritalStatusCode>: maritalStatus?
+              ~date: dateOfBirth,
+              ~<GenderCode>: gender,
+              ~<MaritalStatusCode>: maritalStatus?
             }
           },
 
@@ -139,15 +158,15 @@
           HealthCoverage_Loop: {
             fields: {
               <HD_Segment>: coverage,
-              <DTP_Segment>[]: coverageDates
+              <DTP_Segment>[]: coverageDates [(minItems=1)]
             }
           },
 
           // ── Coverage Detail (HD) ─────────────────────────────────────────
           HD_Segment: {
             fields: {
-              str: maintenanceTypeCode    [(minLength=3, maxLength=3)],
-              str: insuranceLineCode      [(minLength=2, maxLength=3)],
+              <MaintenanceTypeCode>: maintenanceTypeCode,
+              str: insuranceLineCode      [(minLength=2, maxLength=3)],  // e.g. HLT=Health, DEN=Dental
               str: planCoverageDescription? [(minLength=1, maxLength=50)]
             }
           },
@@ -156,21 +175,21 @@
 
           SE_Segment: {
             fields: {
-              u32: segmentCount,
+              u32: segmentCount           [(minValue=1)],
               str: controlNumber          [(minLength=4, maxLength=9)]
             }
           },
 
           GE_Segment: {
             fields: {
-              u32: transactionSetCount,
+              u32: transactionSetCount    [(minValue=1)],
               u32: groupControlNumber     [(minValue=1, maxValue=999999999)]
             }
           },
 
           IEA_Segment: {
             fields: {
-              u32: groupCount,
+              u32: groupCount             [(minValue=1)],
               u32: controlNumber          [(minValue=1, maxValue=999999999)]
             }
           },
@@ -183,14 +202,12 @@
               <BGN_Segment>: beginning,
               <Loop_1000A>: sponsor,
               <Loop_1000B>: payer,
-              <Member_Loop>[]: members,
+              <Member_Loop>[]: members    [(minItems=1)],
               <SE_Segment>: trailer
             },
             validations: {
               rules {
-                // Control number in trailer must match header
                 header.controlNumber == trailer.controlNumber
-                // (Future: Validate segmentCount matches actual count)
               }
             }
           },
@@ -198,7 +215,7 @@
           FunctionalGroup: {
             fields: {
               <GS_Segment>: header,
-              <TransactionSet>[]: transactions,
+              <TransactionSet>[]: transactions [(minItems=1)],
               <GE_Segment>: trailer
             },
             validations: {
@@ -212,27 +229,60 @@
           HL7_834: {
             fields: {
               <ISA_Segment>: interchangeHeader,
-              <FunctionalGroup>[]: groups,
+              <FunctionalGroup>[]: groups [(minItems=1)],
               <IEA_Segment>: interchangeTrailer
             },
             validations: {
               rules {
-                // Functional group count must match trailer
-                // groups.length() == interchangeTrailer.groupCount
-                // Control number in trailer must match header
                 interchangeHeader.controlNumber == interchangeTrailer.controlNumber
               }
             }
           }
         ],
         enums: [
-          BGN_PurposeCode: [ "00", "02", "04", "07", "15", "22" ],
-          MaintenanceTypeCode: [ "001", "021", "024", "025", "030" ],
-          MaintenanceReasonCode: [ "01", "02", "03", "04", "25", "32" ],
-          GenderCode: [ "M", "F", "U" ],
-          MaritalStatusCode: [ "S", "M", "D", "W" ]
-        ],
-        "data-schema": HL7_834
+          BGN_PurposeCode: [
+            ORIGINAL,       // 00 — original file
+            CANCEL,         // 02 — cancellation
+            VERIFY,         // 04 — verification
+            DUPLICATE,      // 07 — duplicate
+            REINSTATEMENT,  // 15 — reinstatement
+            CHANGE          // 22 — change
+          ],
+          RelationshipCode: [
+            SPOUSE,         // 01
+            CHILD,          // 19
+            EMPLOYEE,       // 20
+            DISABLED,       // 39
+            LIFE_PARTNER,   // 53
+            SELF            // 18 — subscriber / insured
+          ],
+          MaintenanceTypeCode: [
+            ADDITION,       // 001 — new enrollment
+            CHANGE,         // 021 — demographic or coverage change
+            CANCELLATION,   // 024 — termination
+            REINSTATEMENT,  // 025 — reinstatement after term
+            AUDIT           // 030 — audit / compare
+          ],
+          MaintenanceReasonCode: [
+            COURT,          // 01 — court order
+            DIVORCE,        // 02 — divorce
+            BIRTH,          // 03 — birth of dependent
+            DEATH,          // 04 — death
+            ELIG_TERM,      // 25 — eligibility terminated
+            MARRIAGE        // 32 — marriage
+          ],
+          GenderCode: [
+            MALE,           // M
+            FEMALE,         // F
+            UNKNOWN         // U
+          ],
+          MaritalStatusCode: [
+            SINGLE,         // S
+            MARRIED,        // M
+            DIVORCED,       // D
+            WIDOWED         // W
+          ]
+        ]
       }
     ],
     data-schema: HL7_834

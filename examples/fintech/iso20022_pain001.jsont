@@ -6,7 +6,7 @@
       {
         schemas: [
           // ── ISO 20022: Payment Initiation (pain.001.001.03) ───────────────
-          
+
           GroupHeader: {
             fields: {
               str: messageId              [(minLength=1, maxLength=35)],
@@ -25,62 +25,58 @@
               <Party>: debtor,
               <Account>: debtorAccount,
               <Agent>: debtorAgent,
-              <CreditTransfer>[]: creditTransfers
-            },
-            validations: {
-              rules {
-                // Ensure execution date is not in the past (simplified check)
-                // requestedExecutionDate >= current_date()
-              }
+              <CreditTransfer>[]: creditTransfers [(minItems=1)],
+              <InstructionPriority>: instructionPriority?,
+              <ChargeBearer>: chargeBearer?
             }
           },
 
           CreditTransfer: {
             fields: {
+              str: endToEndId             [(minLength=1, maxLength=35)],  // mandatory per ISO 20022
               str: paymentId              [(minLength=1, maxLength=35)],
-              d128: amount                [(minValue=0.01, maxPrecision=2)],
-              str: currency               [(minLength=3, maxLength=3)], // ISO 4217
+              ~d128: amount               [(minValue=0.01, maxPrecision=2)],
+              str: currency               [(minLength=3, maxLength=3)],   // ISO 4217
               <Agent>: creditorAgent,
               <Party>: creditor,
               <Account>: creditorAccount,
-              str: remittanceInfo?        [(maxLength=140)]
+              ~str: remittanceInfo?       [(maxLength=140)]
             }
           },
 
-          // ── Common Fintech Components ─────────────────────────────────────
+          // ── Common Components ─────────────────────────────────────────────
 
           Party: {
             fields: {
               str: name                   [(minLength=1, maxLength=140)],
-              str: id?                    [(maxLength=35)],
+              ~str: id?                   [(maxLength=35)],
               <Address>: postalAddress?
             }
           },
 
           Account: {
             fields: {
-              str: iban?                  [(regex="^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$")],
-              str: bbic?                  [(minLength=8, maxLength=11)], // Bank Identifier Code
+              ~str: iban?                 [(regex="^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$")],
+              str: bic?                   [(regex="^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$")],
               str: currency?              [(minLength=3, maxLength=3)]
             },
             validations: {
               rules {
-                // Either IBAN or BIC must be present
-                iban != null || bbic != null
+                iban != null || bic != null
               }
             }
           },
 
           Agent: {
             fields: {
-              str: bic                    [(minLength=8, maxLength=11)],
+              str: bic                    [(regex="^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$")],
               str: name?                  [(maxLength=140)]
             }
           },
 
           Address: {
             fields: {
-              str: country                [(minLength=2, maxLength=2)], // ISO 3166-1 alpha-2
+              str: country                [(minLength=2, maxLength=2)],   // ISO 3166-1 alpha-2
               str: addressLine1?          [(maxLength=70)],
               str: addressLine2?          [(maxLength=70)],
               str: postCode?              [(maxLength=16)],
@@ -89,29 +85,32 @@
           },
 
           // ── Root: ISO 20022 Payment Initiation ───────────────────────────
-          
+
           ISO20022_Pain_001: {
             fields: {
               <GroupHeader>: groupHeader,
-              <PaymentInformation>[]: payments
-            },
-            validations: {
-              rules {
-                // Total amount across all payments should match group header if specified
-                // sum(payments.creditTransfers.amount) == groupHeader.totalSettlementAmount
-              }
+              <PaymentInformation>[]: payments [(minItems=1)]
             }
           }
         ],
         enums: [
           PaymentMethod: [
-            "TRF", // Credit Transfer
-            "CHK", // Check
-            "DD",  // Direct Debit
-            "TRA"  // Transfer Advice
+            TRF_CREDIT,
+            CHECK,
+            DIRECT_DEBIT,
+            TRANSFER_ADVICE
+          ],
+          ChargeBearer: [
+            DEBT,      // debtor bears all charges
+            CRED,      // creditor bears all charges
+            SHAR,      // charges shared between parties
+            SLEV       // follow service level agreement
+          ],
+          InstructionPriority: [
+            NORM,
+            HIGH
           ]
-        ],
-        "data-schema": ISO20022_Pain_001
+        ]
       }
     ],
     data-schema: ISO20022_Pain_001
